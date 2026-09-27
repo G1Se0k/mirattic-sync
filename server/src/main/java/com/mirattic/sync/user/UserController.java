@@ -21,28 +21,27 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api")
 public class UserController {
 
-	public record Me(String id, String email, String displayName, Visibility presenceVisibility,
-			Visibility positionVisibility) {
-		static Me of(User u) {
-			return new Me(u.getId(), u.getEmail(), u.getDisplayName(), u.getPresenceVisibility(),
-					u.getPositionVisibility());
-		}
+	/** `email` is the contact email of the user's first identity that has one; null for email-less OAuth users. */
+	public record Me(String id, String email, List<IdentityProvider> providers, String displayName,
+			Visibility presenceVisibility, Visibility positionVisibility) {
 	}
 
 	public record PrivacyRequest(@NotNull Visibility presenceVisibility, @NotNull Visibility positionVisibility) {
 	}
 
 	private final UserRepository users;
+	private final UserIdentityRepository identities;
 	private final BlockRepository blocks;
 
-	UserController(UserRepository users, BlockRepository blocks) {
+	UserController(UserRepository users, UserIdentityRepository identities, BlockRepository blocks) {
 		this.users = users;
+		this.identities = identities;
 		this.blocks = blocks;
 	}
 
 	@GetMapping("/me")
 	Me me(@AuthenticationPrincipal Jwt jwt) {
-		return Me.of(load(jwt.getSubject()));
+		return me(load(jwt.getSubject()));
 	}
 
 	@PutMapping("/me/privacy")
@@ -50,17 +49,24 @@ public class UserController {
 	Me updatePrivacy(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody PrivacyRequest req) {
 		User me = load(jwt.getSubject());
 		me.setPrivacy(req.presenceVisibility(), req.positionVisibility());
-		return Me.of(me);
+		return me(me);
 	}
 
 	// Exact email match only, so the user base can't be enumerated by name.
 	@GetMapping("/users/search")
 	List<UserSummary> search(@AuthenticationPrincipal Jwt jwt, @RequestParam String email) {
 		String myId = jwt.getSubject();
-		return users.findByEmail(email.trim().toLowerCase(Locale.ROOT))
-				.filter(u -> !u.getId().equals(myId) && !blocks.existsBetween(myId, u.getId()))
-				.map(UserSummary::of)
-				.stream().toList();
+		List<String> ids = identities.findUserIdsByEmail(email.trim().toLowerCase(Locale.ROOT)).stream()
+				.filter(id -> !id.equals(myId) && !blocks.existsBetween(myId, id))
+				.toList();
+		return users.findAllById(ids).stream().map(UserSummary::of).toList();
+	}
+
+	private Me me(User u) {
+		List<UserIdentity> list = identities.findByUserId(u.getId());
+		String email = list.stream().map(UserIdentity::getEmail).filter(e -> e != null).findFirst().orElse(null);
+		return new Me(u.getId(), email, list.stream().map(UserIdentity::getProvider).distinct().toList(),
+				u.getDisplayName(), u.getPresenceVisibility(), u.getPositionVisibility());
 	}
 
 	private User load(String id) {

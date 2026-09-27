@@ -14,9 +14,13 @@ class AuthFlowTest extends IntegrationTest {
 	@Test
 	void signupThenMeUsesPrivateDefaults() throws Exception {
 		TestUser u = signup();
+		// The UID is its own UUID, independent of the email identity used to sign in.
+		assertThat(java.util.UUID.fromString(u.id()).toString()).isEqualTo(u.id());
 		call(HttpMethod.GET, "/api/me", u.accessToken(), null)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(u.id()))
+				.andExpect(jsonPath("$.email").value(u.email()))
+				.andExpect(jsonPath("$.providers[0]").value("LOCAL"))
 				.andExpect(jsonPath("$.presenceVisibility").value("FRIENDS"))
 				.andExpect(jsonPath("$.positionVisibility").value("ROOM_ONLY"));
 	}

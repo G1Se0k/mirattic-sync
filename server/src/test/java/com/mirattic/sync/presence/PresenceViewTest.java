@@ -40,7 +40,7 @@ class PresenceViewTest {
 	}
 
 	private static User user(Visibility presence, Visibility position) {
-		User u = new User("u@example.com", "hash", "U");
+		User u = new User("U");
 		u.setPrivacy(presence, position);
 		return u;
 	}

@@ -34,6 +34,14 @@ Phase 1 — Account / Friend / Presence (완료, 2026-09-28)
 ### Phase 0
 - monorepo, `packages/types`, Tauri desktop shell, WXT extension shell (side panel), Spring Boot 4 server (Maven), CI, docker-compose
 
+### Phase 1 추가 — UID / Identity 분리
+- Flyway V3: `user_identities` 테이블 생성
+  - 기존 users의 email / password_hash를 LOCAL identity로 옮긴 뒤 users에서 해당 컬럼 삭제
+  - 기존 로컬 DB로 검증함: UID 유지, 로그인 / 친구 / 검색 정상
+- `User`는 UID + 프로필 + 설정만 가짐. `UserIdentity`(provider, subject, email?, passwordHash?) 추가, `IdentityProvider { LOCAL }`
+- `/api/me` 응답에 `providers` 추가, `email`은 선택 필드
+- 설계: `docs/architecture/plan.md` "사용자 식별 (UID + Identity)"
+
 ## Major Files Changed (Phase 1)
 - `server/src/main/java/com/mirattic/sync/{auth,user,friend,presence,ws,config}/`
 - `server/src/main/resources/{application.properties,db/migration/V2__users_friends.sql}`
@@ -50,6 +58,7 @@ Phase 1 — Account / Friend / Presence (완료, 2026-09-28)
 - 15. Presence 공개 규칙은 순수 함수 `PresenceService.view`에 모음. 차단하면 친구 관계가 삭제되는 것으로 차단자에게 presence가 가지 않음을 보장
 - 16. Desktop 상태 관리는 React state만 사용. Zustand / TanStack Query는 아직 필요 없어 도입하지 않음
 - 17. JWT 라이브러리를 따로 쓰지 않고 Spring Security OAuth2 resource server에 포함된 Nimbus 사용
+- 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
@@ -73,6 +82,8 @@ Phase 1 — Account / Friend / Presence (완료, 2026-09-28)
 - `IN_ROOM`, `DND` 상태는 아직 없음 (Phase 2 / 5)
 - 계정 삭제, 신고 없음 (Phase 9)
 - 이메일 인증, 비밀번호 재설정 없음
+- OAuth 미구현. 추가 시 `email_verified`, 명시적 계정 연결, 마지막 identity 삭제 금지 필요 (plan.md)
+- 친구 검색이 이메일 기반 → 이메일이 없는 OAuth 사용자는 검색되지 않음. 공개 핸들이나 친구 코드가 필요할 수 있음
 - Windows 빌드 미검증 (CI에 Tauri 빌드 매트릭스 없음). CI(web + server)는 GitHub에서 통과함
 - Extension 로그인은 아직 없음 (Phase 3). 서버 `ALLOWED_ORIGINS`에 extension origin 추가 필요
 

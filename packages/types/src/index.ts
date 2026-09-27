@@ -73,8 +73,13 @@ export type Visibility = "OFF" | "FRIENDS" | "ROOM_ONLY";
 // REST DTOs (mirror server records).
 export type UserSummary = { id: string; displayName: string };
 
+/** How a user can sign in. OAuth providers are added here when implemented. */
+export type IdentityProvider = "LOCAL";
+
+/** `id` is the user's UID — never an email or provider id. `email` may be absent for OAuth-only users. */
 export type Me = UserSummary & {
-  email: string;
+  email?: string;
+  providers: IdentityProvider[];
   presenceVisibility: Visibility;
   positionVisibility: Visibility;
 };

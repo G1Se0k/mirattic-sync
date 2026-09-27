@@ -13,8 +13,6 @@ public class User {
 
 	@Id
 	private String id;
-	private String email;
-	private String passwordHash;
 	private String displayName;
 	@Enumerated(EnumType.STRING)
 	private Visibility presenceVisibility;
@@ -25,10 +23,9 @@ public class User {
 	protected User() {
 	}
 
-	public User(String email, String passwordHash, String displayName) {
+	/** The UID is generated here and never derived from an email or provider id. */
+	public User(String displayName) {
 		this.id = UUID.randomUUID().toString();
-		this.email = email;
-		this.passwordHash = passwordHash;
 		this.displayName = displayName;
 		// Private by default: friends see title-level activity, exact position only inside a room.
 		this.presenceVisibility = Visibility.FRIENDS;
@@ -37,8 +34,6 @@ public class User {
 	}
 
 	public String getId() { return id; }
-	public String getEmail() { return email; }
-	public String getPasswordHash() { return passwordHash; }
 	public String getDisplayName() { return displayName; }
 	public Visibility getPresenceVisibility() { return presenceVisibility; }
 	public Visibility getPositionVisibility() { return positionVisibility; }

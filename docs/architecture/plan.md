@@ -24,6 +24,19 @@
 | 16 | Desktop은 React state만 사용 (Zustand / TanStack Query 보류) | 아직 필요 없음 |
 | 17 | JWT는 Spring Security에 포함된 Nimbus 사용 | 추가 의존성 없음 |
 | 18 | Desktop refresh token은 OS 키체인 (`keyring` crate) | webview 저장소에 장기 토큰을 두지 않음 |
+| 19 | 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 | OAuth 대비. 아래 참고 |
+
+## 사용자 식별 (UID + Identity)
+
+- `users.id` = UID. 앱에서 생성한 UUID이며 이메일이나 provider ID에서 파생하지 않는다. JWT `sub`, 모든 FK, WebSocket `userId`는 UID만 쓴다.
+- `user_identities(provider, subject)` 쌍은 전역 unique. 한 사용자가 여러 identity를 가질 수 있다.
+  - `LOCAL`: subject = 정규화된 이메일, `password_hash` 있음
+  - OAuth(예정): subject = provider의 고정 subject ID (이메일이 아님, 이메일은 바뀔 수 있음). `password_hash`는 null
+- `email` 컬럼은 연락처 / 친구 검색용이며 null일 수 있다 (Apple 비공개 릴레이 등).
+- **OAuth 추가 시 결정할 것**
+  - provider enum 값 추가, `email_verified` 컬럼 추가
+  - 계정 연결 정책: 로그인한 상태에서 명시적으로 연결하는 것을 기본으로 한다. 같은 이메일이라고 자동 연결하지 않는다 (검증되지 않은 이메일로 계정을 탈취할 수 있음)
+  - 마지막 identity 삭제 금지
 
 ## MediaProviderAdapter
 

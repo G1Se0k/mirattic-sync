@@ -22,9 +22,9 @@ ID는 UUID 문자열, 시간은 epoch ms.
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/me` | `Me` |
+| GET | `/api/me` | `Me` `{ id(UID), email?, providers[], displayName, presenceVisibility, positionVisibility }` |
 | PUT | `/api/me/privacy` | `{ presenceVisibility, positionVisibility }` → `Me` |
-| GET | `/api/users/search?email=` | 정확히 일치하는 이메일만. 자기 자신 / 차단 관계는 제외 → `UserSummary[]` |
+| GET | `/api/users/search?email=` | 모든 identity의 email과 정확히 일치하는 것만. 자기 자신 / 차단 관계는 제외 → `UserSummary[]` |
 
 ## Friends / Blocks
 

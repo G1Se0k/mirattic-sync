@@ -1,6 +1,9 @@
 package com.mirattic.sync.auth;
 
+import com.mirattic.sync.user.IdentityProvider;
 import com.mirattic.sync.user.User;
+import com.mirattic.sync.user.UserIdentity;
+import com.mirattic.sync.user.UserIdentityRepository;
 import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.UserSummary;
 import java.util.Locale;
@@ -25,14 +28,16 @@ public class AuthService {
 	}
 
 	private final UserRepository users;
+	private final UserIdentityRepository identities;
 	private final RefreshTokenRepository refreshTokens;
 	private final TokenService tokens;
 	private final PasswordEncoder passwordEncoder;
 	private final String dummyHash;
 
-	AuthService(UserRepository users, RefreshTokenRepository refreshTokens, TokenService tokens,
-			PasswordEncoder passwordEncoder) {
+	AuthService(UserRepository users, UserIdentityRepository identities, RefreshTokenRepository refreshTokens,
+			TokenService tokens, PasswordEncoder passwordEncoder) {
 		this.users = users;
+		this.identities = identities;
 		this.refreshTokens = refreshTokens;
 		this.tokens = tokens;
 		this.passwordEncoder = passwordEncoder;
@@ -43,18 +48,21 @@ public class AuthService {
 	@Transactional
 	public Tokens signup(String email, String password, String displayName) {
 		String normalized = normalize(email);
-		if (users.existsByEmail(normalized)) {
+		if (identities.existsByProviderAndSubject(IdentityProvider.LOCAL, normalized)) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "email already registered");
 		}
-		User user = users.save(new User(normalized, passwordEncoder.encode(password), displayName.trim()));
+		User user = users.save(new User(displayName.trim()));
+		identities.save(UserIdentity.local(user.getId(), normalized, passwordEncoder.encode(password)));
 		return issue(user, UUID.randomUUID().toString());
 	}
 
 	@Transactional
 	public Tokens login(String email, String password) {
-		User user = users.findByEmail(normalize(email)).orElse(null);
-		boolean ok = passwordEncoder.matches(password, user != null ? user.getPasswordHash() : dummyHash);
-		if (user == null || !ok) {
+		UserIdentity identity = identities.findByProviderAndSubject(IdentityProvider.LOCAL, normalize(email))
+				.orElse(null);
+		boolean ok = passwordEncoder.matches(password, identity != null ? identity.getPasswordHash() : dummyHash);
+		User user = ok && identity != null ? users.findById(identity.getUserId()).orElse(null) : null;
+		if (user == null) {
 			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid email or password");
 		}
 		return issue(user, UUID.randomUUID().toString());
