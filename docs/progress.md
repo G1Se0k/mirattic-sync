@@ -2,6 +2,7 @@
 Phase 1 — Account / Friend / Presence (완료, 2026-09-28)
 
 이전: Phase 0 — Repository & Architecture (완료, 커밋 `300eb5f`)
+저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
 ### Phase 1
@@ -72,7 +73,7 @@ Phase 1 — Account / Friend / Presence (완료, 2026-09-28)
 - `IN_ROOM`, `DND` 상태는 아직 없음 (Phase 2 / 5)
 - 계정 삭제, 신고 없음 (Phase 9)
 - 이메일 인증, 비밀번호 재설정 없음
-- Windows 빌드 미검증, CI를 GitHub에서 실행해 본 적 없음
+- Windows 빌드 미검증 (CI에 Tauri 빌드 매트릭스 없음). CI(web + server)는 GitHub에서 통과함
 - Extension 로그인은 아직 없음 (Phase 3). 서버 `ALLOWED_ORIGINS`에 extension origin 추가 필요
 
 ## Next Task
