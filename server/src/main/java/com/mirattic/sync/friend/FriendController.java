@@ -4,6 +4,7 @@ import com.mirattic.sync.user.UserSummary;
 import com.mirattic.sync.ws.SocketHub;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api")
 class FriendController {
 
-	record FriendRequestBody(@NotBlank String userId) {
+	record FriendRequestBody(@NotBlank @Size(max = 32) String friendCode) {
 	}
 
 	private final FriendService friends;
@@ -44,10 +45,12 @@ class FriendController {
 		return friends.requests(jwt.getSubject());
 	}
 
+	/** Returns who the request went to, so the client can confirm by name. */
 	@PostMapping("/friends/requests")
-	@ResponseStatus(HttpStatus.NO_CONTENT)
-	void sendRequest(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody FriendRequestBody body) {
-		notify(jwt.getSubject(), friends.sendRequest(jwt.getSubject(), body.userId()));
+	UserSummary sendRequest(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody FriendRequestBody body) {
+		UserSummary target = friends.sendRequest(jwt.getSubject(), body.friendCode());
+		notify(jwt.getSubject(), target.id());
+		return target;
 	}
 
 	@PostMapping("/friends/requests/{id}/accept")

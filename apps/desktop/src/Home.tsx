@@ -106,6 +106,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         </section>
       )}
 
+      <MyFriendCode me={me} onMeChange={onMeChange} />
       <AddFriend onSent={reload} />
       <Privacy me={me} onChange={onMeChange} />
 
@@ -126,24 +127,53 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   );
 }
 
+function MyFriendCode({ me, onMeChange }: { me: Me; onMeChange: (me: Me) => void }) {
+  const [copied, setCopied] = useState(false);
+  const code = formatCode(me.friendCode);
+
+  async function copy() {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function regenerate() {
+    if (!confirm("새 코드를 발급하면 지금 코드로는 더 이상 친구 요청을 받을 수 없습니다. 계속할까요?")) return;
+    await api.regenerateFriendCode().then(onMeChange, () => {});
+  }
+
+  return (
+    <section>
+      <h2>내 친구 코드</h2>
+      <div className="row">
+        <code className="code grow">{code}</code>
+        <button onClick={copy}>{copied ? "복사됨" : "복사"}</button>
+        <button className="link" onClick={regenerate}>새로 발급</button>
+      </div>
+      <p className="muted">친구에게 이 코드를 알려주면 친구 요청을 받을 수 있습니다.</p>
+    </section>
+  );
+}
+
 function AddFriend({ onSent }: { onSent: () => void }) {
-  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [note, setNote] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     try {
-      const [user] = await api.searchByEmail(email);
-      if (!user) {
-        setNote("해당 이메일의 사용자를 찾을 수 없습니다.");
-        return;
-      }
-      await api.sendFriendRequest(user.id);
+      const user = await api.sendFriendRequest(code);
       setNote(`${user.displayName}님에게 요청을 보냈습니다.`);
-      setEmail("");
+      setCode("");
       onSent();
     } catch (err) {
-      setNote(err instanceof ApiError && err.status === 409 ? "이미 친구이거나 요청할 수 없는 사용자입니다." : "요청에 실패했습니다.");
+      const status = err instanceof ApiError ? err.status : 0;
+      setNote(
+        status === 404 ? "해당 코드의 사용자를 찾을 수 없습니다."
+          : status === 409 ? "이미 친구이거나 요청을 보낸 사용자입니다."
+          : status === 400 ? "내 코드로는 요청할 수 없습니다."
+          : "요청에 실패했습니다.",
+      );
     }
   }
 
@@ -151,13 +181,17 @@ function AddFriend({ onSent }: { onSent: () => void }) {
     <section>
       <h2>친구 추가</h2>
       <form className="row" onSubmit={submit}>
-        <input className="grow" type="email" placeholder="친구 이메일" required value={email}
-          onChange={(e) => setEmail(e.target.value)} />
+        <input className="grow code" placeholder="친구 코드 (예: K7QM-4XPR)" required maxLength={16}
+          autoCapitalize="characters" spellCheck={false} value={code} onChange={(e) => setCode(e.target.value)} />
         <button type="submit">요청</button>
       </form>
       {note && <p className="muted">{note}</p>}
     </section>
   );
+}
+
+function formatCode(code: string) {
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
 }
 
 const PROVIDER_NAMES = { youtube: "YouTube", netflix: "Netflix", laftel: "Laftel" } as const;

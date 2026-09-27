@@ -25,6 +25,7 @@
 | 17 | JWT는 Spring Security에 포함된 Nimbus 사용 | 추가 의존성 없음 |
 | 18 | Desktop refresh token은 OS 키체인 (`keyring` crate) | webview 저장소에 장기 토큰을 두지 않음 |
 | 19 | 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 | OAuth 대비. 아래 참고 |
+| 20 | 친구 추가는 친구 코드로만 (이메일 검색 제거), 재발급 가능 | 이메일 가입 여부 노출 방지, 이메일 없는 OAuth 사용자 지원 |
 
 ## 사용자 식별 (UID + Identity)
 
@@ -32,7 +33,7 @@
 - `user_identities(provider, subject)` 쌍은 전역 unique. 한 사용자가 여러 identity를 가질 수 있다.
   - `LOCAL`: subject = 정규화된 이메일, `password_hash` 있음
   - OAuth(예정): subject = provider의 고정 subject ID (이메일이 아님, 이메일은 바뀔 수 있음). `password_hash`는 null
-- `email` 컬럼은 연락처 / 친구 검색용이며 null일 수 있다 (Apple 비공개 릴레이 등).
+- `email` 컬럼은 연락처용이며 null일 수 있다 (Apple 비공개 릴레이 등). 친구 검색에는 쓰지 않는다 (친구 코드 사용).
 - **OAuth 추가 시 결정할 것**
   - provider enum 값 추가, `email_verified` 컬럼 추가
   - 계정 연결 정책: 로그인한 상태에서 명시적으로 연결하는 것을 기본으로 한다. 같은 이메일이라고 자동 연결하지 않는다 (검증되지 않은 이메일로 계정을 탈취할 수 있음)

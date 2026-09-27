@@ -22,9 +22,9 @@ ID는 UUID 문자열, 시간은 epoch ms.
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/me` | `Me` `{ id(UID), email?, providers[], displayName, presenceVisibility, positionVisibility }` |
+| GET | `/api/me` | `Me` `{ id(UID), email?, providers[], displayName, friendCode, presenceVisibility, positionVisibility }` |
+| POST | `/api/me/friend-code` | 친구 코드 재발급 (이전 코드는 즉시 무효) → `Me` |
 | PUT | `/api/me/privacy` | `{ presenceVisibility, positionVisibility }` → `Me` |
-| GET | `/api/users/search?email=` | 모든 identity의 email과 정확히 일치하는 것만. 자기 자신 / 차단 관계는 제외 → `UserSummary[]` |
 
 ## Friends / Blocks
 
@@ -32,7 +32,7 @@ ID는 UUID 문자열, 시간은 epoch ms.
 |---|---|---|
 | GET | `/api/friends` | `FriendView[]` (presence 포함, 공개 규칙 적용) |
 | GET | `/api/friends/requests` | `{ incoming, outgoing }` |
-| POST | `/api/friends/requests` | `{ userId }`. 상대가 이미 요청했으면 즉시 친구. 차단 관계 / 중복이면 409 |
+| POST | `/api/friends/requests` | `{ friendCode }` → 요청을 받은 `UserSummary`. 상대가 이미 요청했으면 즉시 친구. 없는 코드와 차단 관계는 둘 다 404, 자기 코드는 400, 중복은 409 |
 | POST | `/api/friends/requests/{id}/accept` | 받은 사람만 가능, 아니면 404 |
 | DELETE | `/api/friends/requests/{id}` | 거절(받은 사람) 또는 취소(보낸 사람) |
 | DELETE | `/api/friends/{userId}` | 친구 삭제 |
@@ -40,3 +40,10 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | PUT | `/api/blocks/{userId}` | 차단. 친구 관계와 대기 중인 요청을 삭제 |
 | DELETE | `/api/blocks/{userId}` | 차단 해제 |
 | POST | `/api/ws-ticket` | `{ ticket }` |
+
+## 친구 코드
+
+- 8자, 알파벳 `23456789ABCDEFGHJKMNPQRSTUVWXYZ`(0/O, 1/I/L 제외, 31자 → 약 8.5×10¹¹개). 저장할 때는 대시 없이, 표시할 때는 `XXXX-XXXX`
+- 입력은 대소문자, 대시, 공백을 무시한다 (`k7qm-4xpr` = `K7QM4XPR`)
+- 본인에게만 보인다 (`Me`에만 포함되고 `UserSummary`에는 없음)
+- 이메일 검색은 없앴다. 가입 여부 노출을 막고, 이메일이 없는 OAuth 사용자도 추가할 수 있게 하기 위해서다

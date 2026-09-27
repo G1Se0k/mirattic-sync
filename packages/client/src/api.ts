@@ -102,12 +102,14 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     me: () => authed<Me>("GET", "/api/me"),
     updatePrivacy: (presenceVisibility: Visibility, positionVisibility: Visibility) =>
       authed<Me>("PUT", "/api/me/privacy", { presenceVisibility, positionVisibility }),
-    searchByEmail: (email: string) =>
-      authed<UserSummary[]>("GET", `/api/users/search?email=${encodeURIComponent(email)}`),
+    /** Invalidates the current friend code and returns the updated profile. */
+    regenerateFriendCode: () => authed<Me>("POST", "/api/me/friend-code"),
 
     friends: () => authed<FriendView[]>("GET", "/api/friends"),
     friendRequests: () => authed<FriendRequests>("GET", "/api/friends/requests"),
-    sendFriendRequest: (userId: string) => authed<void>("POST", "/api/friends/requests", { userId }),
+    /** Accepts codes as typed ("k7qm-4xpr"). Resolves to the user the request went to; 404 if no such code. */
+    sendFriendRequest: (friendCode: string) =>
+      authed<UserSummary>("POST", "/api/friends/requests", { friendCode }),
     acceptFriendRequest: (id: string) => authed<void>("POST", `/api/friends/requests/${id}/accept`),
     deleteFriendRequest: (id: string) => authed<void>("DELETE", `/api/friends/requests/${id}`),
     removeFriend: (userId: string) => authed<void>("DELETE", `/api/friends/${userId}`),

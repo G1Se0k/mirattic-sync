@@ -14,6 +14,7 @@ public class User {
 	@Id
 	private String id;
 	private String displayName;
+	private String friendCode;
 	@Enumerated(EnumType.STRING)
 	private Visibility presenceVisibility;
 	@Enumerated(EnumType.STRING)
@@ -26,6 +27,7 @@ public class User {
 	/** The UID is generated here and never derived from an email or provider id. */
 	public User(String displayName) {
 		this.id = UUID.randomUUID().toString();
+		this.friendCode = FriendCode.generate();
 		this.displayName = displayName;
 		// Private by default: friends see title-level activity, exact position only inside a room.
 		this.presenceVisibility = Visibility.FRIENDS;
@@ -35,8 +37,14 @@ public class User {
 
 	public String getId() { return id; }
 	public String getDisplayName() { return displayName; }
+	public String getFriendCode() { return friendCode; }
 	public Visibility getPresenceVisibility() { return presenceVisibility; }
 	public Visibility getPositionVisibility() { return positionVisibility; }
+
+	/** Invalidates the old code, e.g. after it was shared too widely. */
+	public void regenerateFriendCode() {
+		this.friendCode = FriendCode.generate();
+	}
 
 	public void setPrivacy(Visibility presence, Visibility position) {
 		this.presenceVisibility = presence;

@@ -2,6 +2,7 @@ package com.mirattic.sync.friend;
 
 import com.mirattic.sync.presence.PresenceService;
 import com.mirattic.sync.presence.PresenceView;
+import com.mirattic.sync.user.FriendCode;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.UserSummary;
@@ -53,12 +54,23 @@ public class FriendService {
 				views(friendships.findByRequesterIdAndStatus(me, Friendship.Status.PENDING), Friendship::getAddresseeId));
 	}
 
-	/** Returns the other user's id. A request to someone who already asked you accepts theirs. */
+	/**
+	 * Sends a request to the owner of `friendCode`. A request to someone who already asked you accepts theirs.
+	 * Unknown codes and blocked pairs both answer 404, so a code can't be used to detect a block.
+	 */
 	@Transactional
-	public String sendRequest(String me, String targetId) {
-		requireOther(me, targetId);
+	public UserSummary sendRequest(String me, String friendCode) {
+		String code = FriendCode.normalize(friendCode);
+		User target = code == null ? null : users.findByFriendCode(code).orElse(null);
+		if (target == null) {
+			throw notFound();
+		}
+		String targetId = target.getId();
+		if (me.equals(targetId)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot target yourself");
+		}
 		if (blocks.existsBetween(me, targetId)) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "cannot send friend request");
+			throw notFound();
 		}
 		Friendship existing = friendships.findPair(me, targetId).orElse(null);
 		if (existing == null) {
@@ -68,7 +80,7 @@ public class FriendService {
 		} else {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "request already exists");
 		}
-		return targetId;
+		return UserSummary.of(target);
 	}
 
 	@Transactional

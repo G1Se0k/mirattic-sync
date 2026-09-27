@@ -1,5 +1,6 @@
 package com.mirattic.sync.friend;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -29,8 +30,8 @@ class FriendFlowTest extends IntegrationTest {
 	void mutualRequestsBecomeFriends() throws Exception {
 		TestUser a = signup();
 		TestUser b = signup();
-		sendRequest(a, b).andExpect(status().isNoContent());
-		sendRequest(b, a).andExpect(status().isNoContent());
+		sendRequest(a, b).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(b.id()));
+		sendRequest(b, a).andExpect(status().isOk());
 		call(HttpMethod.GET, "/api/friends", a.accessToken(), null).andExpect(jsonPath("$.length()").value(1));
 		sendRequest(a, b).andExpect(status().isConflict());
 	}
@@ -60,15 +61,12 @@ class FriendFlowTest extends IntegrationTest {
 
 		call(HttpMethod.PUT, "/api/blocks/" + b.id(), a.accessToken(), null).andExpect(status().isNoContent());
 		call(HttpMethod.GET, "/api/friends", b.accessToken(), null).andExpect(jsonPath("$.length()").value(0));
-		sendRequest(b, a).andExpect(status().isConflict());
-		sendRequest(a, b).andExpect(status().isConflict());
-
-		// Blocked users can't find the blocker by email either.
-		call(HttpMethod.GET, "/api/users/search?email=" + a.email(), b.accessToken(), null)
-				.andExpect(jsonPath("$.length()").value(0));
+		// Same answer as an unknown code, so the blocked user can't tell they were blocked.
+		sendRequest(b, a).andExpect(status().isNotFound());
+		sendRequest(a, b).andExpect(status().isNotFound());
 
 		call(HttpMethod.DELETE, "/api/blocks/" + b.id(), a.accessToken(), null).andExpect(status().isNoContent());
-		sendRequest(b, a).andExpect(status().isNoContent());
+		sendRequest(b, a).andExpect(status().isOk());
 	}
 
 	@Test
@@ -77,8 +75,33 @@ class FriendFlowTest extends IntegrationTest {
 		sendRequest(a, a).andExpect(status().isBadRequest());
 	}
 
+	@Test
+	void friendCodeInputIsForgivingButStrict() throws Exception {
+		TestUser a = signup();
+		TestUser b = signup();
+		assertThat(b.friendCode()).matches("[2-9A-HJKMNP-Z]{8}");
+		String typed = b.friendCode().substring(0, 4).toLowerCase() + "-" + b.friendCode().substring(4);
+		sendRequest(a, typed).andExpect(status().isOk()).andExpect(jsonPath("$.displayName").value("Tester"));
+
+		sendRequest(a, "ZZZZZZZZ".equals(b.friendCode()) ? "YYYYYYYY" : "ZZZZZZZZ").andExpect(status().isNotFound());
+		sendRequest(a, "0O1IL000").andExpect(status().isNotFound());
+		sendRequest(a, "").andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void regeneratingTheCodeRetiresTheOldOne() throws Exception {
+		TestUser a = signup();
+		TestUser b = signup();
+		String fresh = body(call(HttpMethod.POST, "/api/me/friend-code", b.accessToken(), null)
+				.andExpect(status().isOk())).path("friendCode").asString();
+		assertThat(fresh).isNotEqualTo(b.friendCode());
+
+		sendRequest(a, b.friendCode()).andExpect(status().isNotFound());
+		sendRequest(a, fresh).andExpect(status().isOk());
+	}
+
 	private org.springframework.test.web.servlet.ResultActions sendRequest(TestUser from, TestUser to)
 			throws Exception {
-		return call(HttpMethod.POST, "/api/friends/requests", from.accessToken(), "{\"userId\":\"" + to.id() + "\"}");
+		return sendRequest(from, to.friendCode());
 	}
 }

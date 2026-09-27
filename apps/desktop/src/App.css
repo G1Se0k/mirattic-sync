@@ -36,3 +36,6 @@ button:disabled { opacity: 0.6; }
 button.link { background: none; color: var(--accent); padding: 0.25rem; }
 button.link.danger { color: var(--danger); }
 label { padding: 0.4rem 0; }
+.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; }
+code.code { font-size: 1.1rem; }
+input.code::placeholder { font-family: system-ui, sans-serif; letter-spacing: normal; }

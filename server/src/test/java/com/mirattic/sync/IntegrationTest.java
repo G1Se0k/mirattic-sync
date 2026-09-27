@@ -23,7 +23,7 @@ import tools.jackson.databind.json.JsonMapper;
 @AutoConfigureMockMvc
 public abstract class IntegrationTest {
 
-	protected record TestUser(String id, String email, String accessToken, String refreshToken) {
+	protected record TestUser(String id, String email, String friendCode, String accessToken, String refreshToken) {
 	}
 
 	@Autowired
@@ -35,8 +35,10 @@ public abstract class IntegrationTest {
 		String email = UUID.randomUUID() + "@example.com";
 		JsonNode body = body(call(HttpMethod.POST, "/api/auth/signup", null,
 				"{\"email\":\"" + email + "\",\"password\":\"password123\",\"displayName\":\"Tester\"}"));
-		return new TestUser(body.path("user").path("id").asString(), email,
-				body.path("accessToken").asString(), body.path("refreshToken").asString());
+		String accessToken = body.path("accessToken").asString();
+		String friendCode = body(call(HttpMethod.GET, "/api/me", accessToken, null)).path("friendCode").asString();
+		return new TestUser(body.path("user").path("id").asString(), email, friendCode, accessToken,
+				body.path("refreshToken").asString());
 	}
 
 	protected ResultActions call(HttpMethod method, String path, String token, String jsonBody) throws Exception {
@@ -54,9 +56,14 @@ public abstract class IntegrationTest {
 		return json.readTree(result.andReturn().getResponse().getContentAsString());
 	}
 
+	protected ResultActions sendRequest(TestUser from, String friendCode) throws Exception {
+		return call(HttpMethod.POST, "/api/friends/requests", from.accessToken(),
+				"{\"friendCode\":\"" + friendCode + "\"}");
+	}
+
 	/** a sends, b accepts. */
 	protected void befriend(TestUser a, TestUser b) throws Exception {
-		call(HttpMethod.POST, "/api/friends/requests", a.accessToken(), "{\"userId\":\"" + b.id() + "\"}");
+		sendRequest(a, b.friendCode());
 		String requestId = body(call(HttpMethod.GET, "/api/friends/requests", b.accessToken(), null))
 				.path("incoming").get(0).path("id").asString();
 		call(HttpMethod.POST, "/api/friends/requests/" + requestId + "/accept", b.accessToken(), null);

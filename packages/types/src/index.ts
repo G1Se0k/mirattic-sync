@@ -76,10 +76,14 @@ export type UserSummary = { id: string; displayName: string };
 /** How a user can sign in. OAuth providers are added here when implemented. */
 export type IdentityProvider = "LOCAL";
 
-/** `id` is the user's UID — never an email or provider id. `email` may be absent for OAuth-only users. */
+/**
+ * `id` is the user's UID — never an email or provider id. `email` may be absent for OAuth-only users.
+ * `friendCode` (8 chars, shown as XXXX-XXXX) is how others add you; only its owner ever sees it.
+ */
 export type Me = UserSummary & {
   email?: string;
   providers: IdentityProvider[];
+  friendCode: string;
   presenceVisibility: Visibility;
   positionVisibility: Visibility;
 };
