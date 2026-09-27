@@ -351,8 +351,8 @@ The sync engine must be testable without Netflix/YouTube/Laftel.
 
 At the end of every phase:
 
-1. run relevant tests,
-2. verify the app still builds,
+1. have Codex run and independently verify relevant tests under the validation workflow below,
+2. have Codex verify lint, typecheck and builds, explicitly reporting missing checks,
 3. update `docs/progress.md`,
 4. record architecture decisions,
 5. list known issues,
@@ -361,6 +361,86 @@ At the end of every phase:
 `docs/progress.md` must contain enough information to continue after context compaction.
 
 Before a compact, ensure the current state is written to files rather than existing only in conversation history.
+
+---
+
+## Claude / Codex Validation Workflow
+
+Goal: reduce Claude Code usage and context consumption. Claude owns implementation and design;
+Codex is the independent validation agent, not the implementation agent.
+
+### Responsibilities
+
+- Claude: feature implementation, architecture, core business logic, test-case definition,
+  minimum essential tests, fixes for Codex findings, and final design decisions.
+- Before implementation, Claude must define normal behavior, important edge cases, failure
+  conditions, and authorization/security cases. Test authorship is not delegated entirely to Codex.
+- Codex: execute tests, verify full results, analyze failures, inspect missing edge cases and
+  regression risks, run lint/typecheck/build, and review the git diff for obvious security issues,
+  missing error handling, and important missing tests. Return a final PASS or FAIL.
+- On FAIL, Codex should return location, cause, reproduction steps, and suggested fix direction.
+  Do not independently change features or architecture; Claude performs the fixes.
+
+### Handoff and bounded loop
+
+- Give Codex the task intent, required behavior, git diff, changed files (including untracked
+  files), relevant tests, and verified test/lint/build commands. Include necessary source context.
+- Keep long stack traces, test output and build logs in local artifacts for Codex to inspect.
+  Claude receives only PASS, or FAIL with a short numbered findings list and relevant locations.
+- Loop: Claude implements → Codex validates → PASS ends the task; FAIL returns to Claude for
+  correction and then Codex revalidation.
+- Allow at most **three automatic revalidations after the initial validation** (four validation
+  runs total). If still FAIL, stop automatic corrections and report unresolved findings to the user.
+- PASS requires all required checks to actually run and succeed, with no unresolved blocking
+  findings. Missing commands, skipped required checks, timeouts, authentication/infrastructure
+  failures, or invalid review output must never silently count as PASS. Explain these as FAIL
+  with the blocker distinguished from a product defect. Exclusions require explicit agreement.
+
+### Phase checks and verified command candidates
+
+At phase completion, Codex checks frontend/extension test, lint, typecheck and build; backend
+unit tests, integration tests and build; and the common review items above.
+Reinspect package.json, pom.xml and repository structure before choosing commands; never invent scripts.
+
+Repository inspection on 2026-09-28 found:
+
+- Root: `pnpm test`, `pnpm typecheck`, `pnpm build`. These use `--if-present`, so a successful
+  command does not prove that every package has the required checks.
+- Tests currently exist as scripts in `@mirattic/client` and `@mirattic/sync-core` only:
+  `pnpm --filter @mirattic/client test` and `pnpm --filter @mirattic/sync-core test`.
+- Desktop and extension have `typecheck` and `build` scripts but no `test` or `lint` scripts.
+  No package currently defines lint. Report the missing coverage/tooling; do not invent `pnpm lint`.
+- Backend, from `server/`: `./mvnw -B test` runs the current unit and integration tests together;
+  `./mvnw -B verify` is the combined test/build candidate. No separate Failsafe integration-test
+  configuration exists. Integration tests use Testcontainers with MySQL 8.4 and require Docker.
+- Root `pnpm build` builds the desktop web frontend, not the Tauri native distributable.
+  Native packaging requires separate platform-specific validation when applicable.
+
+### Stop Hook automation (proposal; approval required before implementation)
+
+- Before creating hooks, report the repository/CLI inspection, roles, actual command candidates,
+  automation feasibility, proposed files, risks, and implementation order. Obtain user approval
+  before creating hook or automation files. This documentation update is explicitly authorized.
+- Inspect installed versions and current official hook schema / Codex CLI help again at
+  implementation time. Inspected versions: Claude Code 2.1.283 and codex-cli 0.157.1.
+- Proposed files: `scripts/codex-test.sh`, `scripts/codex-review.sh`,
+  `scripts/codex-review.schema.json`, `.claude/settings.local.json`, `docs/validation.md`.
+  Keep run state and full logs in an ignored local artifact directory.
+- Use a synchronous command Stop hook and noninteractive `codex exec` with structured output
+  (`--output-schema`, `--output-last-message`). Validate the verdict separately from CLI exit status.
+  Prefer a fixed test runner and read-only Codex review; builds need writable artifact locations.
+- Detect relevant staged, unstaged and untracked changes against an explicit baseline, including
+  committed task changes when applicable. No relevant change is a skip, not a validation PASS.
+- Prevent recursion with `stop_hook_active`, session/task-scoped persistent retry state, an
+  execution lock, timeouts and a content fingerprint. Do not reset the retry counter on each edit.
+  Do not unconditionally skip all `stop_hook_active` calls: corrections still need revalidation.
+- PASS allows stopping; FAIL returns only the concise summary using Stop decision feedback.
+  At the retry limit, stop automatic repair and surface the final FAIL to the user, with terminal
+  state preventing another repair loop. Verify this behavior before enabling the hook.
+- `docs/validation.md` must record exact commands, PASS/FAIL criteria, retry limits, exclusions,
+  prerequisites, log locations, and manual fallback. A Stop hook is not a replacement for CI.
+- Official references: https://code.claude.com/docs/en/hooks and
+  https://developers.openai.com/codex/noninteractive.
 
 ---
 
