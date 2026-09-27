@@ -1,0 +1,9 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #0f0f0f;
+  background: #f6f6f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root { color: #f6f6f6; background: #2f2f2f; }
+}
+.container { padding: 2rem; }

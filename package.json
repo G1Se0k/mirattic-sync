@@ -1,0 +1,11 @@
+{
+  "name": "mirattic-sync",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build"
+  },
+  "packageManager": "pnpm@12.6.0"
+}

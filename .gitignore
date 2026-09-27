@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.output/
+.wxt/
+target/
+build/
+.gradle/
+.idea/
+.vscode/
+.DS_Store
+.env
+*.log

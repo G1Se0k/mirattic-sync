@@ -1,0 +1,13 @@
+{
+  "name": "@mirattic/types",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  }
+}
