@@ -10,6 +10,7 @@ apps/desktop      Tauri 2 + React (macOS / Windows)
 apps/extension    WXT (Chrome MV3) — content script + side panel
 packages/types    공통 타입 (MediaPresence, PlaybackState, WebSocket envelope, MediaProviderAdapter, REST DTO)
 packages/client   REST + WebSocket 클라이언트 (토큰 갱신, 재연결) — desktop / extension 공용
+packages/sync-core 동기화 엔진 (서버 시계 추정, drift 정책, SyncFollower, publishHost) + MockMediaProvider
 server            Spring Boot 4 / Java 21 / MySQL (Maven)
 docs              architecture / platform-policy / protocol / progress.md
 ```

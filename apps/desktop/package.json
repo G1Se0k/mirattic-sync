@@ -16,7 +16,8 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@mirattic/types": "workspace:*",
-    "@mirattic/client": "workspace:*"
+    "@mirattic/client": "workspace:*",
+    "@mirattic/sync-core": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.1.8",

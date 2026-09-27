@@ -1,8 +1,23 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ApiError, connectSocket, type SocketStatus } from "@mirattic/client";
-import type { FriendRequests, FriendView, Me, PresenceView, UserSummary } from "@mirattic/types";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { ApiError, connectSocket, type Socket, type SocketStatus } from "@mirattic/client";
+import type {
+  FriendRequests,
+  FriendView,
+  MediaProvider,
+  Me,
+  PresenceView,
+  RoomContent,
+  RoomView,
+  ServerEvent,
+  UserSummary,
+} from "@mirattic/types";
 import { api, SOCKET_URL } from "./session";
 import { Privacy } from "./Privacy";
+import { Room } from "./Room";
+import { clock } from "./format";
+
+/** Phase 2: every room plays this fake video on the mock player. */
+const MOCK_CONTENT: RoomContent = { provider: "mock", contentId: "mock-1", title: "Mock 영상", durationMs: 10 * 60_000 };
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
 
@@ -10,15 +25,30 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [friends, setFriends] = useState<FriendView[]>([]);
   const [requests, setRequests] = useState<FriendRequests>({ incoming: [], outgoing: [] });
   const [blocked, setBlocked] = useState<UserSummary[]>([]);
+  const [rooms, setRooms] = useState<RoomView[]>([]);
+  const [openRoom, setOpenRoom] = useState<string | null>(null);
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const listeners = useRef(new Set<(event: ServerEvent) => void>());
+
+  const subscribe = useCallback((listener: (event: ServerEvent) => void) => {
+    listeners.current.add(listener);
+    return () => void listeners.current.delete(listener);
+  }, []);
+
+  const closeRoom = useCallback((note?: string) => {
+    setOpenRoom(null);
+    setError(note ?? null);
+  }, []);
 
   const reload = useCallback(async () => {
     try {
-      const [f, r, b] = await Promise.all([api.friends(), api.friendRequests(), api.blocked()]);
+      const [f, r, b, rs] = await Promise.all([api.friends(), api.friendRequests(), api.blocked(), api.rooms()]);
       setFriends(f);
       setRequests(r);
       setBlocked(b);
+      setRooms(rs);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onSignedOut();
     }
@@ -33,13 +63,17 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         if (s === "open") void reload(); // catch up on anything missed while disconnected
       },
       onEvent: (event) => {
-        if (event.type === "friend:update") void reload();
+        listeners.current.forEach((l) => l(event));
+        if (event.type === "friend:update" || event.type === "room:invite" || event.type === "room:update") {
+          void reload();
+        }
         if (event.type === "presence:update" && event.userId) {
           const presence = event.payload as PresenceView;
           setFriends((list) => list.map((f) => (f.user.id === event.userId ? { ...f, presence } : f)));
         }
       },
     });
+    setSocket(socket);
     return () => socket.close();
   }, [reload]);
 
@@ -55,6 +89,21 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   };
 
   const sorted = [...friends].sort((a, b) => rank(a.presence) - rank(b.presence));
+
+  if (openRoom && socket) {
+    return (
+      <Room roomId={openRoom} me={me} socket={socket} status={status} subscribe={subscribe} onClose={closeRoom} />
+    );
+  }
+
+  async function watchTogether(friend: UserSummary) {
+    setError(null);
+    try {
+      setOpenRoom((await api.createRoom(MOCK_CONTENT, [friend.id])).id);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
+    }
+  }
 
   return (
     <main className="container">
@@ -78,6 +127,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 <strong>{f.user.displayName}</strong>
                 <div className="muted">{describe(f.presence)}</div>
               </div>
+              <button onClick={() => void watchTogether(f.user)}>같이 보기</button>
               <button className="link" onClick={act(() => api.removeFriend(f.user.id))}>삭제</button>
               <button className="link danger" onClick={act(() => api.block(f.user.id))}>차단</button>
             </li>
@@ -102,6 +152,32 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 <button className="link" onClick={act(() => api.deleteFriendRequest(r.id))}>취소</button>
               </li>
             ))}
+          </ul>
+        </section>
+      )}
+
+      {rooms.length > 0 && (
+        <section>
+          <h2>방</h2>
+          <ul className="list">
+            {rooms.map((r) => {
+              const host = r.members.find((m) => m.role === "HOST");
+              const mine = host?.user.id === me.id;
+              return (
+                <li key={r.id} className="friend">
+                  <div className="grow">
+                    <strong>{r.content.title}</strong>
+                    <div className="muted">
+                      {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.filter((m) => m.present).length}명 참가 중
+                    </div>
+                  </div>
+                  <button onClick={() => setOpenRoom(r.id)}>입장</button>
+                  <button className="link danger" onClick={act(() => api.leaveRoom(r.id))}>
+                    {mine ? "닫기" : "나가기"}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -194,7 +270,7 @@ function formatCode(code: string) {
   return `${code.slice(0, 4)}-${code.slice(4)}`;
 }
 
-const PROVIDER_NAMES = { youtube: "YouTube", netflix: "Netflix", laftel: "Laftel" } as const;
+const PROVIDER_NAMES: Record<MediaProvider, string> = { youtube: "YouTube", netflix: "Netflix", laftel: "Laftel", mock: "Mock" };
 
 function describe(p: PresenceView) {
   if (p.status === "OFFLINE") return "오프라인";
@@ -203,14 +279,6 @@ function describe(p: PresenceView) {
   const title = m.episodeTitle ? `${m.title} · ${m.episodeTitle}` : m.title;
   const position = m.positionMs !== undefined ? ` · ${clock(m.positionMs)}` : "";
   return `${PROVIDER_NAMES[m.provider]} · ${title} ${m.playing ? "시청 중" : "일시정지"}${position}`;
-}
-
-function clock(ms: number) {
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600);
-  const mm = String(Math.floor((s % 3600) / 60)).padStart(h ? 2 : 1, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 function rank(p: PresenceView) {

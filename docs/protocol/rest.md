@@ -41,6 +41,19 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | DELETE | `/api/blocks/{userId}` | 차단 해제 |
 | POST | `/api/ws-ticket` | `{ ticket }` |
 
+## Rooms (Phase 2)
+
+멤버가 아닌 방은 모두 404 (방 ID로 존재 여부를 알 수 없게).
+
+| Method | Path | 설명 |
+|---|---|---|
+| POST | `/api/rooms` | `{ content: RoomContent, inviteIds: string[] }` → `RoomView`. 만든 사람이 HOST. 초대는 수락된 친구만(아니면 400), 최대 7명. 초대받은 사람에게 `room:invite` |
+| GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
+| GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt }` |
+| DELETE | `/api/rooms/{id}/members/me` | 나가기 / 초대 거절. HOST가 나가면 방 삭제. 모든 멤버에게 `room:update` |
+
+`RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만) }`. 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
+
 ## 친구 코드
 
 - 8자, 알파벳 `23456789ABCDEFGHJKMNPQRSTUVWXYZ`(0/O, 1/I/L 제외, 31자 → 약 8.5×10¹¹개). 저장할 때는 대시 없이, 표시할 때는 `XXXX-XXXX`

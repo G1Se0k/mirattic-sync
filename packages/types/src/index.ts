@@ -1,7 +1,8 @@
 // Provider-agnostic types shared by desktop, extension and (by contract) the server.
 // All timestamps are UTC epoch milliseconds.
 
-export const MEDIA_PROVIDERS = ["youtube", "netflix", "laftel"] as const;
+/** "mock" is the fake player in @mirattic/sync-core, used to develop and test sync without a real provider. */
+export const MEDIA_PROVIDERS = ["youtube", "netflix", "laftel", "mock"] as const;
 export type MediaProvider = (typeof MEDIA_PROVIDERS)[number];
 
 export type MediaPresence = {
@@ -109,6 +110,28 @@ export type ChatMessage = {
   mediaPositionMs?: number;
   createdAt: number;
 };
+
+/** What a room watches. `contentId` is provider-scoped, never a global id. */
+export type RoomContent = {
+  provider: MediaProvider;
+  contentId: string;
+  title: string;
+  durationMs?: number;
+  canonicalUrl?: string;
+};
+
+export type RoomRole = "HOST" | "MEMBER";
+
+/** `present` = has a live connection that joined the room (`room:join`). */
+export type RoomMemberView = { user: UserSummary; role: RoomRole; present: boolean };
+
+export type RoomView = { id: string; content: RoomContent; members: RoomMemberView[]; createdAt: number };
+
+/**
+ * Payload of host `playback:play|pause|seek`. `capturedAt` is the host's estimate of *server* time
+ * when `positionMs` was read; the server clamps it to the last few seconds.
+ */
+export type PlaybackCommand = { positionMs: number; capturedAt: number };
 
 // WebSocket envelopes. Clients never send userId; the server stamps it from the authenticated session.
 export type ClientEvent<T = unknown> = {

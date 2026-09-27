@@ -3,6 +3,8 @@ import type {
   FriendRequests,
   FriendView,
   Me,
+  RoomContent,
+  RoomView,
   UserSummary,
   Visibility,
 } from "@mirattic/types";
@@ -117,6 +119,15 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     blocked: () => authed<UserSummary[]>("GET", "/api/blocks"),
     block: (userId: string) => authed<void>("PUT", `/api/blocks/${userId}`),
     unblock: (userId: string) => authed<void>("DELETE", `/api/blocks/${userId}`),
+
+    /** Creates a room you host; invitees must be friends and get `room:invite`. */
+    createRoom: (content: RoomContent, inviteIds: string[]) =>
+      authed<RoomView>("POST", "/api/rooms", { content, inviteIds }),
+    rooms: () => authed<RoomView[]>("GET", "/api/rooms"),
+    /** 404 once the room is closed or you left it. */
+    room: (id: string) => authed<RoomView>("GET", `/api/rooms/${id}`),
+    /** Leave or decline. The host leaving closes the room. */
+    leaveRoom: (id: string) => authed<void>("DELETE", `/api/rooms/${id}/members/me`),
 
     wsTicket: () => authed<{ ticket: string }>("POST", "/api/ws-ticket").then((r) => r.ticket),
   };

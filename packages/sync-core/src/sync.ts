@@ -1,0 +1,195 @@
+import {
+  DEFAULT_DRIFT,
+  type DriftThresholds,
+  type MediaProviderAdapter,
+  type PlaybackCommand,
+  type PlaybackState,
+  type PlayerSnapshot,
+} from "@mirattic/types";
+import type { ServerClock } from "./clock";
+
+/** Where the room's playback is now, extrapolated from the last authoritative state. */
+export function estimatePosition(state: PlaybackState, serverNow: number) {
+  const elapsed = state.playing ? Math.max(0, serverNow - state.capturedAt) : 0;
+  const position = state.positionMs + elapsed;
+  return state.durationMs === undefined ? position : Math.min(position, state.durationMs);
+}
+
+export type DriftAction = "ignore" | "recheck" | "seek" | "immediate";
+
+export function classifyDrift(driftMs: number, t: DriftThresholds = DEFAULT_DRIFT): DriftAction {
+  const d = Math.abs(driftMs);
+  if (d > t.immediateAboveMs) return "immediate";
+  if (d > t.seekAboveMs) return "seek";
+  if (d >= t.ignoreBelowMs) return "recheck";
+  return "ignore";
+}
+
+export type FollowerStatus =
+  | { kind: "synced" | "rechecking" | "confirming" | "corrected"; driftMs: number }
+  | { kind: "waiting" | "ad" | "other-content" };
+
+/**
+ * Member side of the host-authoritative room: keeps the local player on the room's playback state.
+ *
+ * - States with a version <= the current one are dropped (late / reordered messages).
+ * - Play state mismatches are fixed at once; position drift follows the drift policy.
+ *   A drift in the "seek" band that the member accumulated on its own is confirmed on one recheck
+ *   before seeking (it may be a buffering blip); after a host event it is corrected at once.
+ * - Our own play/pause/seek fire `onChange` again; the re-check then sees ~0 drift and stops,
+ *   so no echo-suppression window is needed while members never publish.
+ */
+export class SyncFollower {
+  private state: PlaybackState | null = null;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private confirming = false;
+  private running = false;
+  /** A check requested while one was running; true if any of them was a host event. */
+  private queued: boolean | null = null;
+  private readonly unsubscribe: () => void;
+
+  constructor(
+    private readonly opts: {
+      adapter: MediaProviderAdapter;
+      clock: ServerClock;
+      recheckMs?: number;
+      onStatus?: (status: FollowerStatus) => void;
+    },
+  ) {
+    this.unsubscribe = opts.adapter.onChange(() => void this.check(false));
+  }
+
+  get version() {
+    return this.state?.version ?? -1;
+  }
+
+  /** @returns false if the state is stale and was ignored. */
+  apply(state: PlaybackState) {
+    if (state.version <= this.version) return false;
+    this.state = state;
+    this.confirming = false;
+    void this.check(true);
+    return true;
+  }
+
+  stop() {
+    clearTimeout(this.timer);
+    this.unsubscribe();
+    this.state = null;
+  }
+
+  private async check(hostEvent: boolean) {
+    if (this.running) {
+      this.queued = this.queued === true || hostEvent;
+      return;
+    }
+    this.running = true;
+    try {
+      await this.evaluate(hostEvent);
+    } finally {
+      this.running = false;
+    }
+    if (this.queued !== null) {
+      const queuedHostEvent = this.queued;
+      this.queued = null;
+      await this.check(queuedHostEvent);
+    }
+  }
+
+  private async evaluate(hostEvent: boolean) {
+    clearTimeout(this.timer);
+    const { adapter, clock, onStatus } = this.opts;
+    const state = this.state;
+    if (!state) return;
+
+    let snap = await adapter.getSnapshot();
+    // A newer state arrived meanwhile: its queued check takes over.
+    if (this.state !== state) return;
+    if (!snap) return onStatus?.({ kind: "waiting" });
+    if (snap.adPlaying) {
+      this.schedule();
+      return onStatus?.({ kind: "ad" });
+    }
+    if (snap.contentId !== state.contentId) return onStatus?.({ kind: "other-content" });
+
+    if (snap.playing !== state.playing) {
+      await (state.playing ? adapter.play() : adapter.pause());
+      snap = (await adapter.getSnapshot()) ?? snap;
+      if (this.state !== state) return;
+    }
+
+    const target = estimatePosition(state, clock.serverNow());
+    const driftMs = snap.positionMs - target;
+    const action = classifyDrift(driftMs, { ...DEFAULT_DRIFT, ...adapter.driftOverride });
+
+    if (action === "immediate" || (action === "seek" && (hostEvent || this.confirming))) {
+      this.confirming = false;
+      // Re-estimate: play()/getSnapshot() may have taken a while on a real player.
+      await adapter.seek(estimatePosition(state, clock.serverNow()));
+      this.schedule(); // real players land imprecisely; verify
+      return onStatus?.({ kind: "corrected", driftMs });
+    }
+    if (action === "seek") {
+      this.confirming = true;
+      this.schedule();
+      return onStatus?.({ kind: "confirming", driftMs });
+    }
+    this.confirming = false;
+    // Drift only changes while playing; a paused player is re-checked on the next event.
+    if (action === "recheck" && state.playing) this.schedule();
+    onStatus?.({ kind: action === "recheck" ? "rechecking" : "synced", driftMs });
+  }
+
+  private schedule() {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.check(false), this.opts.recheckMs ?? 1000);
+  }
+}
+
+export type PlaybackCommandType = "playback:play" | "playback:pause" | "playback:seek";
+
+/**
+ * Host side: turns local player changes into playback commands, starting with the current state.
+ * Bursts (e.g. play then an immediate seek) are coalesced to at most one command per `minIntervalMs`,
+ * always ending with the latest state — the server rate-limits, and a dropped last command would
+ * leave members permanently off. `capturedAt` is converted to server time so members can extrapolate.
+ */
+export function publishHost(
+  adapter: MediaProviderAdapter,
+  clock: ServerClock,
+  send: (type: PlaybackCommandType, command: PlaybackCommand) => void,
+  minIntervalMs = 200,
+) {
+  let last: PlayerSnapshot | null = null;
+  let pending: PlayerSnapshot | null = null;
+  let lastSentAt = -Infinity;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+
+  const flush = () => {
+    timer = undefined;
+    const s = pending;
+    if (!s || stopped) return;
+    pending = null;
+    lastSentAt = Date.now();
+    // Compared with the last *sent* state, so a coalesced play+seek still goes out as a play.
+    const type = !last || s.playing !== last.playing ? (s.playing ? "playback:play" : "playback:pause") : "playback:seek";
+    last = s;
+    send(type, { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(s.capturedAt)) });
+  };
+  const queue = (s: PlayerSnapshot) => {
+    pending = s;
+    if (timer !== undefined) return;
+    const wait = lastSentAt + minIntervalMs - Date.now();
+    if (wait <= 0) flush();
+    else timer = setTimeout(flush, wait);
+  };
+
+  void adapter.getSnapshot().then((s) => s && !last && !pending && queue(s));
+  const unsubscribe = adapter.onChange(queue);
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+    unsubscribe();
+  };
+}
