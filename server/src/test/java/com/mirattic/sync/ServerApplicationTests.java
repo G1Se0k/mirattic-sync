@@ -1,30 +1,20 @@
 package com.mirattic.sync;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
-import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.http.HttpMethod;
 
-@Import(TestcontainersConfiguration.class)
-@SpringBootTest
-@AutoConfigureMockMvc
-class ServerApplicationTests {
-
-	@Autowired
-	MockMvc mvc;
+class ServerApplicationTests extends IntegrationTest {
 
 	@Test
 	void healthIsPublic() throws Exception {
-		mvc.perform(get("/actuator/health")).andExpect(status().isOk());
+		call(HttpMethod.GET, "/actuator/health", null, null).andExpect(status().isOk());
 	}
 
 	@Test
-	void everythingElseIsDenied() throws Exception {
-		mvc.perform(get("/api/anything")).andExpect(status().isForbidden());
+	void apiRequiresAuthentication() throws Exception {
+		call(HttpMethod.GET, "/api/me", null, null).andExpect(status().isUnauthorized());
+		call(HttpMethod.GET, "/api/me", "not-a-jwt", null).andExpect(status().isUnauthorized());
 	}
 }

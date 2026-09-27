@@ -1,56 +1,90 @@
 # Current Phase
-Phase 0 — Repository & Architecture (완료, 2026-09-28)
+Phase 1 — Account / Friend / Presence (완료, 2026-09-28)
+
+이전: Phase 0 — Repository & Architecture (완료, 커밋 `300eb5f`)
 
 ## Completed
-- git init, pnpm workspace (`apps/*`, `packages/*`), `tsconfig.base.json`
-- `packages/types`: MediaProvider, MediaPresence, PlayerSnapshot, PlaybackState, DriftThresholds/DEFAULT_DRIFT,
-  MediaProviderAdapter, Visibility, ChatMessage, ClientEvent/ServerEvent (source-only 패키지, 빌드 단계 없음)
-- `apps/desktop`: Tauri 2 + React 19 + Vite, 템플릿 데모 제거, `@mirattic/types` import, CSP 설정
-- `apps/extension`: WXT 0.21 (Chrome MV3). background(아이콘 클릭 → side panel), `youtube.content.ts`(로그만), `sidepanel/`
-- `server`: Spring Boot 4.1.1 / Java 21 / Maven. Web, Security, JPA, WebSocket, MySQL, Flyway, Validation, Actuator
-  - `SecurityConfig`: stateless, `/actuator/health`만 공개, 나머지 denyAll
-  - 기본 in-memory user 비활성화 (생성 비밀번호가 로그에 찍히지 않도록)
-  - DB 정보는 환경변수 (`DB_URL`, `DB_USERNAME`, `DB_PASSWORD`)
-- `docker-compose.yml` (MySQL 8.4, 로컬 개발용)
-- GitHub Actions CI: pnpm typecheck/test/build + `./mvnw test`
-- README, `docs/architecture/plan.md`, `docs/protocol/websocket.md`(초안), `docs/platform-policy/README.md`
+### Phase 1
+- **Server**
+  - Flyway V2: `users`, `refresh_tokens`, `friendships`(방향 무관 쌍 unique 함수 인덱스), `blocks`
+  - 인증: signup / login / refresh / logout
+    - BCrypt(DelegatingPasswordEncoder), HS256 JWT access 15분
+    - refresh 30일, SHA-256 해시만 저장, rotation + 재사용 감지 시 family 전체 폐기
+    - 비관적 락으로 동시 refresh 경쟁 방지
+    - 없는 이메일도 더미 해시로 비교 (응답 시간으로 가입 여부를 알 수 없게)
+  - Spring Security resource server(JWT), stateless, CORS는 `app.allowed-origins`만 허용
+  - `/api/auth/**` IP당 분당 20회 제한 (`AuthRateLimitFilter`)
+  - 친구: 요청 / 수락 / 거절·취소 / 삭제. 서로 요청하면 자동 수락. 차단하면 친구 관계와 요청 삭제
+  - 사용자 검색은 정확한 이메일 일치만
+  - 공개 범위 설정 `PUT /api/me/privacy` (기본 presence=FRIENDS, position=ROOM_ONLY)
+  - WebSocket: 일회용 ticket handshake, raw WS
+    - `SocketHub`: 사용자별 다중 세션, `ConcurrentWebSocketSessionDecorator`
+    - 메모리 presence, 친구에게만 fan-out
+    - `friend:update` 알림, payload Bean Validation(https URL만)
+- **packages/types**: REST DTO 추가 (UserSummary, Me, AuthTokens, PresenceView, FriendView, FriendRequests)
+- **packages/client** (신규): `createApi`(single-flight refresh, 401 시 1회 재시도), `connectSocket`(요청마다 새 ticket, backoff 재연결)
+- **Desktop**
+  - refresh token은 OS 키체인에 저장 (Rust `keyring` crate, `refresh_token_load/save` 명령)
+  - 브라우저 dev 모드에서는 sessionStorage 사용
+  - 화면: 로그인/가입, 친구 목록(실시간 presence), 요청 수락/거절, 이메일로 친구 추가, 삭제/차단/차단 해제, 공개 범위
+  - CSP `connect-src`에 localhost:8080(http/ws) 추가
+- 문서: `docs/protocol/rest.md`(신규), `docs/protocol/websocket.md`(Phase 1 확정), README 환경변수
 
-## Major Files Changed
-- `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `.gitignore`, `docker-compose.yml`, `.github/workflows/ci.yml`
-- `packages/types/src/index.ts`
-- `apps/desktop/src/App.tsx`, `apps/desktop/src-tauri/{tauri.conf.json,src/lib.rs,Cargo.toml}`
-- `apps/extension/{wxt.config.ts,entrypoints/*}`
-- `server/pom.xml`, `server/src/main/java/com/mirattic/sync/config/SecurityConfig.java`,
-  `server/src/main/resources/{application.properties,db/migration/V1__baseline.sql}`,
-  `server/src/test/java/com/mirattic/sync/ServerApplicationTests.java`
+### Phase 0
+- monorepo, `packages/types`, Tauri desktop shell, WXT extension shell (side panel), Spring Boot 4 server (Maven), CI, docker-compose
+
+## Major Files Changed (Phase 1)
+- `server/src/main/java/com/mirattic/sync/{auth,user,friend,presence,ws,config}/`
+- `server/src/main/resources/{application.properties,db/migration/V2__users_friends.sql}`
+- `server/src/test/java/com/mirattic/sync/{IntegrationTest.java,auth/,friend/,presence/}`
+- `packages/types/src/index.ts`, `packages/client/src/{api.ts,socket.ts,api.test.ts}`
+- `apps/desktop/src/{App,Login,Home,Privacy}.tsx`, `apps/desktop/src/session.ts`
+- `apps/desktop/src-tauri/{src/lib.rs,Cargo.toml,tauri.conf.json}`
 
 ## Architecture Decisions
-`docs/architecture/plan.md` 참고. 요약:
-- WXT, Chrome sidePanel API, raw WebSocket + JSON envelope, JWT + refresh rotation(bearer only), 일회용 WS ticket
-- Extension ↔ Desktop은 Backend 경유
-- 서버는 Maven (start.spring.io Gradle 생성이 2026-09-28에 500 에러)
-- adapter는 `PlayerSnapshot` 반환, room 계층이 `PlaybackState`로 감쌈
+- `docs/architecture/plan.md` 결정 1–11 유지
+- 12. ID는 앱에서 생성한 UUID 문자열 (`VARCHAR(36)`). TS 타입의 `string` id와 일치
+- 13. 친구 요청과 친구 관계를 `friendships` 한 테이블(status)로 관리
+- 14. 친구 관계 변경은 `friend:update`(payload 없음)만 보내고 클라이언트가 다시 조회. 변경 내용을 이벤트로 동기화하지 않음
+- 15. Presence 공개 규칙은 순수 함수 `PresenceService.view`에 모음. 차단하면 친구 관계가 삭제되는 것으로 차단자에게 presence가 가지 않음을 보장
+- 16. Desktop 상태 관리는 React state만 사용. Zustand / TanStack Query는 아직 필요 없어 도입하지 않음
+- 17. JWT 라이브러리를 따로 쓰지 않고 Spring Security OAuth2 resource server에 포함된 Nimbus 사용
+- 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
-- `pnpm typecheck` ✅ / `pnpm build` ✅ (desktop vite, extension chrome-mv3)
-- `pnpm test` — 아직 JS 테스트 없음 (Phase 2 sync-core부터)
-- `cargo check` ✅, `pnpm tauri build --debug --no-bundle` ✅ (macOS)
-- `./mvnw test` ✅ 2/2 (Testcontainers MySQL 8.4: health 공개, 그 외 403)
+- `./mvnw test` ✅ 21/21 (Testcontainers MySQL 8.4)
+  - AuthFlowTest 6: 비공개 기본값, 대소문자 무시 이메일 중복, 비밀번호 검사, rotation + 재사용 시 family 폐기, logout, 입력 검증
+  - FriendFlowTest 5: 요청/수락/삭제, 상호 요청, 받은 사람만 수락, 차단(양방향 요청 불가, 검색 숨김), 자기 자신
+  - PresenceViewTest 4: 공개 규칙
+  - PresenceSocketTest 4: 친구에게만 전달, client가 보낸 userId 무시, 위치 제거, 차단 후 전달 안 됨, 잘못된 payload, ticket 일회성
+  - ServerApplicationTests 2
+- `packages/client` vitest ✅ 3/3 (동시 refresh 1회, refresh 거부 시 토큰 삭제, problem detail)
+- `pnpm typecheck` / `pnpm build` ✅, `cargo check` ✅
+- 수동 E2E(Playwright, 브라우저 dev 모드 탭 2개)
+  - 가입 → 이메일로 친구 요청 → 상대 화면에 실시간 표시 → 수락 → 온라인 표시 → 탭 닫으면 오프라인 → 새로고침해도 세션 유지 ✅
 
 ## Known Issues
-- Windows 빌드 미검증 (CI에 Tauri macOS/Windows 매트릭스 없음 → Phase 5/10)
-- CI 워크플로는 아직 GitHub에서 실행해 본 적 없음 (원격 저장소 없음)
-- Extension 아이콘은 WXT 기본 아이콘, Desktop 아이콘은 Tauri 기본 아이콘
-- Extension popup 제거함. Phase 3에서 로그인용 popup 추가 필요
-- Tauri CSP는 `'self'`만 허용. Phase 1에서 API/WS origin을 `connect-src`에 추가해야 함
-- Cargo 패키지명과 바이너리명은 아직 `desktop`
-- 아직 커밋하지 않음
+- **Tauri 앱에서 키체인 경로를 실제로 실행해 보지 않음** (cargo check만 함). 첫 `tauri dev` 때 macOS 키체인 접근 허용 창이 뜰 수 있음
+- CSP / `VITE_API_URL`이 localhost 고정 → 배포(Phase 10)에서 운영 주소로 바꿔야 함
+- Presence, WS ticket, rate limit 카운터가 서버 메모리에 있음 → 서버 1대 전제 (`ponytail:` 주석)
+- rate limit은 소켓 주소 기준 → 프록시 뒤에서는 `server.forward-headers-strategy` 설정 필요
+- WebSocket presence 전송 제한(250ms)은 초과분을 버림 → adapter가 상태 변화가 있을 때만 보내야 함
+- `IN_ROOM`, `DND` 상태는 아직 없음 (Phase 2 / 5)
+- 계정 삭제, 신고 없음 (Phase 9)
+- 이메일 인증, 비밀번호 재설정 없음
+- Windows 빌드 미검증, CI를 GitHub에서 실행해 본 적 없음
+- Extension 로그인은 아직 없음 (Phase 3). 서버 `ALLOWED_ORIGINS`에 extension origin 추가 필요
 
 ## Next Task
-Phase 1 — Account / Friend / Presence
-1. Flyway V2: `users`, `refresh_tokens`, `friendships`, `blocks`
-2. `POST /api/auth/{signup,login,refresh,logout}` — BCrypt, JWT access(15분), refresh rotation + 재사용 감지(family revoke)
-3. 친구 API: 요청 / 수락 / 거절 / 삭제 / 차단, 사용자 검색
-4. `POST /api/ws-ticket`, `/ws` raw WebSocket handler, 메모리 presence 저장소, `presence:update` fan-out (친구·차단·visibility 검사)
-5. 테스트: refresh 재사용 감지, 차단된 사용자·비친구에게 presence가 가지 않음
-6. `packages/client` (REST + WS, 재연결), Desktop 로그인 화면 + 친구 목록 (Zustand, TanStack Query 도입)
+Phase 2 — Mock Media Provider + 동기화 엔진
+1. `packages/sync-core` 생성 (순수 TS + vitest)
+   - `estimatePosition(state, nowServer)`, 시계 offset 추정(`sync:request/response`, RTT/2)
+   - drift 정책 (`DEFAULT_DRIFT` + provider override) → `ignore | recheck | seek | immediate`
+   - version 필터 (작거나 같은 version 버림), echo 억제 (프로그램 조작 직후 이벤트 무시)
+   - `MockMediaProvider` (`MediaProviderAdapter` 구현, 가짜 시계로 재생)
+2. 서버
+   - Flyway V3 `rooms`, `room_members`
+   - `POST /api/rooms`(친구 초대), `room:join/leave/invite`
+   - host만 `playback:*` 가능, room별 version 증가, `playback:update` 브로드캐스트, `sync:request/response`
+   - 테스트: 멤버가 아니면 거부, host가 아니면 거부, version 단조 증가
+3. Desktop: mock player 화면 (방 만들기 / 참가, 재생 / 일시정지 / seek 버튼, drift 표시)으로 두 클라이언트 동기화 확인

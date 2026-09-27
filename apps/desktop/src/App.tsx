@@ -1,12 +1,30 @@
-import { MEDIA_PROVIDERS } from "@mirattic/types";
+import { useEffect, useState } from "react";
+import type { Me } from "@mirattic/types";
+import { api } from "./session";
+import { Login } from "./Login";
+import { Home } from "./Home";
 import "./App.css";
 
 function App() {
+  const [me, setMe] = useState<Me | null | "loading">("loading");
+
+  const loadMe = () => api.me().then(setMe, () => setMe(null));
+
+  useEffect(() => {
+    api.restore().then((ok) => (ok ? loadMe() : setMe(null)), () => setMe(null));
+  }, []);
+
+  if (me === "loading") return <main className="container">불러오는 중…</main>;
+  if (!me) return <Login onSignedIn={loadMe} />;
   return (
-    <main className="container">
-      <h1>Mirattic Sync</h1>
-      <p>Supported providers: {MEDIA_PROVIDERS.join(", ")}</p>
-    </main>
+    <Home
+      me={me}
+      onMeChange={setMe}
+      onSignedOut={async () => {
+        await api.logout();
+        setMe(null);
+      }}
+    />
   );
 }
 

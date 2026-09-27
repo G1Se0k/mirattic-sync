@@ -70,6 +70,28 @@ export interface MediaProviderAdapter {
 
 export type Visibility = "OFF" | "FRIENDS" | "ROOM_ONLY";
 
+// REST DTOs (mirror server records).
+export type UserSummary = { id: string; displayName: string };
+
+export type Me = UserSummary & {
+  email: string;
+  presenceVisibility: Visibility;
+  positionVisibility: Visibility;
+};
+
+export type AuthTokens = { accessToken: string; refreshToken: string; user: UserSummary };
+
+export type PresenceStatus = "OFFLINE" | "ONLINE" | "WATCHING";
+
+/** A friend's presence as the server lets you see it. `media` is absent when hidden or not watching. */
+export type PresenceView = { status: PresenceStatus; media?: MediaPresence };
+
+export type FriendView = { user: UserSummary; presence: PresenceView };
+
+export type FriendRequestView = { id: string; user: UserSummary; createdAt: number };
+
+export type FriendRequests = { incoming: FriendRequestView[]; outgoing: FriendRequestView[] };
+
 export type ChatMessage = {
   id: string;
   roomId: string;

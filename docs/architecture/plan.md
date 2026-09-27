@@ -17,6 +17,13 @@
 | 9 | `api-client` / `websocket-client` / `ui` 패키지는 필요해질 때 생성 | Phase 1에서 `packages/client` 하나로 시작 |
 | 10 | Presence는 서버 메모리에만 (UserPresence 테이블 없음) | 휘발성 데이터. 다중 인스턴스 시 Redis pub/sub |
 | 11 | 시간 값은 전부 epoch ms (`ChatMessage.createdAt` 포함) | CLAUDE.md 규칙. 기획서의 string createdAt 대체 |
+| 12 | ID는 앱에서 생성한 UUID 문자열 (`VARCHAR(36)`) | TS의 string id와 일치 (Phase 1) |
+| 13 | 친구 요청과 친구 관계를 `friendships` 한 테이블(status)로 관리 | 방향 무관 쌍 unique 함수 인덱스로 중복 방지 |
+| 14 | 친구 관계 변경은 `friend:update`만 보내고 클라이언트가 다시 조회 | 변경 내용 동기화 로직이 필요 없음 |
+| 15 | Presence 공개 규칙은 순수 함수 `PresenceService.view` 하나에 모음 | 테스트 가능. 차단 = 친구 관계 삭제 |
+| 16 | Desktop은 React state만 사용 (Zustand / TanStack Query 보류) | 아직 필요 없음 |
+| 17 | JWT는 Spring Security에 포함된 Nimbus 사용 | 추가 의존성 없음 |
+| 18 | Desktop refresh token은 OS 키체인 (`keyring` crate) | webview 저장소에 장기 토큰을 두지 않음 |
 
 ## MediaProviderAdapter
 
