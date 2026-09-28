@@ -60,4 +60,5 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseDraft: true
+          tauriScript: pnpm tauri
           args: ${{ matrix.args }}
