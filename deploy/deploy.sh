@@ -18,25 +18,33 @@ if [ ! -f .env ]; then
   } > .env
 fi
 
+healthy() {
+  for _ in $(seq 60); do
+    curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
 previous=$(docker image inspect -f '{{.Id}}' "$image:current" 2>/dev/null || true)
 docker tag "$image:$1" "$image:current"
-docker compose up -d
 
-for _ in $(seq 60); do
-  if curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null 2>&1; then
-    echo "deployed $1"
-    # Keep the five newest tagged images for manual rollback.
-    docker images "$image" --format '{{.Tag}}' | grep -v '^current$' | tail -n +6 | xargs -I{} docker rmi "$image:{}" >/dev/null 2>&1 || true
-    exit 0
-  fi
-  sleep 2
-done
+# `if` keeps set -e from exiting on a failed `compose up`: every failure goes through the rollback below.
+if docker compose up -d && healthy; then
+  echo "deployed $1"
+  # Keep the five newest tagged images for manual rollback.
+  docker images "$image" --format '{{.Tag}}' | grep -v '^current$' | tail -n +6 | xargs -I{} docker rmi "$image:{}" >/dev/null 2>&1 || true
+  exit 0
+fi
 
-echo "health check failed for $1" >&2
-docker compose logs --tail 80 server >&2
+echo "deploy of $1 failed" >&2
+docker compose logs --tail 80 server >&2 || true
 if [ -n "$previous" ]; then
   docker tag "$previous" "$image:current"
-  docker compose up -d
-  echo "rolled back" >&2
+  if docker compose up -d && healthy; then
+    echo "rolled back to the previous image" >&2
+  else
+    echo "rollback failed too" >&2
+  fi
 fi
 exit 1
