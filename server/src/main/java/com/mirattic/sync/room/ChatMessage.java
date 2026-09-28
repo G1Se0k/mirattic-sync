@@ -9,8 +9,9 @@ import java.util.UUID;
 @Table(name = "chat_messages")
 public class ChatMessage {
 
-	/** Mirrors `ChatMessage` in packages/types. */
-	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, long createdAt) {
+	/** Mirrors `ChatMessage` in packages/types. A reaction's text is its emoji. */
+	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, boolean reaction,
+			long createdAt) {
 	}
 
 	@Id
@@ -19,21 +20,23 @@ public class ChatMessage {
 	private String userId;
 	private String text;
 	private Long mediaPositionMs;
+	private boolean reaction;
 	private long createdAt;
 
 	protected ChatMessage() {
 	}
 
-	ChatMessage(String roomId, String userId, String text, Long mediaPositionMs) {
+	ChatMessage(String roomId, String userId, String text, Long mediaPositionMs, boolean reaction) {
 		this.id = UUID.randomUUID().toString();
 		this.roomId = roomId;
 		this.userId = userId;
 		this.text = text;
 		this.mediaPositionMs = mediaPositionMs;
+		this.reaction = reaction;
 		this.createdAt = System.currentTimeMillis();
 	}
 
 	View view() {
-		return new View(id, roomId, userId, text, mediaPositionMs, createdAt);
+		return new View(id, roomId, userId, text, mediaPositionMs, reaction, createdAt);
 	}
 }

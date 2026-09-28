@@ -76,6 +76,7 @@ class SocketHandler extends TextWebSocketHandler {
 		try {
 			for (String roomId : joined(session)) {
 				hub.leaveRoom(roomId, out(session));
+				rooms.read(userId(session), roomId);
 				rooms.announce(roomId, rooms.memberIds(roomId));
 			}
 			if (offline) {
@@ -105,7 +106,7 @@ class SocketHandler extends TextWebSocketHandler {
 			case "sync:request" -> hub.send(out(session), new ServerEvent("sync:response", null, null, null,
 					System.currentTimeMillis(), Map.of("reqId", reqId == null ? "" : reqId)));
 			case "room:join", "room:leave", "playback:play", "playback:pause", "playback:seek",
-					"playback:content-change", "chat:message" -> {
+					"playback:content-change", "chat:message", "reaction:add" -> {
 				if (roomId == null) {
 					error(session, reqId, "bad_payload");
 					return;
@@ -136,22 +137,27 @@ class SocketHandler extends TextWebSocketHandler {
 			case "room:leave" -> {
 				if (joined(session).remove(roomId)) {
 					hub.leaveRoom(roomId, out(session));
+					rooms.read(me, roomId);
 					rooms.announce(roomId, rooms.memberIds(roomId));
 				}
 			}
-			case "chat:message" -> {
+			case "chat:message", "reaction:add" -> {
 				if (!withinBudget(session, CHAT_WINDOW, MAX_CHAT_PER_SECOND)) {
 					error(session, reqId, "rate_limited");
 					return;
 				}
+				boolean reaction = type.equals("reaction:add");
+				JsonNode text = payload.path(reaction ? "emoji" : "text");
 				JsonNode position = payload.path("mediaPositionMs");
-				if (!payload.path("text").isString() || !(position.isMissingNode() || position.isNull() || position.canConvertToLong())) {
+				if (!text.isString() || !(position.isMissingNode() || position.isNull() || position.canConvertToLong())) {
 					error(session, reqId, "bad_payload");
 					return;
 				}
-				ChatMessage.View message = rooms.chat(me, roomId, payload.path("text").asString(),
-						position.canConvertToLong() ? position.asLong() : null);
-				hub.sendToRoom(roomId, new ServerEvent("chat:message", roomId, me, null, message.createdAt(), message));
+				ChatMessage.View message = rooms.chat(me, roomId, text.asString(),
+						position.canConvertToLong() ? position.asLong() : null, reaction);
+				// To every member, live in the room or not: the others count it as unread (and may be notified).
+				ServerEvent event = new ServerEvent("chat:message", roomId, me, null, message.createdAt(), message);
+				rooms.memberIds(roomId).forEach(id -> hub.sendEvent(id, event));
 			}
 			case "playback:content-change" -> {
 				if (!withinBudget(session, PLAYBACK_WINDOW, MAX_PLAYBACK_PER_SECOND)) {

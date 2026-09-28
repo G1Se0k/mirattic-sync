@@ -176,6 +176,16 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
     );
   }
 
+  async function toggleMute() {
+    const muted = !room!.muted;
+    try {
+      await api.muteRoom(roomId, muted);
+      setRoom((r) => r && { ...r, muted });
+    } catch {
+      alert("알림 설정을 바꾸지 못했습니다. 다시 시도해 주세요.");
+    }
+  }
+
   async function leave() {
     const message = isHost ? "방을 닫을까요? 모든 멤버가 나가게 됩니다." : "방에서 나갈까요?";
     if (!confirm(message)) return;
@@ -192,7 +202,12 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
     <main className="container">
       <header className="row between">
         <button className="link" onClick={() => onClose()}>← 친구 목록</button>
-        <button className="link danger" onClick={leave}>{isHost ? "방 닫기" : "방 나가기"}</button>
+        <div className="row">
+          <button className="link" onClick={() => void toggleMute()} title="다른 화면에 있을 때 이 방의 새 메시지 알림">
+            {room.muted ? "🔕 채팅 알림 켜기" : "🔔 채팅 알림 끄기"}
+          </button>
+          <button className="link danger" onClick={leave}>{isHost ? "방 닫기" : "방 나가기"}</button>
+        </div>
       </header>
       <h1>{room.content.title}</h1>
       {asking && asking === experiment && (

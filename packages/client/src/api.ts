@@ -134,8 +134,11 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     room: (id: string) => authed<RoomView>("GET", `/api/rooms/${id}`),
     /** Leave or decline. The host leaving closes the room. */
     leaveRoom: (id: string) => authed<void>("DELETE", `/api/rooms/${id}/members/me`),
-    /** The last 100 chat messages, oldest first; new ones arrive as `chat:message`. */
-    messages: (id: string) => authed<ChatMessage[]>("GET", `/api/rooms/${id}/messages`),
+    /** 100 chat messages, oldest first: the latest, or those before message `before`. New ones arrive as `chat:message`. */
+    messages: (id: string, before?: string) =>
+      authed<ChatMessage[]>("GET", `/api/rooms/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ""}`),
+    /** My chat notifications for the room. */
+    muteRoom: (id: string, muted: boolean) => authed<void>("PUT", `/api/rooms/${id}/members/me/muted`, { muted }),
 
     wsTicket: () => authed<{ ticket: string }>("POST", "/api/ws-ticket").then((r) => r.ticket),
   };

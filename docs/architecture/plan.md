@@ -58,6 +58,11 @@
 | 50 | Laftel도 Netflix와 같은 실험 기능: 기본 꺼짐, 선택 권한 `https://laftel.net/*`, 따라가는 탭에만 주입, 설정·방 첫 입장 팝업에서 위험을 보고 켬. 실험 provider는 각각 따로 켜고 끔 (`watch.ts` `EXPERIMENTAL`, ui `EXPERIMENTS`) | 개발자 정책 없음, 허용 여부 불명확 → 보수적 (사용자 확인·결정, `platform-policy/laftel.md`) |
 | 51 | Laftel contentId는 `"<작품 ID>/<에피소드 ID>"` (각 1–10자리 숫자), URL은 `https://laftel.net/player/<contentId>` | 플레이어 URL에 둘 다 필요. 서버·types가 같은 형식을 검증 |
 | 52 | Laftel은 seek함 (`seekable` 기본값) | Netflix M7375 같은 알려진 차단 없음. 실제 플레이어에서 문제가 보이면 `SEEKABLE`에서 끔 |
+| 53 | 리액션은 `chat_messages`의 한 종류 (`reaction = true`, text = 이모지 5개 중 하나). WS `reaction:add`로 보내고 `chat:message`로 받음. 채팅 목록 안에서 연속된 같은 이모지·10초 이내를 "😂 ×4 · 24:32"로 묶어 표시 | 별도 테이블 없이 기록·순서·페이지·방 삭제 정리를 그대로 씀. 영상 위 overlay 없음 (기획서 §13) |
+| 54 | `chat:message`는 방에 참가한 연결이 아니라 **모든 멤버의 연결**로 보냄 | 방 밖(친구 목록)에서 읽지 않은 수를 올리고 알림을 띄우기 위해. 멤버는 어차피 기록을 볼 수 있어 공개 범위 변화 없음 |
+| 55 | 읽지 않은 수는 서버 `room_members.last_read_at` 이후 다른 사람의 메시지 수 (리액션 제외). `room:join`, `room:leave`, 연결 끊김 때 서버가 기록 (읽음 REST 없음). `RoomView.unread` | leave 처리 안에서 `room:update` 알림 전에 기록하므로 그 알림으로 다시 조회한 목록이 이미 0. 탭을 닫아도 끊김으로 기록 |
+| 56 | 알림 끄기는 멤버별 서버 저장 (`room_members.muted`, `PUT /members/me/muted`). 끄면 채팅 알림만 없고 읽지 않은 수는 흐리게 표시. 채팅 알림은 앱에 포커스가 없고 열린 방이 아닐 때만 (Desktop만, Extension은 알림 권한 없음) | Desktop과 Extension이 같은 설정을 봄. 보고 있는 방은 알리지 않음 |
+| 57 | 기록은 100개씩, `before=<메시지 ID>` 커서 (`createdAt`, `id` 순) | 같은 밀리초 메시지도 페이지 경계에서 빠지거나 겹치지 않음 |
 
 ## 사용자 식별 (UID + Identity)
 
@@ -86,7 +91,7 @@ adapter는 `sourceUserId`/`version`을 알 수 없으므로 로컬 `PlayerSnapsh
 - `RoomMember` — roomId, userId, role(HOST/MEMBER), joinedAt
 - `ChatMessage` — roomId, userId, text, mediaPositionMs?, createdAt
 
-나중: `Reaction`(Phase 8), `Notification`(Phase 5).
+리액션은 `ChatMessage`의 한 종류 (결정 53). 나중: `Notification`.
 
 ## 알려진 기술 위험
 

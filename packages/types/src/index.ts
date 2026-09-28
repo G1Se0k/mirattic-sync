@@ -104,14 +104,19 @@ export type FriendRequestView = { id: string; user: UserSummary; createdAt: numb
 
 export type FriendRequests = { incoming: FriendRequestView[]; outgoing: FriendRequestView[] };
 
+/** A chat line, or a reaction (`reaction`: `text` is one of `REACTIONS`), both sent as `chat:message`. */
 export type ChatMessage = {
   id: string;
   roomId: string;
   userId: string;
   text: string;
   mediaPositionMs?: number;
+  reaction: boolean;
   createdAt: number;
 };
+
+/** The reactions offered (`reaction:add`); the server accepts only these. */
+export const REACTIONS = ["❤️", "😂", "😮", "😭", "🔥"] as const;
 
 /** What a room watches. `contentId` is provider-scoped, never a global id. */
 export type RoomContent = {
@@ -149,7 +154,15 @@ export type RoomRole = "HOST" | "MEMBER";
 /** `present` = has a live connection that joined the room (`room:join`). */
 export type RoomMemberView = { user: UserSummary; role: RoomRole; present: boolean };
 
-export type RoomView = { id: string; content: RoomContent; members: RoomMemberView[]; createdAt: number };
+/** `unread` (others' messages since I last had the room open) and `muted` are mine: 0 / false in an invite. */
+export type RoomView = {
+  id: string;
+  content: RoomContent;
+  members: RoomMemberView[];
+  createdAt: number;
+  unread: number;
+  muted: boolean;
+};
 
 /**
  * Payload of host `playback:play|pause|seek`. `capturedAt` is the host's estimate of *server* time

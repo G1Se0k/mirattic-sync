@@ -17,8 +17,10 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -34,6 +36,9 @@ class RoomController {
 	}
 
 	record WatchRequest(@NotBlank String friendId) {
+	}
+
+	record Mute(@NotNull Boolean muted) {
 	}
 
 	/** One watch request per (requester, friend) per this interval. */
@@ -112,10 +117,18 @@ class RoomController {
 		return rooms.get(jwt.getSubject(), id);
 	}
 
-	/** The last 100 chat messages, oldest first. New ones arrive as `chat:message`. */
+	/** 100 chat messages, oldest first: the latest, or those before message `before`. New ones arrive as `chat:message`. */
 	@GetMapping("/{id}/messages")
-	List<ChatMessage.View> messages(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
-		return rooms.history(jwt.getSubject(), id);
+	List<ChatMessage.View> messages(@AuthenticationPrincipal Jwt jwt, @PathVariable String id,
+			@RequestParam(required = false) String before) {
+		return rooms.history(jwt.getSubject(), id, before);
+	}
+
+	/** My chat notifications for this room. */
+	@PutMapping("/{id}/members/me/muted")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void mute(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody Mute body) {
+		rooms.mute(jwt.getSubject(), id, body.muted());
 	}
 
 	/** Leave (or decline an invite). The host leaving closes the room; members then get 404 on refetch. */

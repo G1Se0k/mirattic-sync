@@ -51,11 +51,12 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | POST | `/api/rooms/{id}/invites` | `{ userIds }` → `RoomView`. HOST만(403), 친구만(400), 전체 초대 7명까지. 이미 멤버면 무시. 새로 초대된 사람에게 `room:invite`, 기존 멤버에게 `room:update` |
 | POST | `/api/rooms/requests` | `{ friendId }` → 202. 친구에게 같이 보자고 요청 (`watch:request`). 친구가 아니면 404, 오프라인이면 409, 같은 친구에게 30초 안에 다시 보내면 429 |
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
-| GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt }` |
-| GET | `/api/rooms/{id}/messages` | 최근 채팅 100개 `ChatMessage[]`, 오래된 순. 멤버가 아니면 404 |
+| GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt, unread, muted }` |
+| GET | `/api/rooms/{id}/messages?before=` | 채팅 100개 `ChatMessage[]`, 오래된 순: 최근 것, 또는 메시지 ID `before`보다 앞 (`createdAt`, `id` 순). 멤버가 아니거나 `before`가 이 방 메시지가 아니면 404 |
+| PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204. 이 방의 내 채팅 알림 끄기/켜기. 멤버가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/me` | 나가기 / 초대 거절. HOST가 나가면 방 삭제. 모든 멤버에게 `room:update` |
 
-`RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만) }`. 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
+`RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만) }`. `unread`(다른 사람의 리액션이 아닌 메시지 중 내가 마지막으로 방을 연 뒤의 수)와 `muted`는 요청한 사람 기준 (초대 이벤트·초대 응답의 `RoomView`에서는 0 / false). 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
 
 ## 친구 코드
 

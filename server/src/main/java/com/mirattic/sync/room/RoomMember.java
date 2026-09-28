@@ -27,6 +27,9 @@ public class RoomMember {
 	@Enumerated(EnumType.STRING)
 	private Role role;
 	private long joinedAt;
+	/** Others' messages after this count as unread. */
+	private long lastReadAt;
+	private boolean muted;
 
 	protected RoomMember() {
 	}
@@ -41,4 +44,9 @@ public class RoomMember {
 	public String getRoomId() { return roomId; }
 	public String getUserId() { return userId; }
 	public Role getRole() { return role; }
+	public long getLastReadAt() { return lastReadAt; }
+	public boolean isMuted() { return muted; }
+
+	void read(long at) { lastReadAt = Math.max(lastReadAt, at); }
+	void mute(boolean muted) { this.muted = muted; }
 }

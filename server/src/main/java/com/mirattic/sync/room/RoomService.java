@@ -33,7 +33,9 @@ public class RoomService {
 	public record MemberView(UserSummary user, RoomMember.Role role, boolean present) {
 	}
 
-	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt) {
+	/** `unread` and `muted` are the viewer's own (0 / false in a view sent to someone else). */
+	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, long unread,
+			boolean muted) {
 	}
 
 	/** A member removed from a room because of a block, and who to tell (before the removal). */
@@ -51,6 +53,8 @@ public class RoomService {
 	static final int MAX_INVITES = 7;
 	static final int MAX_CHAT_LENGTH = 1000;
 	static final int CHAT_HISTORY = 100;
+	/** The reactions offered (Mirattic_Sync_PLAN.md §13). */
+	static final Set<String> REACTIONS = Set.of("❤️", "😂", "😮", "😭", "🔥");
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
 	/** Laftel "item/episode", the two ids in its player URL. */
@@ -91,7 +95,7 @@ public class RoomService {
 		for (String id : invitees) {
 			members.save(new RoomMember(room.getId(), id, RoomMember.Role.MEMBER));
 		}
-		return view(room, members.findByRoomId(room.getId()));
+		return view(room, members.findByRoomId(room.getId()), me);
 	}
 
 	/** The room after an invite, and who was a member before it. */
@@ -116,8 +120,8 @@ public class RoomService {
 		for (String id : invitees) {
 			members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER));
 		}
-		return new Invited(view(rooms.findById(roomId).orElseThrow(RoomService::notFound), members.findByRoomId(roomId)),
-				before);
+		return new Invited(view(rooms.findById(roomId).orElseThrow(RoomService::notFound), members.findByRoomId(roomId),
+				null), before);
 	}
 
 	/**
@@ -161,14 +165,14 @@ public class RoomService {
 	public List<RoomView> mine(String me) {
 		List<String> ids = members.findByUserId(me).stream().map(RoomMember::getRoomId).toList();
 		return rooms.findAllById(ids).stream()
-				.map(r -> view(r, members.findByRoomId(r.getId())))
+				.map(r -> view(r, members.findByRoomId(r.getId()), me))
 				.toList();
 	}
 
 	@Transactional(readOnly = true)
 	public RoomView get(String me, String roomId) {
 		requireMember(me, roomId);
-		return view(rooms.findById(roomId).orElseThrow(RoomService::notFound), members.findByRoomId(roomId));
+		return view(rooms.findById(roomId).orElseThrow(RoomService::notFound), members.findByRoomId(roomId), me);
 	}
 
 	/** Leaving as host closes the room for everyone. */
@@ -184,11 +188,25 @@ public class RoomService {
 		return new Left(everyone, false);
 	}
 
-	/** For `room:join`: checks membership and returns the state to start from. */
-	@Transactional(readOnly = true)
+	/** For `room:join`: checks membership, marks the chat read and returns the state to start from. */
+	@Transactional
 	public PlaybackState join(String me, String roomId) {
-		requireMember(me, roomId);
+		requireMember(me, roomId).read(System.currentTimeMillis());
 		return rooms.findById(roomId).orElseThrow(RoomService::notFound).playback();
+	}
+
+	/**
+	 * Leaving the room live (`room:leave`, disconnect): what arrived while it was open has been seen.
+	 * Marked on the server, before the leave is announced, so a list refetched after it is already current.
+	 */
+	@Transactional
+	public void read(String me, String roomId) {
+		members.findByRoomIdAndUserId(roomId, me).ifPresent(m -> m.read(System.currentTimeMillis()));
+	}
+
+	@Transactional
+	public void mute(String me, String roomId, boolean muted) {
+		requireMember(me, roomId).mute(muted);
 	}
 
 	@Transactional
@@ -205,25 +223,33 @@ public class RoomService {
 		return room.playback();
 	}
 
-	/** Any member may chat; the text is stored trimmed. */
+	/** Any member may chat; the text is stored trimmed. A reaction's text must be one of {@link #REACTIONS}. */
 	@Transactional
-	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs) {
+	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs, boolean reaction) {
 		requireMember(me, roomId);
 		String trimmed = text == null ? "" : text.strip();
-		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)) {
+		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)
+				|| (reaction && !REACTIONS.contains(trimmed))) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
 		}
-		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs)).view();
+		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, reaction)).view();
 	}
 
-	/** The latest messages, oldest first. */
+	/** A page of messages, oldest first: the latest, or those before message `before` (of this room). */
 	@Transactional(readOnly = true)
-	public List<ChatMessage.View> history(String me, String roomId) {
+	public List<ChatMessage.View> history(String me, String roomId, String before) {
 		requireMember(me, roomId);
-		List<ChatMessage.View> latest = new ArrayList<>(messages
-				.findByRoomIdOrderByCreatedAtDesc(roomId, Limit.of(CHAT_HISTORY)).stream().map(ChatMessage::view).toList());
-		Collections.reverse(latest);
-		return latest;
+		List<ChatMessage> page;
+		if (before == null) {
+			page = messages.findByRoomIdOrderByCreatedAtDescIdDesc(roomId, Limit.of(CHAT_HISTORY));
+		} else {
+			ChatMessage.View cursor = messages.findById(before).map(ChatMessage::view)
+					.filter(m -> m.roomId().equals(roomId)).orElseThrow(RoomService::notFound);
+			page = messages.findBefore(roomId, cursor.createdAt(), cursor.id(), Limit.of(CHAT_HISTORY));
+		}
+		List<ChatMessage.View> views = new ArrayList<>(page.stream().map(ChatMessage::view).toList());
+		Collections.reverse(views);
+		return views;
 	}
 
 	/** The host moved on to another content (e.g. the next video): the room restarts paused at 0 on it. */
@@ -281,7 +307,8 @@ public class RoomService {
 		return members.findByRoomIdAndUserId(roomId, me).orElseThrow(RoomService::notFound);
 	}
 
-	private RoomView view(Room room, List<RoomMember> list) {
+	/** `viewer` gets their unread count and mute; null = a view for someone else. */
+	private RoomView view(Room room, List<RoomMember> list, String viewer) {
 		Map<String, User> byId = users.findAllById(list.stream().map(RoomMember::getUserId).toList()).stream()
 				.collect(Collectors.toMap(User::getId, Function.identity()));
 		Set<String> present = hub.presentIn(room.getId());
@@ -290,7 +317,12 @@ public class RoomService {
 				.map(m -> new MemberView(UserSummary.of(byId.get(m.getUserId())), m.getRole(),
 						present.contains(m.getUserId())))
 				.toList();
-		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt());
+		RoomMember self = list.stream().filter(m -> m.getUserId().equals(viewer)).findFirst().orElse(null);
+		long unread = self == null ? 0
+				: messages.countByRoomIdAndUserIdNotAndReactionFalseAndCreatedAtGreaterThan(room.getId(), viewer,
+						self.getLastReadAt());
+		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), unread,
+				self != null && self.isMuted());
 	}
 
 	private static ResponseStatusException notFound() {

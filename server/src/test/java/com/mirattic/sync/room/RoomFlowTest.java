@@ -203,6 +203,109 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void reactionsAndMessagesReachMembersOutsideTheRoomAndCountAsUnreadUntilSeen() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend); // online, but not in the room
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"hello\"}"));
+		assertThat(friendWs.nextOfType("chat:message").path("payload").path("reaction").asBoolean()).isFalse();
+		hostWs.send(event("reaction:add", roomId, "{\"emoji\":\"🔥\",\"mediaPositionMs\":1000}"));
+		JsonNode reaction = friendWs.nextOfType("chat:message").path("payload");
+		assertThat(reaction.path("reaction").asBoolean()).isTrue();
+		assertThat(reaction.path("text").asString()).isEqualTo("🔥");
+		assertThat(reaction.path("mediaPositionMs").asLong()).isEqualTo(1000);
+		for (String bad : new String[] {"{\"emoji\":\"👍\"}", "{\"emoji\":1}", "{\"text\":\"🔥\"}"}) {
+			hostWs.send(event("reaction:add", roomId, bad));
+			assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		}
+
+		// Reactions and my own messages don't count.
+		assertThat(myRoom(friend).path("unread").asLong()).isEqualTo(1);
+		assertThat(myRoom(host).path("unread").asLong()).isZero();
+
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		hostWs.nextOfType("room:update"); // the join's announcement: the next one is the leave's
+		assertThat(myRoom(friend).path("unread").asLong()).isZero();
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"seen live\"}"));
+		friendWs.nextOfType("chat:message");
+		friendWs.send(event("room:leave", roomId, "{}"));
+		assertThat(hostWs.nextOfType("room:update")).isNotNull(); // announced after the read mark
+		assertThat(myRoom(friend).path("unread").asLong()).isZero();
+
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		hostWs.nextOfType("room:update"); // the join's announcement: the next one is the leave's
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"seen before closing\"}"));
+		friendWs.nextOfType("chat:message");
+		friendWs.session().close();
+		assertThat(hostWs.nextOfType("room:update")).isNotNull();
+		assertThat(myRoom(friend).path("unread").asLong()).isZero();
+	}
+
+	@Test
+	void membersMuteTheirOwnChatNotifications() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		TestUser stranger = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		String path = "/api/rooms/" + roomId + "/members/me/muted";
+
+		call(HttpMethod.PUT, path, friend.accessToken(), "{\"muted\":true}").andExpect(status().isNoContent());
+		assertThat(myRoom(friend).path("muted").asBoolean()).isTrue();
+		assertThat(myRoom(host).path("muted").asBoolean()).isFalse();
+		call(HttpMethod.PUT, path, friend.accessToken(), "{\"muted\":false}").andExpect(status().isNoContent());
+		assertThat(myRoom(friend).path("muted").asBoolean()).isFalse();
+		call(HttpMethod.PUT, path, friend.accessToken(), "{}").andExpect(status().isBadRequest());
+		call(HttpMethod.PUT, path, stranger.accessToken(), "{\"muted\":true}").andExpect(status().isNotFound());
+	}
+
+	@Test
+	void olderMessagesComeInPagesWithoutGapsOrRepeats() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		String otherRoom = body(createRoom(host, friend)).path("id").asString();
+		// Saved in a burst: many share a millisecond, which the page boundary must not split badly.
+		for (int i = 0; i < 150; i++) {
+			chatMessages.save(new ChatMessage(roomId, host.id(), "m" + i, null, false));
+		}
+		String elsewhere = chatMessages.save(new ChatMessage(otherRoom, host.id(), "x", null, false)).view().id();
+		String messages = "/api/rooms/" + roomId + "/messages";
+
+		JsonNode latest = body(call(HttpMethod.GET, messages, friend.accessToken(), null));
+		assertThat(latest).hasSize(100);
+		JsonNode older = body(call(HttpMethod.GET, messages + "?before=" + latest.get(0).path("id").asString(),
+				friend.accessToken(), null));
+		assertThat(older).hasSize(50);
+		List<String> ids = new ArrayList<>(older.findValuesAsString("id"));
+		ids.addAll(latest.findValuesAsString("id"));
+		assertThat(ids).doesNotHaveDuplicates().hasSize(150);
+		assertThat(body(call(HttpMethod.GET, messages + "?before=" + older.get(0).path("id").asString(),
+				friend.accessToken(), null))).isEmpty();
+		call(HttpMethod.GET, messages + "?before=" + elsewhere, friend.accessToken(), null)
+				.andExpect(status().isNotFound());
+	}
+
+	@Autowired
+	private ChatMessageRepository chatMessages;
+
+	/** The caller's only room, as its room list shows it. */
+	private JsonNode myRoom(TestUser u) throws Exception {
+		JsonNode rooms = body(call(HttpMethod.GET, "/api/rooms", u.accessToken(), null));
+		assertThat(rooms).hasSize(1);
+		return rooms.get(0);
+	}
+
+	@Test
 	void hostInvitesMoreFriendsIntoAnExistingRoom() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ApiError, connectSocket, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
+  ChatMessage,
   FriendRequests,
   FriendView,
   Me,
@@ -34,6 +35,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const listeners = useRef(new Set<(event: ServerEvent) => void>());
   const watching = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatching ?? nothing);
+  // Read by the socket handler, which outlives renders.
+  const current = useRef({ rooms, openRoom });
+  current.current = { rooms, openRoom };
 
   const subscribe = useCallback((listener: (event: ServerEvent) => void) => {
     listeners.current.add(listener);
@@ -81,6 +85,16 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           const host = room.members.find((m) => m.role === "HOST")?.user.displayName ?? "친구";
           notify(`${host}님의 같이 보기 초대`, room.content.title);
         }
+        if (event.type === "chat:message") {
+          const m = event.payload as ChatMessage;
+          const room = current.current.rooms.find((r) => r.id === m.roomId);
+          // The open room shows it; reactions and my own messages are never unread.
+          if (m.roomId !== current.current.openRoom && m.userId !== me.id && !m.reaction && room) {
+            setRooms((list) => list.map((r) => (r.id === m.roomId ? { ...r, unread: r.unread + 1 } : r)));
+            const from = room.members.find((x) => x.user.id === m.userId)?.user.displayName ?? "친구";
+            if (!room.muted) notify(`${from} · ${room.content.title}`, m.text);
+          }
+        }
         if (event.type === "presence:update" && event.userId) {
           const presence = event.payload as PresenceView;
           setFriends((list) => list.map((f) => (f.user.id === event.userId ? { ...f, presence } : f)));
@@ -92,7 +106,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       socket.close();
       platform.connected?.(null);
     };
-  }, [reload]);
+  }, [reload, me.id]);
 
   // Every action refetches; the other side learns via `friend:update`.
   const act = (fn: () => Promise<unknown>) => async () => {
@@ -104,6 +118,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     }
     await reload();
   };
+
+  /** Opening a room reads its chat (the server marks it on `room:join`). */
+  function enter(id: string) {
+    setRooms((list) => list.map((r) => (r.id === id ? { ...r, unread: 0 } : r)));
+    setOpenRoom(id);
+  }
 
   const sorted = [...friends].sort((a, b) => rank(a.presence) - rank(b.presence));
 
@@ -225,11 +245,15 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 <li key={r.id} className="friend">
                   <div className="grow">
                     <strong>{r.content.title}</strong>
+                    {r.unread > 0 && (
+                      <span className={`badge ${r.muted ? "quiet" : ""}`} title="읽지 않은 메시지">{r.unread > 99 ? "99+" : r.unread}</span>
+                    )}
+                    {r.muted && <span className="muted" title="채팅 알림 꺼짐"> 🔕</span>}
                     <div className="muted">
                       {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.filter((m) => m.present).length}명 참가 중
                     </div>
                   </div>
-                  <button onClick={() => setOpenRoom(r.id)}>입장</button>
+                  <button onClick={() => enter(r.id)}>입장</button>
                   <button className="link danger" onClick={act(() => api.leaveRoom(r.id))}>
                     {mine ? "닫기" : "나가기"}
                   </button>

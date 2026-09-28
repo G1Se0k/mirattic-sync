@@ -82,15 +82,12 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | type | 방향 | payload | 비고 |
 |---|---|---|---|
 | `chat:message` | C→S | `{ text, mediaPositionMs? }` | 멤버만 (`not_member`). text는 앞뒤 공백 제거 후 1–1000자, `mediaPositionMs` ≥ 0 (아니면 `bad_payload`). 세션당 초당 5회 |
-| `chat:message` | S→C | `ChatMessage` | 방에 참가한 연결 전부에게 (보낸 사람 포함). envelope `userId` = 보낸 사람. 기록은 `GET /api/rooms/{id}/messages` |
+| `reaction:add` | C→S | `{ emoji, mediaPositionMs? }` | `emoji`는 `❤️ 😂 😮 😭 🔥` 중 하나 (아니면 `bad_payload`). 멤버만, `chat:message`와 같은 초당 5회 한도 |
+| `chat:message` | S→C | `ChatMessage` `{ id, roomId, userId, text, mediaPositionMs?, reaction, createdAt }` | **방의 모든 멤버의 연결**에게 (참가하지 않은 멤버, 보낸 사람 포함). 리액션은 `reaction: true`, `text` = 이모지. envelope `userId` = 보낸 사람. 기록은 `GET /api/rooms/{id}/messages` |
+
+읽지 않은 수: 서버는 `room:join`, `room:leave`, 연결 끊김 때 그 멤버의 `last_read_at`을 지금으로 기록한다. `room:leave`·끊김은 기록한 뒤에 `room:update`를 보낸다.
 
 타임스탬프(`mediaPositionMs`)를 누르면 호스트에게만 확인 창을 띄운 뒤 이동한다 (호스트의 이동이 방 전체에 전파됨). 멤버에게는 표시만.
-
-## 예정 이벤트
-
-| type | 방향 | 비고 |
-|---|---|---|
-| `reaction:add` | C→S, S→C | Phase 8 |
 
 ## 규칙
 
