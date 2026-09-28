@@ -20,7 +20,10 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 - **클라이언트 운영 주소** (결정 65): `apps/{desktop,extension}/.env.production`, Desktop CSP에 `https/wss://sync.mirattic.com`
 - **Netflix seek** (결정 66, 결정 47 대체 · 사용자 결정): 따라가는 Netflix 탭에만 page world에서 Netflix 내부 플레이어 API로 이동, 실패하면 기존 "직접 이동" 안내. 켜기 안내 문구 갱신. `providers/netflix.test.ts` (세션 선택 · 반올림 · API 없음 → false · Netflix 밖 문서면 아무것도 안 함)
 - **호스트 이탈 · 영상 변경** (결정 67, 사용자 요청): 호스트가 영상을 떠나면(뒤로가기 · 탭 닫기 → 호스트가 보냄, 창 · side panel 닫기 → 서버가) 멤버 일시정지. 영상이 바뀌면 멤버에게 팝업, 같은 묶음(`series`: YouTube 재생목록 · Laftel 작품 · Netflix 이어 본 화)이면 팝업 없이 자동 이동. Flyway V10 (`rooms.series`). Laftel 제목의 "다시보기" 제거
-- **빌드 규칙 (2026-09-29 사용자 결정)**: Desktop 설치 파일(dmg 등)은 더 만들지 않음 — 확장으로 모든 기능이 됨. `release.yml`은 확장 zip만. 빌드할 때마다 확장 버전 +0.0.1 (지금 0.0.1)
+- **사용 편의 (결정 68, 사용자 요청)**: 확장 자동 로그인(`storage.local`), UI에서 Mock 방 생성 제거, 방 닫힘 알림 제거, 채팅 입력창을 화면 맨 아래로 · 메시지가 아래에서 위로 쌓임
+- **Netflix 다음 화 감지 (사용자 보고: 재생바를 조작해야 감지)**: 원인 추정 — 플레이어가 새 `<video>`로 바꾸며 이벤트가 페이지의 첫 영상이 아닌 요소에서 나오거나 붙기 전에 발생 → adapter가 모든 `<video>` 이벤트를 받고, 1초 확인에 영상 유무 · 재생 상태도 넣음. 가짜 페이지에서 "붙기 전에 재생을 시작한 새 영상"으로 재현(옛 코드는 멤버가 따라가지 못함), 수정 후 통과. 실제 Netflix에서 재확인 필요
+- 결정 68 · Netflix 감지 Codex Sol: 1차 FAIL (p10run11, blocking 1: `storage.local`은 기본적으로 content script도 읽음) → `setAccessLevel('TRUSTED_CONTEXTS')`로 확장 페이지만, 설정 실패 시 토큰을 읽지도 저장하지도 않음. non-blocking 3 (Mock 안내 문구, 요청 배너가 방 높이 밖에 있어 입력창이 밀림, 스토어 정책 문서) 수정. E2E: 브라우저를 닫고 다시 열면 자동 로그인, 로그아웃 뒤 다시 열면 로그인 화면. 재검증 1회차 **PASS** (p10run12, non-blocking 1: 남은 옛 문구 0.0.1 · `storage.session` → 수정)
+- **빌드 규칙 (2026-09-29 사용자 결정)**: Desktop 설치 파일(dmg 등)은 더 만들지 않음 — 확장으로 모든 기능이 됨. `release.yml`은 확장 zip만. 빌드할 때마다 확장 버전 +0.0.1 (지금 0.0.2)
 - **릴리스 자동화**: `v*` 태그 → `release.yml`이 Desktop 설치 파일(macOS universal `.dmg`, Windows `.exe`/`.msi`, 서명 없음)과 확장 zip을 draft release로. `v0.1.0` draft 생성 확인
   - 첫 실행에서 `@tauri-apps/plugin-opener` npm(2.5.5) · crate(2.6.0) 불일치로 Tauri CLI가 거부 → npm 2.6으로 맞춤 (기존 문제, Windows 빌드도 이번에 처음 통과)
 
@@ -508,6 +511,8 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 
 ## Known Issues
 - **Phase 10**
+  - 확장 refresh token이 `storage.local`(프로필 디스크에 평문)에 남음 — 자동 로그인을 위한 선택 (결정 68)
+  - Netflix 다음 화 감지 수정은 가짜 페이지로만 확인 (실제 DOM 구조 미확인)
   - 호스트가 방 화면에서 친구 목록으로만 나가도(`room:leave`) 멤버가 일시정지됨 (탭에서 계속 보고 있어도). 그동안 호스트 조작은 원래도 전달되지 않음
   - Netflix "같은 작품"은 플레이어 안에서 넘어간 것으로 판단 → 엔딩 추천작을 바로 재생해도 멤버가 자동으로 따라감. 호스트 탭을 새로고침하면 다음 화도 팝업으로 물음
   - **Netflix 다음 화 문제(사용자 보고)는 실제 사이트에서 미확인**: 멤버가 이전 화에 남던 문제는 자동 이동으로 해결. 호스트 쪽이 넘어가지 않는 증상이라면 실제 증상 확인 필요
@@ -601,7 +606,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
   - manifest `key`는 dev용. 스토어 등록 시 대시보드 공개키로 교체하고 운영 `ALLOWED_ORIGINS` 설정
   - 개인정보처리방침과 UI 내 공개·동의 화면 없음 → 시청 정보(브라우징 활동)를 보내기 시작하는 Phase 4 전에 필요
   - ~~운영은 https/wss 필수~~ → Phase 10 운영 빌드는 `https/wss://sync.mirattic.com`
-  - Extension은 브라우저를 다시 열면 재로그인 (`storage.session`)
+  - ~~Extension은 브라우저를 다시 열면 재로그인~~ → 결정 68로 자동 로그인 (`storage.local`, 확장 페이지만 읽음)
   - side panel을 닫으면 WebSocket이 끊겨 오프라인으로 보임 (의도)
   - side panel 실제 컨테이너에서 `confirm()`/`alert()` 미확인 (탭으로 연 페이지에서만 확인)
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음

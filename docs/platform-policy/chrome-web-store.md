@@ -28,10 +28,10 @@
 
 ## 로그인 / 세션 취급 (결정)
 - Extension은 Mirattic 계정으로 별도 로그인 (provider 계정 정보는 다루지 않음)
-- refresh token은 **`chrome.storage.session`**
-  - 메모리에만 있고 브라우저 재시작·확장 업데이트 시 지워짐, 기본적으로 content script에서 접근 불가
-  - `storage.local`은 디스크에 평문 → "저장 시 암호화" 요건을 만족시키기 어려움. 공식 문서도 민감 데이터에 `storage.session` 권장
-  - 대가: 브라우저를 다시 열면 다시 로그인해야 함
+- refresh token은 **`chrome.storage.local`** (결정 68, 2026-09-29 사용자 요청으로 자동 로그인. 이전: `storage.session`, 결정 30)
+  - 브라우저를 다시 열어도 로그인 유지
+  - `setAccessLevel('TRUSTED_CONTEXTS')`로 확장 페이지만 읽음 (content script 접근 불가). 설정에 실패하면 읽지도 저장하지도 않음
+  - 대가: Chrome 프로필 디스크에 평문 → "저장 시 암호화" 요건 관점에서 약해짐. 서버가 사용할 때마다 교체하고 재사용 시 family 폐기, 로그아웃 · 계정 삭제 시 지움. 스토어 제출 전 재검토
 - access token은 side panel 메모리에만
 
 ## 서비스 워커 수명

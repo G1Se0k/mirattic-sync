@@ -25,15 +25,19 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
   }
 
   constructor() {
+    // Any <video>: a player may swap in a new element for the next episode while the old one is still first
+    // in the page. emit() reads the provider's own choice of video anyway.
     const onMedia = (e: Event) => {
-      if (e.target === this.video()) this.emit();
+      if (e.target instanceof HTMLVideoElement) this.emit();
     };
     // Media events don't bubble, but capture sees them — also on a <video> swapped in later.
     for (const type of EVENTS) document.addEventListener(type, onMedia, true);
     // An ad starting / ending and in-page navigation change no media event we can rely on: poll them.
     let last = '';
     const poll = setInterval(() => {
-      const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}`; // series: a playlist joined mid-video
+      // series: a playlist joined mid-video; the video's state: a next episode whose events we missed
+      const video = this.video();
+      const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}|${video ? video.paused : 'none'}`;
       if (key !== last) {
         last = key;
         this.emit();

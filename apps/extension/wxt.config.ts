@@ -8,7 +8,7 @@ export default defineConfig({
   manifest: {
     name: 'Mirattic Sync',
     description: 'Watch together with friends. Syncs playback state only — never media.',
-    // storage: the refresh token (storage.session) and the consent flag. The only site access is YouTube —
+    // storage: the refresh token (storage.local, extension pages only) and the consent flag. The only site access is YouTube —
     // the content script's match; host_permissions repeats it so the side panel can see which tab is YouTube
     // (same install warning). The API server allows this extension's origin through CORS instead.
     // Netflix and Laftel are opt-in (experimental, docs/platform-policy/{netflix,laftel}.md): each origin is

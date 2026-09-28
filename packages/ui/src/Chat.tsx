@@ -122,7 +122,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
       : <span className="muted code">{clock(ms)}</span>;
 
   return (
-    <section className="stack">
+    <section className="stack chat-panel">
       <h2>채팅</h2>
       <ul className="list chat" ref={list} onScroll={onScroll}>
         {hasOlder && (

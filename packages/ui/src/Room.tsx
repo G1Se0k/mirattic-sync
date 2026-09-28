@@ -17,7 +17,7 @@ type Props = {
   socket: Socket;
   status: SocketStatus;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
-  onClose: (note?: string) => void;
+  onClose: () => void;
   /** The room list decides notifications with it: tell it at once, not at its next refetch. */
   onMuted: (muted: boolean) => void;
 };
@@ -112,7 +112,7 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
         },
         (e) => {
           if (!fresh()) return;
-          if (e instanceof ApiError && e.status === 404) onClose("방이 닫혔거나 더 이상 멤버가 아닙니다.");
+          if (e instanceof ApiError && e.status === 404) onClose(); // closed or no longer a member: back to the list
           else setLoadFailed(true);
         },
       );
@@ -247,7 +247,7 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
   }
 
   return (
-    <main className="container">
+    <main className="container room">
       <header className="row between">
         <button className="link" onClick={() => onClose()}>← 친구 목록</button>
         <div className="row">

@@ -42,6 +42,14 @@ label { padding: 0.4rem 0; }
 code.code { font-size: 1.1rem; }
 input.code::placeholder { font-family: system-ui, sans-serif; letter-spacing: normal; }
 .chat { max-height: 40vh; overflow-y: auto; }
+/* Room screen: the chat fills the rest of the window, its input at the very bottom and messages stacking up
+   from just above it. margin-top: auto (not justify-content: flex-end) keeps the list scrollable. */
+/* The page holds the request banner too, so the room gets what is left of the window. */
+.room-page { height: 100vh; display: flex; flex-direction: column; }
+main.room { box-sizing: border-box; width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+main.room > .chat-panel { flex: 1; min-height: 14rem; }
+.chat-panel .chat { flex: 1; min-height: 0; max-height: none; display: flex; flex-direction: column; }
+.chat-panel .chat > :first-child { margin-top: auto; }
 .chat li { padding: 0.3rem 0; }
 .message { white-space: pre-wrap; overflow-wrap: anywhere; }
 .emoji { font-size: 1.2em; }

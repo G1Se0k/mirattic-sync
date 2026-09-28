@@ -21,7 +21,6 @@ import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
 
 /** Shared when the app sees nothing being watched (desktop, or no YouTube tab): a fake video. */
-const MOCK_CONTENT: RoomContent = { provider: "mock", contentId: "mock-1", title: "Mock 영상", durationMs: 10 * 60_000 };
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
 
@@ -86,9 +85,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     return () => void listeners.current.delete(listener);
   }, []);
 
-  const closeRoom = useCallback((note?: string) => {
+  const closeRoom = useCallback(() => {
     setOpenRoom(null);
-    setError(note ?? null);
+    setError(null);
   }, []);
 
   const reload = useCallback(async () => {
@@ -190,9 +189,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   async function watchTogether(friend: UserSummary) {
     setError(null);
     const hosted = roomToInvite(rooms, me.id, openRoom, watching);
+    if (!hosted && !watching) return setError("같이 볼 영상을 먼저 여세요 (YouTube · Netflix · Laftel).");
     try {
       if (hosted) await api.inviteToRoom(hosted.id, [friend.id]);
-      setOpenRoom(hosted?.id ?? (await api.createRoom(watching ?? MOCK_CONTENT, [friend.id])).id);
+      setOpenRoom(hosted?.id ?? (await api.createRoom(watching!, [friend.id])).id);
       setWatchRequests((list) => list.filter((u) => u.id !== friend.id)); // answered; kept on failure to retry
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
@@ -225,7 +225,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   if (openRoom && socket) {
     return (
-      <>
+      <div className="room-page">
         {requestBanner}
         {error && <div className="container"><p className="error" role="alert">{error}</p></div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
@@ -234,7 +234,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             // A list read before the change would bring the old setting back: updateRooms drops it.
             updateRooms((list) => list.map((r) => (r.id === openRoom ? { ...r, muted } : r)));
           }} />
-      </>
+      </div>
     );
   }
 
@@ -252,7 +252,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       {error && <p className="error" role="alert">{error}</p>}
       {notice && <p className="muted">{notice}</p>}
       <p className="muted">
-        {watching ? `지금 보는 영상: ${watching.title} · "같이 보기"로 공유` : `"같이 보기"는 Mock 영상으로 방을 만듭니다`}
+        {watching ? `지금 보는 영상: ${watching.title} · "같이 보기"로 공유` : "같이 볼 영상(YouTube · Netflix · Laftel)을 열면 \"같이 보기\"로 공유할 수 있습니다"}
       </p>
 
       <section>

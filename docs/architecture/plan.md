@@ -35,7 +35,7 @@
 | 27 | echo 억제 창 없음 | MVP는 멤버가 명령을 보내지 않으므로, 보정 후 발생한 이벤트는 재확인에서 차이 0으로 끝남 |
 | 28 | 호스트 명령은 클라이언트에서 200ms 단위로 모으고, 서버는 초당 20회 제한 | 최소 간격 제한은 지터로 붙은 마지막 명령을 버려 멤버가 계속 어긋남 (E2E에서 발견) |
 | 29 | Extension의 API client와 WebSocket은 background가 아니라 side panel 페이지가 가짐 | MV3 service worker는 30초간 트래픽이 없으면 종료됨. side panel이 열려 있는 동안 = 같이 보는 동안이라 수명이 맞고, background ↔ panel 중계 코드가 필요 없음. Phase 4 content script는 side panel과 직접 메시지 |
-| 30 | Extension refresh token은 `chrome.storage.session` | 디스크에 평문으로 남지 않음, content script 접근 불가. 브라우저 재시작 시 재로그인 (`platform-policy/chrome-web-store.md`) |
+| 30 | ~~(결정 68로 대체)~~ Extension refresh token은 `chrome.storage.session` | 디스크에 평문으로 남지 않음, content script 접근 불가. 브라우저 재시작 시 재로그인 (`platform-policy/chrome-web-store.md`) |
 | 31 | 화면 컴포넌트는 `packages/ui`로 옮겨 Desktop과 Extension이 공유. 각 앱은 토큰 저장소만 다른 client를 `configure()`로 넘김 | 같은 화면을 두 번 작성하지 않음 (결정 9의 "필요해질 때") |
 | 32 | Extension 권한은 `sidePanel`, `storage` + provider 사이트만 (Phase 4: `https://www.youtube.com/*` content script와 같은 host_permissions). API 서버는 host 권한 대신 CORS로 extension origin 허용 | Chrome Web Store 최소 권한 정책. content script match만으로는 side panel이 탭 URL을 볼 수 없어 같은 범위를 host_permissions로도 선언 (설치 경고 동일) |
 | 33 | YouTube는 사용자가 연 youtube.com 탭의 `<video>`를 content script로 재생·일시정지·seek만 (IFrame Player API 아님) | 사용자 자기 로그인 상태 그대로, 임베드 제한 없음. 약관 해석은 불확실 → `platform-policy/youtube.md`, 스토어 공개 전 재검토 |
@@ -73,6 +73,7 @@
 | 65 | 클라이언트 운영 주소는 빌드 시 `.env.production`(`VITE_API_URL=https://sync.mirattic.com`). Desktop CSP는 운영·localhost 둘 다 허용. `v*` 태그 → Release 워크플로가 extension zip을 draft release로 (Desktop 설치 파일은 2026-09-29 사용자 결정으로 중단 — 확장으로 모든 기능이 됨) | 로컬 E2E는 `VITE_API_URL=http://localhost:8080 pnpm build`로 덮어씀. 서명·공증은 인증서가 생길 때 |
 | 66 | Netflix도 seek함 (결정 47 대체, 2026-09-29 사용자 결정): side panel이 따라가는 Netflix 탭에만 `scripting.executeScript({ world: "MAIN" })`로 Netflix 내부 플레이어 API(`netflix.appContext…videoPlayer.seek`)를 호출 (`providers/netflix.ts` `seekInPage`). 실패하면 그 탭은 seek 불가로 보고 기존 "직접 이동" 안내로 돌아감. 켜기 안내 문구에 내부 기능 사용과 계정 위험을 명시 | 사용자 결정: Teleparty 등 기존 서비스와 같은 수준의 경험. 비공식 API라 예고 없이 깨질 수 있고, Netflix 약관 1.8 (v)(vi) 위반 소지 → 사용자 계정 위험. DRM · 스트림에는 손대지 않음. 스토어 공개 전 법률 검토 유지 (`platform-policy/netflix.md`) |
 | 67 | 호스트 이탈 · 영상 변경 (결정 35 확장, 2026-09-29 사용자 요청): ① 호스트 탭의 영상이 사라지면(뒤로가기 · 탭 닫기) 호스트가 그 위치로 `playback:pause`, 호스트의 연결이 방에서 모두 빠지면(창 · side panel 닫기, 방 화면 나가기) 서버가 방을 일시정지. ② 영상이 바뀌면 멤버에게 "호스트가 영상을 바꿨습니다 · 이 영상 열기 / 나중에" 팝업. ③ `RoomContent.series`가 같으면 팝업 없이 멤버 탭을 새 영상으로 이동: YouTube = URL `list`, Laftel = 작품 ID, Netflix = 시청 페이지를 떠나지 않고 이어 본 화들(첫 화 ID, 목록으로 나가거나 새로고침하면 새 묶음). 방 입장 때와 이미 그 영상을 열어 둔 경우엔 아무것도 안 함 | 사용자 요청. Netflix URL에는 작품 ID가 없고 페이지를 더 읽지 않으려고 "플레이어 안에서 넘어감"을 같은 작품으로 봄 (엔딩 추천작을 바로 재생해도 같은 묶음으로 따라감). 멤버 탭 자동 이동은 같은 묶음일 때만 |
+| 68 | 자동 로그인 (결정 30 대체, 2026-09-29 사용자 요청): Extension refresh token을 `storage.local`에 저장해 브라우저를 다시 열어도 로그인 유지. Mock 방은 UI에서 만들지 않음 (영상이 없으면 "같이 볼 영상을 먼저 여세요"), 방이 사라졌을 때 알림 없이 목록으로. 방 화면은 창 높이에 맞추고 채팅 입력은 맨 아래, 메시지는 입력 바로 위부터 쌓임 | 사용자 요청. refresh token은 Chrome 프로필에 평문으로 남지만 서버가 사용할 때마다 교체하고 재사용 시 family를 폐기. 로그아웃 · 계정 삭제 시 지움 |
 
 ## 사용자 식별 (UID + Identity)
 
