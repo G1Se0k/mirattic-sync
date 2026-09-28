@@ -36,7 +36,9 @@ cat > "$agent" <<PLIST
 PLIST
 mkdir -p "$HOME/mirattic-sync-backups" && chmod 700 "$HOME/mirattic-sync-backups"
 launchctl bootout "gui/$(id -u)/com.mirattic.sync.backup" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$agent" || echo "backup agent not loaded (no GUI session?)" >&2
+# Fails the deploy before the image switch: a deploy must not report success with backups stopped.
+launchctl bootstrap "gui/$(id -u)" "$agent"
+launchctl print "gui/$(id -u)/com.mirattic.sync.backup" >/dev/null
 
 healthy() {
   for _ in $(seq 60); do

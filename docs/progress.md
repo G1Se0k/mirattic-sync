@@ -1,5 +1,5 @@
 # Current Phase
-Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29. Codex Sol PASS. 스토어 제출 · 서명 · 백업은 Next Task)
+Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29. Codex Sol PASS. DB 백업 추가. 스토어 제출 · 서명 · 백업 외부 보관은 Next Task)
 
 운영: https://sync.mirattic.com (`wss://sync.mirattic.com/ws`)
 
@@ -15,6 +15,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
   - `deploy/compose.yml`: MySQL 8.4 + 서버, `127.0.0.1:8090` (8080은 다른 프로젝트가 사용)
 - **Caddy는 compose 밖** (사용자 요청, 결정 63): 호스트의 Caddy(`/opt/homebrew/etc/Caddyfile`)에 `sync.mirattic.com` 블록과 전역 Cloudflare `trusted_proxies` · `client_ip_headers CF-Connecting-IP` 추가 (백업 `Caddyfile.bak-mirattic-sync`, validate 후 reload, 기존 사이트 200 확인). 참고용 사본 `deploy/Caddyfile`
   - 서버 `server.forward-headers-strategy=native` → 인증 요청 제한이 실제 사용자 IP 기준
+- **DB 백업**: `deploy/backup.sh`를 `deploy.sh`가 launchd agent(`com.mirattic.sync.backup`, 매일 04:00)로 설치 (스크립트는 TCC 밖 `~/Library/Application Support/mirattic-sync/`로 복사). `mysqldump --single-transaction` → `~/mirattic-sync-backups/*.sql.gz` (디렉터리 700 · 파일 600), 7일 보관. 개인정보처리방침 초안에 "삭제 후 백업에 최대 8일" 명시
 - **WebSocket ping** 30초 (결정 64, Cloudflare 100초 유휴 종료 방지)
 - **클라이언트 운영 주소** (결정 65): `apps/{desktop,extension}/.env.production`, Desktop CSP에 `https/wss://sync.mirattic.com`
 - **릴리스 자동화**: `v*` 태그 → `release.yml`이 Desktop 설치 파일(macOS universal `.dmg`, Windows `.exe`/`.msi`, 서명 없음)과 확장 zip을 draft release로. `v0.1.0` draft 생성 확인
@@ -287,6 +288,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 - `deploy.sh` 로컬 실행: 첫 배포(`.env` 600 생성) → 성공, 헬스 실패 이미지 → 이전 이미지로 롤백 후 UP, `compose up` 자체 실패(없는 entrypoint) → 롤백 후 UP, exit 1
 - 전달 IP 신뢰: 로컬 · 호스트 loopback에서 서로 다른 `X-Forwarded-For`는 별도 제한
 - 실제 파이프라인: CI web · server · deploy 성공, 호스트가 해당 커밋으로 동작. Cloudflare 경유로 가입 → `wss` 연결 130초 무통신 유지 → 계정 삭제, `X-Forwarded-For`를 위조해도 20번째에 429 (키는 `CF-Connecting-IP`)
+- 백업: 배포 후 launchd로 즉시 실행 → 파일 생성(600), 임시 DB `restore_check`로 복원해 테이블 10개 · Flyway v9 확인 후 삭제
 - Release: `v0.1.0` → macOS universal · Windows 설치 파일 + 확장 zip draft release
 - Codex Sol 검증 1차 FAIL (2026-09-29, 검사 12개 모두 통과, blocking 1) → 수정
   - `docker compose up -d`가 실패하면 `set -e`로 바로 종료되어 롤백하지 않음 → compose와 헬스 체크를 `if` 안에서 실행해 모든 실패가 롤백 경로로, 롤백 후에도 헬스 체크 (로컬에서 재현 · 확인). 수정본이 CI로 배포되어 운영 UP 확인
@@ -498,7 +500,8 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 
 ## Known Issues
 - **Phase 10**
-  - **DB 백업 없음**: MySQL은 호스트의 Docker 볼륨(`mirattic-sync_mysql-data`)에만 있음. 백업 · 보관 기간(계정 삭제 후 백업에 남는 기간 포함) 정책 필요
+  - **백업이 같은 호스트에만 있음** (디스크 · 호스트 장애 시 함께 잃음). 외부 보관(다른 기기 · 클라우드, 암호화) 필요. 백업 실패 알림 없음 (`~/mirattic-sync-backups/backup.log`만)
+  - 백업 agent는 GUI 로그인 세션에 설치됨 → 호스트 사용자가 로그아웃하면 백업 안 됨 (OrbStack도 같은 조건)
   - 배포 호스트 1대(가정용 Mac) → 호스트 · 회선 장애 시 서비스 중단. 배포 중 수 초 중단(무중단 배포 아님), 접속 중인 WebSocket은 재연결
   - 배포 호스트 클론은 detached HEAD로 남음 (배포 전용, 직접 수정하지 말 것)
   - Desktop 설치 파일 서명 · 공증 없음 → macOS Gatekeeper · Windows SmartScreen 경고. 자동 업데이트 없음
@@ -593,6 +596,6 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 
 ## Next Task
 Phase 10 남은 일 (사용자 결정 필요)
-1. DB 백업: 호스트에서 `mysqldump` 주기 실행과 보관 위치 · 기간
+1. 백업 외부 보관 위치 결정 (현재 같은 호스트에만 7일)
 2. Chrome Web Store 제출 준비: 개발자 계정 등록 → 공개키로 manifest `key` 교체 · 운영 `ALLOWED_ORIGINS`에 스토어 확장 ID, 개인정보처리방침 `[ ]` 채우고 게시(예: `https://sync.mirattic.com/privacy`), 스토어 설명 · 스크린샷, YouTube · Netflix · Laftel 정책 재검토
 3. Desktop 서명 · 공증 (Apple Developer ID, Windows 코드 서명 인증서)

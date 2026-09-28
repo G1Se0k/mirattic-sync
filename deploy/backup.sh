@@ -6,9 +6,11 @@ export PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:$PATH
 umask 077
 dir=$HOME/mirattic-sync-backups
 mkdir -p "$dir"
+# Prune first, so a failing dump never keeps old dumps (and deleted accounts) past the retention.
+find "$dir" -name 'mirattic-*.sql.gz*' -mtime +6 -delete # 7 days old: gone within 8 days of a deletion (privacy policy)
 file=$dir/mirattic-$(date +%Y%m%d-%H%M).sql.gz
+trap 'rm -f "$file.tmp"' EXIT
 docker exec mirattic-sync-mysql-1 sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --no-tablespaces mirattic' \
   | gzip > "$file.tmp"
 mv "$file.tmp" "$file"
-find "$dir" -name 'mirattic-*.sql.gz' -mtime +6 -delete # 7 days old: gone within 8 days of a deletion (privacy policy)
 echo "backup $file"
