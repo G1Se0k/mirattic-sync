@@ -31,6 +31,7 @@ export type FollowerStatus =
   | { kind: "manual"; driftMs: number; targetMs: number }
   | { kind: "waiting" | "ad" | "other-content" };
 
+
 /**
  * Member side of the host-authoritative room: keeps the local player on the room's playback state.
  *
@@ -107,13 +108,17 @@ export class SyncFollower {
     let snap = await adapter.getSnapshot();
     // A newer state arrived meanwhile: its queued check takes over.
     if (this.state !== state) return;
-    if (!snap) return onStatus?.({ kind: "waiting" });
+    if (!snap) {
+      this.schedule(); // a tab being connected or reloaded answers soon, with or without an event
+      return onStatus?.({ kind: "waiting" });
+    }
     if (snap.adPlaying) {
       this.schedule();
       return onStatus?.({ kind: "ad" });
     }
     if (snap.contentId !== state.contentId) return onStatus?.({ kind: "other-content" });
 
+    // Only the host pauses the room: a member's own pause is undone (they can ask the host from the room screen).
     if (snap.playing !== state.playing) {
       await (state.playing ? adapter.play() : adapter.pause());
       snap = (await adapter.getSnapshot()) ?? snap;
@@ -142,14 +147,15 @@ export class SyncFollower {
       return onStatus?.({ kind: "confirming", driftMs });
     }
     this.confirming = false;
-    // Drift only changes while playing; a paused player is re-checked on the next event.
-    if (action === "recheck" && state.playing) this.schedule();
+    // Drift only changes while playing; a paused player is re-checked on the next event. A player that didn't
+    // take our play / pause (autoplay refused, still loading) is tried again too.
+    if ((action === "recheck" && state.playing) || snap.playing !== state.playing) this.schedule();
     onStatus?.({ kind: action === "recheck" ? "rechecking" : "synced", driftMs });
   }
 
-  private schedule() {
+  private schedule(delayMs = this.opts.recheckMs ?? 1000) {
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.check(false), this.opts.recheckMs ?? 1000);
+    this.timer = setTimeout(() => void this.check(false), delayMs);
   }
 }
 

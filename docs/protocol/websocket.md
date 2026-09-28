@@ -8,7 +8,7 @@
 2. `ws://<host>/ws?ticket=<ticket>` — ticket이 없거나 이미 사용됐거나 만료됐으면 handshake 401
 3. Origin 헤더가 있으면 `app.allowed-origins`에 포함돼야 함
 4. 인바운드 텍스트 프레임 최대 16KB
-5. 서버가 30초마다 ping 프레임을 보냄 (Cloudflare의 100초 유휴 종료 방지, 브라우저가 자동 pong). 운영 주소 `wss://sync.mirattic.com/ws`
+5. Extension은 background service worker가 연결을 가짐(결정 69)·20초마다 keepalive로 `sync:request`를 보냄. 서버가 30초마다 ping 프레임을 보냄 (Cloudflare의 100초 유휴 종료 방지, 브라우저가 자동 pong). 운영 주소 `wss://sync.mirattic.com/ws`
 
 클라이언트(`packages/client` `connectSocket`)는 재연결할 때마다 새 ticket을 받고, 지수 backoff(최대 30초)를 쓴다.
 ticket 요청이 401이면 재연결을 멈춘다(세션 종료).
@@ -86,8 +86,11 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 |---|---|---|---|
 | `chat:message` | C→S | `{ text, mediaPositionMs? }` | 멤버만 (`not_member`). text는 앞뒤 공백 제거 후 1–1000자, `mediaPositionMs` ≥ 0 (아니면 `bad_payload`). 세션당 초당 5회 |
 | `reaction:add` | C→S | `{ emoji, mediaPositionMs? }` | `emoji`는 `❤️ 😂 😮 😭 🔥` 중 하나 (아니면 `bad_payload`). 멤버만, `chat:message`와 같은 초당 5회 한도 |
-| `chat:delete` | S→C | `{ id }` 또는 `{ userId }` | 메시지 삭제(`DELETE /api/rooms/{id}/messages/{messageId}`, envelope `userId` = 지운 사람) 또는 계정 삭제(`{ userId }` = 그 사람의 모든 메시지). `chat:message`와 같이 모든 멤버의 연결에게. 클라이언트는 목록에서 빼고, 이후 도착하는 기록 응답과 늦게 도착한 같은 메시지의 `chat:message`에서도 뺀다 (배지·알림 없음) (Phase 9) |
-| `chat:message` | S→C | `ChatMessage` `{ id, roomId, userId, text, mediaPositionMs?, reaction, createdAt }` | **방의 모든 멤버의 연결**에게 (참가하지 않은 멤버, 보낸 사람 포함). 리액션은 `reaction: true`, `text` = 이모지. envelope `userId` = 보낸 사람. 기록은 `GET /api/rooms/{id}/messages` |
+| `chat:delete` | S→C | `{ id }` 또는 `{ userId }` | 메시지 삭제(`DELETE /api/rooms/{id}/messages/{messageId}`, envelope `userId` = 지운 사람) 또는 계정 삭제(`{ userId }` = 그 사람의 모든 메시지). `chat:message`와 같이 모든 멤버의 연결에게. 채팅은 `{ id }`를 "삭제된 메시지입니다" 자리표시로 바꾸고(결정 71, 기록에도 `deleted: true`로 남음), `{ userId }`는 목록에서 뺀다. 늦게 도착한 같은 메시지에도 적용. 방 목록은 배지·알림에서 뺀다 |
+| (서버) 빈 방 닫기 | S→C | `room:update` | 결정 75: 참가 중인 연결이 없는 상태가 1–2분 이어진 방은 서버가 닫고 멤버에게 알림 |
+| `room:read` | C→S | `{}` | 멤버만 (`not_member`). 지금까지 온 메시지를 읽음으로 표시하고 내 연결들에 `room:update` (목록 재조회). Extension은 패널을 닫아도 방에 들어가 있으므로(결정 69), 패널이 그 방을 보여 줄 때만 보냄 — 열 때, 보는 중 메시지가 올 때(0.5초 모아서), 화면을 닫을 때 |
+| `pause:request` | C→S, S→C | `{ reason? }` (200자 이하) | 결정 70. 멤버만 (호스트 `bad_payload`, 비멤버 `not_member`). 멤버·방마다 30초에 1번 (`rate_limited`). 서버는 호스트의 모든 연결로 같은 이름으로 보냄: envelope `userId` = 요청한 멤버, `roomId`, payload `{ reason }`(앞뒤 공백 제거) |
+| `chat:message` | S→C | `ChatMessage` `{ id, roomId, userId, text, mediaPositionMs?, reaction, createdAt, deleted }` | **방의 모든 멤버의 연결**에게 (참가하지 않은 멤버, 보낸 사람 포함). 리액션은 `reaction: true`, `text` = 이모지. envelope `userId` = 보낸 사람. 기록은 `GET /api/rooms/{id}/messages` |
 
 읽지 않은 수: 서버는 `room:join`, `room:leave`, 연결 끊김 때 그 멤버의 읽음 위치(`last_read_seq`)를 방의 마지막 메시지 순번으로 기록한다 (메시지 저장과 같은 방 행 잠금 아래). `room:leave`·끊김은 기록한 뒤에 `room:update`를 보낸다.
 

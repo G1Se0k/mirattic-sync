@@ -214,6 +214,9 @@ importers:
       '@mirattic/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@mirattic/sync-core':
+        specifier: workspace:*
+        version: link:../../packages/sync-core
       '@mirattic/types':
         specifier: workspace:*
         version: link:../../packages/types

@@ -34,6 +34,9 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
   let accessToken: string | null = null;
   // Single in-flight refresh: two concurrent refreshes with one token would trip server reuse detection.
   let refreshing: Promise<boolean> | null = null;
+  // Bumped by sign-in, sign-up and sign-out: a refresh that answers after one of them belongs to an older
+  // session and must not bring its tokens back.
+  let session = 0;
 
   async function send(method: string, path: string, body: unknown, token: string | null) {
     const headers: Record<string, string> = {};
@@ -55,30 +58,69 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
+  // Token writes run one after another and check the session when they run: a write of an older session that
+  // was still waiting — or still saving — never lands after a newer session's (a sign-out's) write.
+  let writes: Promise<unknown> = Promise.resolve();
+  function write<T>(fn: () => Promise<T>): Promise<T> {
+    const next = writes.then(fn, fn);
+    writes = next.catch(() => {});
+    return next;
+  }
+  const revoke = (refreshToken: string) =>
+    send("POST", "/api/auth/logout", { refreshToken }, null).then(() => {}, () => {});
+
   async function adopt(tokens: AuthTokens) {
-    accessToken = tokens.accessToken;
-    await opts.store.save(tokens.refreshToken);
+    const mine = ++session;
+    refreshing = null; // a refresh of the previous session no longer counts
+    const kept = await write(async () => {
+      if (mine !== session) return false;
+      accessToken = tokens.accessToken;
+      await opts.store.save(tokens.refreshToken);
+      return true;
+    });
+    if (!kept) await revoke(tokens.refreshToken); // signed out again before it was stored
     return tokens.user;
   }
 
   function refresh(): Promise<boolean> {
-    refreshing ??= (async () => {
+    if (refreshing) return refreshing;
+    const mine = session;
+    let run: Promise<boolean> | null = null;
+    run = (async () => {
       try {
         const stored = await opts.store.load();
-        if (!stored) return false;
+        if (!stored || mine !== session) return false;
         const res = await send("POST", "/api/auth/refresh", { refreshToken: stored }, null);
-        if (res.status === 401) {
-          accessToken = null;
-          await opts.store.save(null);
+        if (mine !== session) {
+          // Signed out (or in again) meanwhile: drop what this answer issued, on the server too.
+          const late = res.ok ? await parse<AuthTokens>(res).catch(() => null) : null;
+          if (late) await revoke(late.refreshToken);
           return false;
         }
-        await adopt(await parse<AuthTokens>(res));
-        return true;
+        if (res.status === 401) {
+          await write(async () => {
+            if (mine !== session) return;
+            accessToken = null;
+            await opts.store.save(null);
+          });
+          return false;
+        }
+        const tokens = await parse<AuthTokens>(res);
+        const kept = await write(async () => {
+          if (mine !== session) return false;
+          accessToken = tokens.accessToken;
+          await opts.store.save(tokens.refreshToken);
+          return true;
+        });
+        if (!kept) await revoke(tokens.refreshToken);
+        // A sign-out queued behind this write clears (and revokes) it: not a live session any more.
+        return kept && mine === session;
       } finally {
-        refreshing = null;
+        if (refreshing === run) refreshing = null;
       }
     })();
-    return refreshing;
+    refreshing = run;
+    return run;
   }
 
   async function authed<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -99,10 +141,16 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
       return adopt(await parse<AuthTokens>(await send("POST", "/api/auth/login", { email, password }, null)));
     },
     async logout(): Promise<void> {
-      const stored = await opts.store.load();
+      const mine = ++session;
+      refreshing = null;
       accessToken = null;
-      await opts.store.save(null);
-      if (stored) await send("POST", "/api/auth/logout", { refreshToken: stored }, null).catch(() => {});
+      // Behind any write already under way: what it stored is read here, cleared and revoked.
+      const stored = await write(async () => {
+        const token = await opts.store.load();
+        if (mine === session) await opts.store.save(null);
+        return token;
+      });
+      if (stored) await revoke(stored);
     },
 
     me: () => authed<Me>("GET", "/api/me"),

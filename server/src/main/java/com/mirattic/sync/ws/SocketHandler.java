@@ -8,6 +8,7 @@ import com.mirattic.sync.room.RoomContent;
 import com.mirattic.sync.room.RoomService;
 import com.mirattic.sync.user.UserRepository;
 import jakarta.validation.Validator;
+import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
 import java.util.Map;
@@ -47,6 +48,9 @@ class SocketHandler extends TextWebSocketHandler {
 	private static final int MAX_PLAYBACK_PER_SECOND = 20;
 	private static final String CHAT_WINDOW = "chatWindow";
 	private static final int MAX_CHAT_PER_SECOND = 5;
+	private static final int MAX_REASON = 200;
+	static final long PAUSE_REQUEST_COOLDOWN_MS = 30_000;
+	private static final int MAX_PAUSE_REQUEST_ENTRIES = 10_000;
 
 	private final SocketHub hub;
 	private final PresenceService presence;
@@ -54,6 +58,8 @@ class SocketHandler extends TextWebSocketHandler {
 	private final UserRepository users;
 	private final JsonMapper json;
 	private final Validator validator;
+	/** "user|room" → when its last pause request went out. ponytail: in memory, single instance; expired ones pruned past 10k. */
+	private final Map<String, Long> pauseRequests = new ConcurrentHashMap<>();
 
 	SocketHandler(SocketHub hub, PresenceService presence, RoomService rooms, UserRepository users, JsonMapper json,
 			Validator validator) {
@@ -119,7 +125,7 @@ class SocketHandler extends TextWebSocketHandler {
 			case "sync:request" -> hub.send(out(session), new ServerEvent("sync:response", null, null, null,
 					System.currentTimeMillis(), Map.of("reqId", reqId == null ? "" : reqId)));
 			case "room:join", "room:leave", "playback:play", "playback:pause", "playback:seek",
-					"playback:content-change", "chat:message", "reaction:add" -> {
+					"playback:content-change", "chat:message", "reaction:add", "pause:request", "room:read" -> {
 				if (roomId == null) {
 					error(session, reqId, "bad_payload");
 					return;
@@ -155,6 +161,40 @@ class SocketHandler extends TextWebSocketHandler {
 					pauseIfHostGone(me, roomId);
 					rooms.announce(roomId, rooms.memberIds(roomId));
 				}
+			}
+			case "room:read" -> {
+				// The extension stays joined with its panel closed: it marks what the user actually saw.
+				rooms.requireMembership(me, roomId);
+				rooms.read(me, roomId);
+				rooms.announce(roomId, List.of(me)); // my other apps refetch their counts
+			}
+			case "pause:request" -> {
+				JsonNode reason = payload.path("reason");
+				if (!(reason.isMissingNode() || reason.isNull() || reason.isString() && reason.asString().length() <= MAX_REASON)) {
+					error(session, reqId, "bad_payload");
+					return;
+				}
+				String host = rooms.hostToAsk(me, roomId);
+				// One request per member and room every 30 seconds.
+				long now = System.currentTimeMillis();
+				if (pauseRequests.size() > MAX_PAUSE_REQUEST_ENTRIES) {
+					pauseRequests.values().removeIf(at -> now - at >= PAUSE_REQUEST_COOLDOWN_MS);
+				}
+				// Checked and taken in one step per key: concurrent requests from two connections can't both pass.
+				boolean[] allowed = {false};
+				pauseRequests.compute(me + "|" + roomId, (k, last) -> {
+					if (last != null && now - last < PAUSE_REQUEST_COOLDOWN_MS) {
+						return last;
+					}
+					allowed[0] = true;
+					return now;
+				});
+				if (!allowed[0]) {
+					error(session, reqId, "rate_limited");
+					return;
+				}
+				String text = reason.isString() ? reason.asString().strip() : "";
+				hub.sendEvent(host, new ServerEvent("pause:request", roomId, me, null, now, Map.of("reason", text)));
 			}
 			case "chat:message", "reaction:add" -> {
 				if (!withinBudget(session, CHAT_WINDOW, MAX_CHAT_PER_SECOND)) {

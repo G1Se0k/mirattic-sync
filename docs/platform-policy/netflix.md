@@ -33,7 +33,7 @@ YouTube 약관("interfere", "automated means")보다 훨씬 구체적이다.
 → **정책이 불명확함 (CLAUDE.md 규칙: 보수적 구현)**. 구현 범위는 아래 "결정".
 
 ## 금지 동작 (어떤 선택이든 구현하지 않음)
-- Netflix 내부 JS API / page-world 스크립트 호출 (**예외: 결정 66의 seek 호출 하나**), 네트워크 요청 가로채기, 매니페스트·자막·스트림 접근
+- Netflix 내부 JS API / page-world 스크립트 호출 (**예외: 결정 66의 seek, 결정 73의 재생 정보(작품명·시즌·화·작품 ID) 읽기**), 네트워크 요청 가로채기, 매니페스트·자막·스트림 접근
 - DRM(Widevine) 관련 모든 것, 화면 캡처, 재전송
 - 페이지 DOM에 UI 삽입, 플레이어 가림
 - 쿠키·세션·프로필 정보 읽기
@@ -43,7 +43,7 @@ YouTube 약관("interfere", "automated means")보다 훨씬 구체적이다.
 - 각 사용자가 자기 Netflix 계정으로 브라우저에서 직접 로그인. Mirattic은 아무것도 읽거나 저장하지 않음
 
 ## 재전송 금지
-- 서버로 가는 것은 Netflix 콘텐츠 ID(URL `/watch/<숫자>`)와 재생 상태 메타데이터뿐
+- 서버로 가는 것은 Netflix 콘텐츠 ID(URL `/watch/<숫자>`)와 재생 상태 메타데이터뿐 (결정 73부터: 재생 정보에서 읽은 작품명·시즌·화·에피소드 제목, 또는 플레이어 제목 줄의 제목도 보내며, 공개 범위 설정대로 친구·방에 공유됨)
 
 ## 계정 / 회선 제한
 - 멤버마다 자기 계정 필요. 계정 공유·동시 시청 제한을 우회하는 기능 없음
@@ -54,7 +54,7 @@ YouTube 약관("interfere", "automated means")보다 훨씬 구체적이다.
   - `optional_host_permissions`의 `https://www.netflix.com/*`는 사용자가 켤 때 Chrome 권한 창으로 요청, 끌 때 반납
   - content script는 manifest에 등록하지 않고, side panel이 **따라가는 Netflix 탭 하나에만** `scripting.executeScript`로 넣음
 - 켜는 곳: 설정의 "실험 기능", Netflix 방에 처음 들어갈 때 뜨는 팝업. 둘 다 약관 조항과 계정 제한 위험을 보여준 뒤 사용자가 직접 켬
-- 읽는 것: URL의 콘텐츠 ID(`/watch/<숫자>`), 탭 제목, `<video>`의 재생 상태. 에피소드 제목 등 페이지 DOM은 읽지 않음 ((vii))
+- 읽는 것: URL의 콘텐츠 ID(`/watch/<숫자>`), 탭 제목, `<video>`의 재생 상태, 그리고 결정 73부터 재생 정보(Netflix 내부 데이터의 작품명·시즌·화·에피소드 제목·작품 ID)와 플레이어 제목 줄(`[data-uia="video-title"]`). 그 밖의 페이지 DOM은 읽지 않음. (처음 결정: 에피소드 제목 등 페이지 DOM은 읽지 않음 — 결정 73으로 바뀜)
 - 제어: 재생 / 일시정지는 `<video>`로. seek는 **Netflix 내부 플레이어 API로** (결정 변경, 아래)
   - `currentTime` 쓰기는 Netflix가 막고 재생 오류(M7375)를 띄움 (확장 개발자들의 공개 이슈로 확인, 아래 출처)
   - 내부 API 호출이 실패하면 (Netflix 변경) 그 탭은 예전처럼 멤버에게 "호스트와 N초 차이 · mm:ss로 직접 이동" 안내
@@ -62,9 +62,10 @@ YouTube 약관("interfere", "automated means")보다 훨씬 구체적이다.
 ## 결정 변경 (2026-09-29, 사용자 결정)
 - 처음 결정(Phase 6, 결정 47): seek하지 않음. 피하는 방법이 내부 API뿐이라 금지 동작으로 분류
 - 변경(결정 66): 사용자(프로젝트 소유자)가 "Teleparty도 그렇게 운영한다"는 이유로 내부 API seek를 기본 동작으로 결정 (Netflix 제어를 켠 사용자에게)
-- 범위: side panel이 따라가는 Netflix 탭 하나에만 `scripting.executeScript({ world: "MAIN" })`로 `netflix.appContext.state.playerApp.getAPI().videoPlayer…seek(ms)` 한 번 호출. 페이지의 다른 내부 기능 · DOM · 네트워크 · DRM에는 손대지 않음
+- 범위: side panel이 따라가는 Netflix 탭 하나에만 `scripting.executeScript({ world: "MAIN" })`로 `netflix.appContext.state.playerApp.getAPI().videoPlayer…seek(ms)` 호출, 결정 73부터 같은 방식으로 재생 정보 읽기(화마다 한 번, 읽기만). 페이지의 다른 내부 기능 · DOM · 네트워크 · DRM에는 손대지 않음
 - 남은 위험: 약관 1.8 (v)(vi) 위반 소지가 더 직접적 → 사용자 계정 제한 가능. 제3자 계약 위반 유도 쟁점. Teleparty의 존재는 Netflix가 허용했다는 근거가 아님. 켜기 안내 문구에 내부 기능 사용과 계정 위험을 적음
 - 스토어 공개 전 법률 검토 항목에 이 변경 포함
+- 추가 (2026-09-29, 결정 73, 사용자 요청): 무엇을 보는지 표시하려고 같은 내부 데이터에서 작품명·시즌·화·에피소드 제목·작품 ID를 읽음 (따라가는 탭 하나, 화마다 한 번). 페이지의 다른 데이터·DOM·네트워크는 읽지 않음. 읽은 제목은 공개 범위 설정대로 친구·방에 공유
 - 광고 요금제: 광고 감지 방법(DOM)이 확인되지 않아 미지원. 켜기 팝업에서 알림
 - 채팅은 YouTube와 같이 side panel 안 (Teleparty도 Netflix에서 별도 창을 쓰지 않음). 페이지 안에는 아무것도 넣지 않음
 

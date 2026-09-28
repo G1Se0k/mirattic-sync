@@ -21,6 +21,12 @@ type Served = MediaProviderAdapter & { onGone(callback: () => void): () => void 
  * so nothing is read from the page before that.
  */
 export function serveAdapter(create: () => Served) {
+  // Injected again after an extension update or on every rebind: one live copy per page answers. A copy left
+  // over from before an update can't (its runtime is gone), so it doesn't block the new one.
+  const g = globalThis as { miratticServing?: () => boolean };
+  if (g.miratticServing?.()) return;
+  g.miratticServing = () => !!browser.runtime?.id;
+
   browser.runtime.onConnect.addListener((port) => {
     if (port.name !== PORT_NAME) return;
     const adapter = create();
@@ -68,9 +74,14 @@ export class RemoteAdapter implements MediaProviderAdapter {
   private listeners = new Set<(s: PlayerSnapshot) => void>();
   private goneListeners = new Set<() => void>();
 
+  /** Heard from the tab since connecting: a port that closes before that found no live script there. */
+  private heard = false;
+
   constructor(
     /** Every change of what the tab shows, including losing it (null). */
     private readonly onPresence: (presence: MediaPresence | null) => void,
+    /** The tab had no script answering (opened before install / update). */
+    private readonly onDead?: (tabId: number, provider: MediaProvider) => void,
   ) {}
 
   get connected() {
@@ -86,9 +97,11 @@ export class RemoteAdapter implements MediaProviderAdapter {
     this.provider = provider;
     this.tabId = tabId;
     this.pageSeekFailed = false;
+    this.heard = false;
     const port = browser.tabs.connect(tabId, { name: PORT_NAME });
     this.port = port;
     port.onMessage.addListener((m: PortMessage) => {
+      this.heard = true;
       if ('id' in m) {
         this.replies.get(m.id)?.(m.snapshot);
         this.replies.delete(m.id);
@@ -100,7 +113,10 @@ export class RemoteAdapter implements MediaProviderAdapter {
     });
     // Also fires right away when the tab has no content script (not YouTube, or opened before install).
     port.onDisconnect.addListener(() => {
-      if (this.port === port) this.drop();
+      if (this.port !== port) return;
+      const dead = !this.heard;
+      this.drop();
+      if (dead) this.onDead?.(tabId, provider);
     });
   }
 

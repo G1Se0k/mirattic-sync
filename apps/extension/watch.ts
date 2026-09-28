@@ -2,9 +2,13 @@ import { browser } from 'wxt/browser';
 import type { Socket } from '@mirattic/client';
 import type { Platform } from '@mirattic/ui';
 import type { MediaPresence, MediaProvider, RoomContent } from '@mirattic/types';
-import { RemoteAdapter } from '../../bridge';
+import { RemoteAdapter } from './bridge';
+import { describeMetadata, metadataInPage, type NetflixMetadata } from './providers/netflix';
 
 const YOUTUBE = 'https://www.youtube.com/';
+const YOUTUBE_SCRIPT = '/content-scripts/youtube.js';
+const NETFLIX_META_TRIES = 5;
+const NETFLIX_META_RETRY_MS = 2_000;
 // Experimental control (docs/platform-policy/{netflix,laftel}.md): each is off until the user grants its
 // optional host permission; while off, its tabs are invisible to us and nothing is injected into them.
 const EXPERIMENTAL = {
@@ -17,13 +21,18 @@ const isExperimental = (p: MediaProvider): p is Experimental => p in EXPERIMENTA
 const originsOf = (p: Experimental) => ({ origins: [`${EXPERIMENTAL[p].site}*`] });
 const PRESENCE_DELAY_MS = 300; // the server drops presence updates closer than 250ms
 
+export type Watch = Platform & {
+  /** Follow the video tab of another window (the one whose side panel was opened last). */
+  follow(windowId: number): void;
+};
+
 /**
- * The extension's platform: follows the video tab of this window — YouTube, or Netflix / Laftel once turned on;
+ * The extension's platform: follows the video tab of one window — YouTube, or Netflix / Laftel once turned on;
  * the active one, else the last one used, else any — and exposes it as the room player, "now watching"
- * and the user's presence.
+ * and the user's presence. Runs in the background, so it goes on while the side panel is closed.
  */
-export async function watch(): Promise<Platform> {
-  const windowId = (await browser.windows.getCurrent()).id;
+export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
+  let windowId = opts.windowId ?? (await browser.windows.getCurrent()).id;
   let tabId: number | null = null;
   let content: RoomContent | null = null;
   let presence: MediaPresence | null = null;
@@ -42,7 +51,54 @@ export async function watch(): Promise<Platform> {
     }, PRESENCE_DELAY_MS);
   };
 
-  const adapter = new RemoteAdapter((p) => {
+  // A YouTube tab opened before the extension was installed or updated has no live script (it came with the
+  // page): put one in, once per page load, and connect again.
+  const reinjected = new Set<number>();
+  const revive = async (id: number, provider: MediaProvider) => {
+    if (provider !== 'youtube' || reinjected.has(id)) return;
+    reinjected.add(id);
+    const injected = await browser.scripting.executeScript({ target: { tabId: id }, files: [YOUTUBE_SCRIPT] }).catch(() => null);
+    if (injected && id === tabId && !adapter.connected) adapter.connect(id, provider);
+  };
+
+  // Netflix names what plays only in its page data (decision 73): read once per episode, retried while the
+  // player loads; until then the adapter's own title stands. Its show id is the series.
+  const netflixMeta = new Map<string, NetflixMetadata | null>();
+  /** Episodes played in a row (the adapter's run, named after its first episode) → the show id read for one of them. */
+  const runShow = new Map<string, string>();
+  let raw: MediaPresence | null = null;
+  const readNetflix = async (id: string, attempt: number) => {
+    if (!netflixMeta.get(id)) netflixMeta.set(id, null); // a partial answer stays shown while it is read again
+    const tab = tabId;
+    if (tab === null) return;
+    const [done] = await browser.scripting.executeScript({ target: { tabId: tab }, world: 'MAIN', func: metadataInPage, args: [id] })
+      .catch(() => []);
+    const found = (done?.result as NetflixMetadata | null | undefined) ?? null;
+    console.info('[mirattic] Netflix page data for', id, found ? `found: ${describeMetadata(found)}` : 'not found', `(try ${attempt})`);
+    if (found && !(found.partial && netflixMeta.get(id) && !netflixMeta.get(id)!.partial)) {
+      netflixMeta.set(id, found);
+      if (tabId === tab && raw?.contentId === id) show(enrich(raw)); // still the tab and episode it was read for
+    }
+    // Nothing yet, or a show whose episode list lacks this episode so far: read again while tries last.
+    if ((!found || found.partial) && attempt < NETFLIX_META_TRIES) {
+      setTimeout(() => raw?.contentId === id && void readNetflix(id, attempt + 1), NETFLIX_META_RETRY_MS);
+    }
+  };
+  const enrich = (p: MediaPresence | null): MediaPresence | null => {
+    if (p?.provider !== 'netflix' || !p.contentId) return p;
+    if (!netflixMeta.has(p.contentId)) void readNetflix(p.contentId, 1);
+    const m = netflixMeta.get(p.contentId);
+    if (m) {
+      if (p.series) runShow.set(p.series, m.showId);
+      return { ...p, title: describeMetadata(m), series: m.showId };
+    }
+    // The next episode of a run whose show is known: keep that show as the series until its own data is read,
+    // so members follow it instead of being asked (and the title updates when the data arrives).
+    const show = p.series ? runShow.get(p.series) : undefined;
+    return show ? { ...p, series: show } : p;
+  };
+
+  const show = (p: MediaPresence | null) => {
     presence = p;
     const next: RoomContent | null = p?.contentId
       ? { provider: p.provider, contentId: p.contentId, title: p.title, durationMs: p.durationMs, canonicalUrl: p.canonicalUrl, series: p.series }
@@ -54,7 +110,11 @@ export async function watch(): Promise<Platform> {
       changed();
     }
     sendPresence();
-  });
+  };
+  const adapter = new RemoteAdapter((p) => {
+    raw = p;
+    show(enrich(p));
+  }, (id, provider) => void revive(id, provider));
 
   const providerOf = (url?: string): MediaProvider | null =>
     url?.startsWith(YOUTUBE) ? 'youtube' : ([...on].find((p) => url?.startsWith(EXPERIMENTAL[p].site)) ?? null);
@@ -123,6 +183,7 @@ export async function watch(): Promise<Platform> {
     // stays ours, so "이 영상 열기" brings it back.
     if (id === tabId && change.url && providerOf(change.url) !== adapter.provider) void pick();
     // A reload or a fresh navigation to a video site starts without our script: reconnect (and reinject).
+    if (change.status === 'complete') reinjected.delete(id);
     if (change.status === 'complete' && isVideoTab(tab.url) && (id === tabId || (tab.active && tab.windowId === windowId))) {
       if (id !== tabId || !adapter.connected) {
         tabId = null;
@@ -141,6 +202,11 @@ export async function watch(): Promise<Platform> {
   await pick();
 
   return {
+    follow: (id) => {
+      if (id === windowId) return;
+      windowId = id;
+      void pick();
+    },
     adapter: (provider) => (provider === 'youtube' || (isExperimental(provider) && on.has(provider)) ? adapter.as(provider) : undefined),
     nowWatching: () => content,
     subscribe: (onChange) => {

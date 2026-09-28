@@ -276,17 +276,51 @@ public class RoomService {
 	@Transactional
 	public void deleteMessage(String me, String roomId, String messageId) {
 		RoomMember self = requireMember(me, roomId);
-		ChatMessage message = messages.findByIdAndRoomId(messageId, roomId).orElseThrow(RoomService::notFound);
+		ChatMessage message = messages.findByIdAndRoomId(messageId, roomId).filter(m -> !m.isDeleted())
+				.orElseThrow(RoomService::notFound);
 		if (!message.view().userId().equals(me) && self.getRole() != RoomMember.Role.HOST) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "author or host only");
 		}
-		messages.delete(message);
+		message.delete();
+	}
+
+	/** 404 unless a member (for socket events that only need membership). */
+	@Transactional(readOnly = true)
+	public void requireMembership(String me, String roomId) {
+		requireMember(me, roomId);
+	}
+
+	@Transactional(readOnly = true)
+	public List<String> allIds() {
+		return rooms.findAll().stream().map(Room::getId).toList();
+	}
+
+	/** Closes a room nobody is in (decision 75). @return its members (to tell them), empty if already gone. */
+	@Transactional
+	public List<String> close(String roomId) {
+		if (rooms.findForUpdate(roomId).isEmpty()) {
+			return List.of();
+		}
+		List<String> everyone = memberIds(roomId);
+		rooms.deleteById(roomId);
+		return everyone;
+	}
+
+	/** For a member's `pause:request`: the host to ask. 404 if not a member, 400 for the host itself. */
+	@Transactional(readOnly = true)
+	public String hostToAsk(String me, String roomId) {
+		if (requireMember(me, roomId).getRole() == RoomMember.Role.HOST) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "the host pauses directly");
+		}
+		return members.findByRoomId(roomId).stream().filter(m -> m.getRole() == RoomMember.Role.HOST)
+				.map(RoomMember::getUserId).findFirst().orElseThrow(RoomService::notFound);
 	}
 
 	/** A message to report: someone else's, in a room I'm in (404 otherwise, like any room lookup). */
 	@Transactional(readOnly = true)
 	public ChatMessage.View reportable(String me, String messageId) {
-		ChatMessage.View m = messages.findById(messageId).map(ChatMessage::view).orElseThrow(RoomService::notFound);
+		ChatMessage.View m = messages.findById(messageId).filter(x -> !x.isDeleted()).map(ChatMessage::view)
+				.orElseThrow(RoomService::notFound);
 		requireMember(me, m.roomId());
 		if (m.userId().equals(me)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot report yourself");
@@ -386,7 +420,7 @@ public class RoomService {
 				.toList();
 		RoomMember self = list.stream().filter(m -> m.getUserId().equals(viewer)).findFirst().orElse(null);
 		long unread = self == null ? 0
-				: messages.countByRoomIdAndUserIdNotAndReactionFalseAndSeqGreaterThan(room.getId(), viewer,
+				: messages.countByRoomIdAndUserIdNotAndReactionFalseAndDeletedFalseAndSeqGreaterThan(room.getId(), viewer,
 						self.getLastReadSeq());
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), unread,
 				self != null && self.isMuted());

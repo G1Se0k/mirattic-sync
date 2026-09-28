@@ -1,20 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { App, configure } from '@mirattic/ui';
-import { api, SOCKET_URL } from './session';
+import { SOCKET_URL } from '../../session';
 import { Consent, hasConsent } from './Consent';
-import { watch } from './watch';
+import { connectPanel } from './panel';
 
-// The side panel page owns the socket: it lives exactly as long as the panel is open, which is when the
-// user is watching together. The background service worker would be shut down after 30s without traffic.
-let platform: ReturnType<typeof watch> | undefined;
+// The side panel is a view: the background owns the session, the socket and the room's sync (plan.md
+// decision 69), so closing the panel neither breaks the sync nor leaves the room.
+let connected: ReturnType<typeof connectPanel> | undefined;
 
 function SidePanel() {
   const [state, setState] = useState<'loading' | 'consent' | 'ready'>('loading');
 
   const start = async () => {
-    platform ??= watch(); // only now do we look at video tabs; once, despite StrictMode
-    configure(api, SOCKET_URL, await platform);
+    connected ??= connectPanel(); // once, despite StrictMode; tabs are looked at only after consent
+    const { api, platform } = await connected;
+    configure(api, SOCKET_URL, platform);
     setState('ready');
   };
 

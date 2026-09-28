@@ -60,4 +60,65 @@ describe("createApi", () => {
       message: "email already registered",
     });
   });
+
+  it("a refresh answering after logout doesn't bring the session back", async () => {
+    const store = memoryStore("r1");
+    let answer!: () => void;
+    const held = new Promise<void>((r) => (answer = r));
+    const loggedOut: string[] = [];
+    const fetchMock: typeof fetch = async (url, init) => {
+      const path = String(url).replace("http://api", "");
+      if (path === "/api/auth/refresh") {
+        await held;
+        return json(200, { accessToken: "a2", refreshToken: "r2", user: { id: "u", displayName: "U" } });
+      }
+      if (path === "/api/auth/logout") {
+        loggedOut.push(JSON.parse(String(init?.body)).refreshToken);
+        return json(204);
+      }
+      return json(200, []);
+    };
+    const api = createApi({ baseUrl: "http://api", store, fetch: fetchMock });
+
+    const restoring = api.restore();
+    await new Promise((r) => setTimeout(r, 0)); // the refresh is on its way
+    await api.logout();
+    answer();
+    expect(await restoring).toBe(false);
+    expect(store.value).toBeNull();
+    expect(loggedOut).toEqual(["r1", "r2"]); // the late one is revoked too
+    await expect(api.friends()).rejects.toMatchObject({ status: 401 }); // no access token left
+  });
+
+  it("a refresh still saving when logout comes doesn't leave its token behind", async () => {
+    const store = memoryStore("r1");
+    const save = store.save.bind(store);
+    let saved!: () => void;
+    const slowSave = new Promise<void>((r) => (saved = r));
+    store.save = async (t) => {
+      if (t === "r2") await slowSave; // the refresh's write is under way
+      await save(t);
+    };
+    const loggedOut: string[] = [];
+    const fetchMock: typeof fetch = async (url, init) => {
+      const path = String(url).replace("http://api", "");
+      if (path === "/api/auth/refresh") return json(200, { accessToken: "a2", refreshToken: "r2", user: { id: "u", displayName: "U" } });
+      if (path === "/api/auth/logout") {
+        loggedOut.push(JSON.parse(String(init?.body)).refreshToken);
+        return json(204);
+      }
+      return json(200, []);
+    };
+    const api = createApi({ baseUrl: "http://api", store, fetch: fetchMock });
+
+    const restoring = api.restore();
+    await new Promise((r) => setTimeout(r, 0)); // the refresh answered and is saving r2
+    const out = api.logout();
+    saved();
+    await out;
+    expect(await restoring).toBe(false);
+    expect(store.value).toBeNull();
+    expect(loggedOut).toEqual(["r2"]);
+    await expect(api.friends()).rejects.toMatchObject({ status: 401 });
+  });
 });

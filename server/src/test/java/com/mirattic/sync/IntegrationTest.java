@@ -27,7 +27,8 @@ import tools.jackson.databind.json.JsonMapper;
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
 		"app.jwt-secret=test-secret-test-secret-test-secret-0123456789",
-		"app.auth-rate-limit-per-minute=100000" })
+		"app.auth-rate-limit-per-minute=100000",
+		"app.empty-room-sweep-ms=3600000" }) // tests sweep by hand
 @AutoConfigureMockMvc
 public abstract class IntegrationTest {
 

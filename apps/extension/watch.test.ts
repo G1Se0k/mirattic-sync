@@ -18,6 +18,8 @@ let listeners: Record<string, Listener[]>;
 let heldQuery: ReturnType<typeof hold<void>> | null;
 let heldGet: Map<number, ReturnType<typeof hold<void>>>;
 let heldInject: ReturnType<typeof hold<void>> | null;
+let injected: string[][]; // files injected per call
+let dropConnection: (() => void) | null; // closes the latest port, as a tab without a live script does
 
 const on = (name: string) => ({ addListener: (l: Listener) => void (listeners[name] ??= []).push(l) });
 const fire = (name: string, ...args: unknown[]) => Promise.all((listeners[name] ?? []).map((l) => l(...args)));
@@ -32,7 +34,8 @@ vi.mock('wxt/browser', () => ({
       onRemoved: on('permissions.onRemoved'),
     },
     scripting: {
-      executeScript: async () => {
+      executeScript: async (q: { files?: string[] }) => {
+        injected.push(q.files ?? []);
         const h = heldInject;
         heldInject = null;
         await h?.promise;
@@ -61,7 +64,7 @@ vi.mock('wxt/browser', () => ({
         connects.push(id);
         return {
           onMessage: { addListener() {} },
-          onDisconnect: { addListener() {} },
+          onDisconnect: { addListener: (l: () => void) => void (dropConnection = l) },
           postMessage() {},
           disconnect() {},
         };
@@ -92,6 +95,26 @@ beforeEach(() => {
   heldQuery = null;
   heldGet = new Map();
   heldInject = null;
+  injected = [];
+  dropConnection = null;
+});
+
+describe('watch: a YouTube tab without a live script', () => {
+  it('gets the script again once, then is connected again', async () => {
+    tabs = [YT(1, true)];
+    await watch();
+    expect(connects).toEqual([1]);
+    dropConnection!(); // closed before saying anything: opened before the extension was updated
+    await settle();
+    expect(injected).toEqual([['/content-scripts/youtube.js']]);
+    expect(connects).toEqual([1, 1]);
+    dropConnection!(); // still nothing: not again until the page loads anew
+    await settle();
+    expect(injected).toHaveLength(1);
+    await fire('tabs.onUpdated', 1, { status: 'complete' }, tabs[0]);
+    await settle();
+    expect(connects).toEqual([1, 1, 1]);
+  });
 });
 
 describe('watch: which tab the side panel follows', () => {

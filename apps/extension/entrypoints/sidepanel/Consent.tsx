@@ -1,13 +1,8 @@
 import { useState } from 'react';
 import { browser } from 'wxt/browser';
+import { CONSENT_KEY, CONSENT_VERSION } from '../../consent';
 
-// Bump when what we collect changes: everyone is asked again.
-const CONSENT_KEY = 'mirattic.consent';
-const CONSENT_VERSION = '2026-09-28.2';
-
-export async function hasConsent() {
-  return (await browser.storage.local.get(CONSENT_KEY))[CONSENT_KEY] === CONSENT_VERSION;
-}
+export { hasConsent } from '../../consent';
 
 /**
  * Prominent disclosure required by the Chrome Web Store user data policy before any browsing activity

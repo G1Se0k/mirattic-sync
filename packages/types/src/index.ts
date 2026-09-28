@@ -117,10 +117,15 @@ export type ChatMessage = {
   mediaPositionMs?: number;
   reaction: boolean;
   createdAt: number;
+  /** Deleted for everyone: `text` is empty, shown as a placeholder. */
+  deleted?: boolean;
 };
 
 /** The reactions offered (`reaction:add`); the server accepts only these. */
 export const REACTIONS = ["❤️", "😂", "😮", "😭", "🔥"] as const;
+
+/** `pause:request` (member → host): at most one per member and room every 30 seconds. */
+export const PAUSE_REQUEST_COOLDOWN_MS = 30_000;
 
 /** `chat:delete`: one message (`id`), or every message of a deleted account (`userId`). */
 export type ChatDeleted = { id?: string; userId?: string };

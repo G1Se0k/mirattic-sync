@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ApiError, connectSocket, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
   ChatDeleted,
@@ -13,14 +13,13 @@ import type {
   UserSummary,
 } from "@mirattic/types";
 import { api, platform, SOCKET_URL } from "./session";
-import { DeleteAccount, Privacy } from "./Privacy";
 import { ReportDialog } from "./Report";
-import { ExperimentalSettings } from "./Experimental";
 import { Room } from "./Room";
+import { Settings } from "./Settings";
+import { localRoom } from "./localRoom";
 import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
-
-/** Shared when the app sees nothing being watched (desktop, or no YouTube tab): a fake video. */
+import { Avatar, IconButton } from "./Icons";
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
 
@@ -29,7 +28,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [requests, setRequests] = useState<FriendRequests>({ incoming: [], outgoing: [] });
   const [blocked, setBlocked] = useState<UserSummary[]>([]);
   const [rooms, setRooms] = useState<RoomView[]>([]);
-  const [openRoom, setOpenRoom] = useState<string | null>(null);
+  // The extension may still be in a room from before the panel was closed: back into it.
+  const [openRoom, setOpenRoom] = useState<string | null>(() => platform.activeRoom?.() ?? null);
+  const [screen, setScreen] = useState<"home" | "settings">("home");
+  const [adding, setAdding] = useState(false);
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -38,6 +40,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [reporting, setReporting] = useState<UserSummary | null>(null);
   const listeners = useRef(new Set<(event: ServerEvent) => void>());
   const watching = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatching ?? nothing);
+  const activeRoom = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.activeRoom ?? nothing);
   // Read by the socket handler, which outlives renders.
   const current = useRef({ rooms, openRoom });
   current.current = { rooms, openRoom };
@@ -104,15 +107,13 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   }, [onSignedOut, applyRooms]);
 
   useEffect(() => {
-    const socket = connectSocket({
-      url: SOCKET_URL,
-      getTicket: api.wsTicket,
-      onStatus: (s) => {
+    const handlers = {
+      onStatus: (s: SocketStatus) => {
         setStatus(s);
         platform.connected?.(s === "open" ? socket : null);
         if (s === "open") void reload(); // catch up on anything missed while disconnected
       },
-      onEvent: (event) => {
+      onEvent: (event: ServerEvent) => {
         listeners.current.forEach((l) => l(event));
         if (event.type === "room:update" && typeof (event.payload as { muted?: unknown } | null)?.muted === "boolean") {
           // Muted from another app of mine: applied now, so no message notifies by the old setting meanwhile.
@@ -157,7 +158,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           setFriends((list) => list.map((f) => (f.user.id === event.userId ? { ...f, presence } : f)));
         }
       },
-    });
+    };
+    // The extension's background owns the socket (it outlives the side panel); otherwise the screen opens one.
+    const socket: Socket = platform.connect?.(handlers)
+      ?? connectSocket({ url: SOCKET_URL, getTicket: api.wsTicket, ...handlers });
     setSocket(socket);
     return () => {
       clearTimeout(refetchRooms.current);
@@ -176,6 +180,13 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     }
     await reload();
   };
+
+  /** Leaving (or closing, as the host) from the list; the extension stops syncing it if it is the active one. */
+  async function leaveRoom(id: string) {
+    if (!confirm(rooms.find((r) => r.id === id)?.members.some((m) => m.user.id === me.id && m.role === "HOST")
+      ? "방을 닫을까요? 모든 멤버가 나가게 됩니다." : "방에서 나갈까요?")) return;
+    await act(() => api.leaveRoom(id))();
+  }
 
   /** Opening a room reads its chat (the server marks it on `room:join`). */
   function enter(id: string) {
@@ -211,25 +222,38 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     }
   }
 
-  const requestBanner = watchRequests.length > 0 && (
-    <div className="container banner">
-      {watchRequests.map((u) => (
-        <div key={u.id} className="row">
-          <span className="grow">{u.displayName}님이 같이 보자고 합니다</span>
-          <button onClick={() => void watchTogether(u)}>같이 보기</button>
-          <button className="link" onClick={() => setWatchRequests((list) => list.filter((x) => x.id !== u.id))}>무시</button>
-        </div>
-      ))}
-    </div>
-  );
+  // The room screen's live side: the extension's background runs it (and keeps it when the panel closes);
+  // otherwise it runs here and leaves with the screen.
+  const local = useRef<ReturnType<typeof localRoom> | null>(null);
+  const handle = useMemo(() => {
+    if (!openRoom || !socket) return null;
+    if (platform.room) return platform.room(openRoom);
+    return (local.current = localRoom(openRoom, me.id, socket, subscribe));
+  }, [openRoom, socket, me.id, subscribe]);
+  useEffect(() => {
+    if (!handle) return;
+    handle.show();
+    return () => handle.close();
+  }, [handle]);
+  useEffect(() => local.current?.setConnected(status === "open"), [handle, status]);
 
-  if (openRoom && socket) {
+  const requestBanner = watchRequests.map((u) => (
+    <div key={u.id} className="banner">
+      <Avatar name={u.displayName} />
+      <span className="grow">{u.displayName}님이 같이 보자고 합니다</span>
+      <button onClick={() => void watchTogether(u)}>같이 보기</button>
+      <IconButton icon="close" label="무시" onClick={() => setWatchRequests((list) => list.filter((x) => x.id !== u.id))} />
+    </div>
+  ));
+
+  if (openRoom && socket && handle) {
     return (
       <div className="room-page">
         {requestBanner}
-        {error && <div className="container"><p className="error" role="alert">{error}</p></div>}
+        {error && <div className="banner"><p className="error grow" role="alert">{error}</p></div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
-        <Room key={openRoom} roomId={openRoom} me={me} socket={socket} status={status} subscribe={subscribe} onClose={closeRoom}
+        <Room key={openRoom} roomId={openRoom} me={me} handle={handle} socket={socket} status={status} subscribe={subscribe}
+          onClose={closeRoom}
           onMuted={(muted) => {
             // A list read before the change would bring the old setting back: updateRooms drops it.
             updateRooms((list) => list.map((r) => (r.id === openRoom ? { ...r, muted } : r)));
@@ -238,149 +262,152 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     );
   }
 
+  if (screen === "settings") {
+    return (
+      <Settings me={me} blocked={blocked} onMeChange={onMeChange} onUnblock={(id) => void act(() => api.unblock(id))()}
+        onSignedOut={onSignedOut} onClose={() => setScreen("home")} />
+    );
+  }
+
   return (
-    <main className="container">
-      <header className="row between">
-        <h1>Friends</h1>
-        <div className="row">
-          <span className={`dot ${status === "open" ? "on" : ""}`} title={status} />
-          <span className="muted">{me.displayName}</span>
-          <button className="link" onClick={onSignedOut}>로그아웃</button>
-        </div>
+    <>
+      <header className="topbar">
+        <span className="wordmark grow">Mirattic <span>Sync</span></span>
+        <span className={`dot ${status === "open" ? "on" : ""}`} title={status === "open" ? "연결됨" : "연결 중"} />
+        <IconButton icon="settings" label="설정" onClick={() => setScreen("settings")} />
       </header>
       {requestBanner}
-      {error && <p className="error" role="alert">{error}</p>}
-      {notice && <p className="muted">{notice}</p>}
-      <p className="muted">
-        {watching ? `지금 보는 영상: ${watching.title} · "같이 보기"로 공유` : "같이 볼 영상(YouTube · Netflix · Laftel)을 열면 \"같이 보기\"로 공유할 수 있습니다"}
-      </p>
+      <main className="container">
+        {error && <p className="error" role="alert">{error}</p>}
+        {notice && <p className="muted">{notice}</p>}
+        <div className="card">
+          {watching ? (
+            <>
+              <div className="muted">지금 보는 영상 · {PROVIDER_NAMES[watching.provider]}</div>
+              <div className="ellipsis"><strong>{watching.title}</strong></div>
+            </>
+          ) : (
+            <div className="muted">YouTube · Netflix · Laftel 영상을 열면 친구와 같이 볼 수 있습니다.</div>
+          )}
+        </div>
 
-      <section>
-        {sorted.length === 0 && <p className="muted">아직 친구가 없습니다.</p>}
-        <ul className="list">
-          {sorted.map((f) => (
-            <li key={f.user.id} className="friend">
-              <span className={`dot ${f.presence.status !== "OFFLINE" ? "on" : ""}`} />
-              <div className="grow">
-                <strong>{f.user.displayName}</strong>
-                <div className="muted">{describe(f.presence)}</div>
-              </div>
-              {f.presence.status === "WATCHING" && (
-                <button onClick={() => void requestWatch(f.user)} title="친구가 보는 영상으로 같이 보자고 요청합니다">합류 요청</button>
-              )}
-              <button onClick={() => void watchTogether(f.user)} title="내 방에 초대합니다">같이 보기</button>
-              <button className="link" onClick={act(() => api.removeFriend(f.user.id))}>삭제</button>
-              <button className="link" onClick={() => setReporting(f.user)}>신고</button>
-              <button className="link danger" onClick={act(() => api.block(f.user.id))}>차단</button>
-            </li>
-          ))}
-        </ul>
-        {reporting && (
-          <ReportDialog target={{ userId: reporting.id }} user={{ id: reporting.id, name: reporting.displayName }}
-            onClose={() => { setReporting(null); void reload(); }} />
-        )}
-      </section>
-
-      {(requests.incoming.length > 0 || requests.outgoing.length > 0) && (
-        <section>
-          <h2>친구 요청</h2>
-          <ul className="list">
-            {requests.incoming.map((r) => (
-              <li key={r.id} className="friend">
-                <span className="grow">{r.user.displayName}</span>
-                <button onClick={act(() => api.acceptFriendRequest(r.id))}>수락</button>
-                <button className="link" onClick={act(() => api.deleteFriendRequest(r.id))}>거절</button>
-              </li>
-            ))}
-            {requests.outgoing.map((r) => (
-              <li key={r.id} className="friend">
-                <span className="grow">{r.user.displayName} <span className="muted">· 대기 중</span></span>
-                <button className="link" onClick={act(() => api.deleteFriendRequest(r.id))}>취소</button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {rooms.length > 0 && (
-        <section>
-          <h2>방</h2>
-          <ul className="list">
-            {rooms.map((r) => {
-              const host = r.members.find((m) => m.role === "HOST");
-              const mine = host?.user.id === me.id;
-              return (
-                <li key={r.id} className="friend">
-                  <div className="grow">
-                    <strong>{r.content.title}</strong>
-                    {r.unread > 0 && (
-                      <span className={`badge ${r.muted ? "quiet" : ""}`} title="읽지 않은 메시지">{r.unread > 99 ? "99+" : r.unread}</span>
-                    )}
-                    {r.muted && <span className="muted" title="채팅 알림 꺼짐"> 🔕</span>}
-                    <div className="muted">
-                      {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.filter((m) => m.present).length}명 참가 중
+        {rooms.length > 0 && (
+          <section>
+            <h2>방</h2>
+            <ul className="list">
+              {rooms.map((r) => {
+                const host = r.members.find((m) => m.role === "HOST");
+                const mine = host?.user.id === me.id;
+                return (
+                  <li key={r.id} className={`friend${r.id === activeRoom ? " card active" : ""}`}>
+                    <div className="grow">
+                      <div className="ellipsis">
+                        <span className="name">{r.content.title}</span>
+                        {r.unread > 0 && (
+                          <span className={`badge ${r.muted ? "quiet" : ""}`} title="읽지 않은 메시지">{r.unread > 99 ? "99+" : r.unread}</span>
+                        )}
+                      </div>
+                      <div className="muted">
+                        {r.id === activeRoom ? "참여 중 · " : ""}
+                        {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.filter((m) => m.present).length}명
+                        {r.muted && " · 알림 꺼짐"}
+                      </div>
                     </div>
-                  </div>
-                  <button onClick={() => enter(r.id)}>입장</button>
-                  <button className="link danger" onClick={act(() => api.leaveRoom(r.id))}>
-                    {mine ? "닫기" : "나가기"}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
+                    <button onClick={() => enter(r.id)}>입장</button>
+                    <IconButton icon="logout" tone="danger" label={mine ? "닫기" : "나가기"} onClick={() => void leaveRoom(r.id)} />
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
-      <MyFriendCode me={me} onMeChange={onMeChange} />
-      <AddFriend onSent={reload} />
-      <Privacy me={me} onChange={onMeChange} />
-      <ExperimentalSettings />
-
-      {blocked.length > 0 && (
         <section>
-          <h2>차단한 사용자</h2>
+          <div className="row between">
+            <h2>친구</h2>
+            <IconButton icon="userPlus" label="친구 추가" onClick={() => setAdding((a) => !a)} />
+          </div>
+          {adding && <AddFriend onSent={() => { setAdding(false); void reload(); }} />}
+          {sorted.length === 0 && !adding && <p className="muted">아직 친구가 없습니다. 오른쪽 위 버튼으로 친구 코드를 입력하세요.</p>}
           <ul className="list">
-            {blocked.map((u) => (
-              <li key={u.id} className="friend">
-                <span className="grow">{u.displayName}</span>
-                <button className="link" onClick={act(() => api.unblock(u.id))}>차단 해제</button>
+            {sorted.map((f) => (
+              <li key={f.user.id} className="friend">
+                <Avatar name={f.user.displayName} on={f.presence.status !== "OFFLINE"} />
+                <div className="grow">
+                  <div className="name ellipsis">{f.user.displayName}</div>
+                  <div className="muted ellipsis">{describe(f.presence)}</div>
+                </div>
+                <span className="actions">
+                  {f.presence.status === "WATCHING" && (
+                    <IconButton icon="join" label="합류 요청" onClick={() => void requestWatch(f.user)} />
+                  )}
+                  <IconButton icon="watch" label="같이 보기" onClick={() => void watchTogether(f.user)} />
+                  <Menu label={`${f.user.displayName} 메뉴`} items={[
+                    { label: "친구 삭제", icon: "userMinus", run: act(() => api.removeFriend(f.user.id)) },
+                    { label: "신고", icon: "flag", run: () => setReporting(f.user) },
+                    { label: "차단", icon: "ban", danger: true, run: act(() => api.block(f.user.id)) },
+                  ]} />
+                </span>
               </li>
             ))}
           </ul>
+          {reporting && (
+            <ReportDialog target={{ userId: reporting.id }} user={{ id: reporting.id, name: reporting.displayName }}
+              onClose={() => { setReporting(null); void reload(); }} />
+          )}
         </section>
-      )}
 
-      <DeleteAccount onDeleted={onSignedOut} />
-    </main>
+        {(requests.incoming.length > 0 || requests.outgoing.length > 0) && (
+          <section>
+            <h2>친구 요청</h2>
+            <ul className="list">
+              {requests.incoming.map((r) => (
+                <li key={r.id} className="friend">
+                  <Avatar name={r.user.displayName} />
+                  <span className="grow name">{r.user.displayName}</span>
+                  <IconButton icon="check" tone="primary" label="수락" onClick={act(() => api.acceptFriendRequest(r.id))} />
+                  <IconButton icon="close" label="거절" onClick={act(() => api.deleteFriendRequest(r.id))} />
+                </li>
+              ))}
+              {requests.outgoing.map((r) => (
+                <li key={r.id} className="friend">
+                  <Avatar name={r.user.displayName} />
+                  <span className="grow"><span className="name">{r.user.displayName}</span> <span className="muted">· 대기 중</span></span>
+                  <IconButton icon="close" label="취소" onClick={act(() => api.deleteFriendRequest(r.id))} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </main>
+    </>
   );
 }
 
-function MyFriendCode({ me, onMeChange }: { me: Me; onMeChange: (me: Me) => void }) {
-  const [copied, setCopied] = useState(false);
-  const code = formatCode(me.friendCode);
+type MenuItem = { label: string; icon: Parameters<typeof IconButton>[0]["icon"]; danger?: boolean; run: () => void };
 
-  async function copy() {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
-  async function regenerate() {
-    if (!confirm("새 코드를 발급하면 지금 코드로는 더 이상 친구 요청을 받을 수 없습니다. 계속할까요?")) return;
-    await api.regenerateFriendCode().then(onMeChange, () => {});
-  }
-
+/** A "⋯" button with a small list of less common actions. */
+function Menu({ label, items }: { label: string; items: MenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open]);
   return (
-    <section>
-      <h2>내 친구 코드</h2>
-      <div className="row">
-        <code className="code grow">{code}</code>
-        <button onClick={copy}>{copied ? "복사됨" : "복사"}</button>
-        <button className="link" onClick={regenerate}>새로 발급</button>
-      </div>
-      <p className="muted">친구에게 이 코드를 알려주면 친구 요청을 받을 수 있습니다.</p>
-    </section>
+    <span className="menu">
+      <IconButton icon="more" label={label} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} />
+      {open && (
+        <div className="menu-items" role="menu">
+          {items.map((i) => (
+            <button key={i.label} role="menuitem" className={i.danger ? "danger" : undefined} onClick={() => { setOpen(false); i.run(); }}>
+              {i.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -407,15 +434,14 @@ function AddFriend({ onSent }: { onSent: () => void }) {
   }
 
   return (
-    <section>
-      <h2>친구 추가</h2>
+    <div className="stack">
       <form className="row" onSubmit={submit}>
-        <input className="grow code" placeholder="친구 코드 (예: K7QM-4XPR)" required maxLength={16}
+        <input className="grow code" placeholder="친구 코드 (예: K7QM-4XPR)" required maxLength={16} autoFocus
           autoCapitalize="characters" spellCheck={false} value={code} onChange={(e) => setCode(e.target.value)} />
         <button type="submit">요청</button>
       </form>
       {note && <p className="muted">{note}</p>}
-    </section>
+    </div>
   );
 }
 
@@ -461,9 +487,6 @@ export function settleUnlisted(pending: ChatMessage[], rooms: RoomView[], openRo
 const noSubscribe = () => () => {};
 const nothing = () => null;
 
-function formatCode(code: string) {
-  return `${code.slice(0, 4)}-${code.slice(4)}`;
-}
 
 
 function describe(p: PresenceView) {

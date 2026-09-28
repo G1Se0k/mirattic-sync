@@ -7,10 +7,6 @@ export default defineContentScript({
   matches: ['https://laftel.net/*'],
   registration: 'runtime',
   main() {
-    // Injected again on every rebind; one listener per page is enough.
-    const g = globalThis as { miratticLaftel?: true };
-    if (g.miratticLaftel) return;
-    g.miratticLaftel = true;
     serveAdapter(() => new LaftelAdapter());
   },
 });

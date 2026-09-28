@@ -37,7 +37,8 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
     const poll = setInterval(() => {
       // series: a playlist joined mid-video; the video's state: a next episode whose events we missed
       const video = this.video();
-      const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}|${video ? video.paused : 'none'}`;
+      // …and the title (Netflix's appears only once its player line has been shown)
+      const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}|${video ? video.paused : 'none'}|${this.title()}`;
       if (key !== last) {
         last = key;
         this.emit();

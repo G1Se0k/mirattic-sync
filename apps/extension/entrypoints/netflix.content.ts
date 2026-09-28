@@ -7,10 +7,6 @@ export default defineContentScript({
   matches: ['https://www.netflix.com/*'],
   registration: 'runtime',
   main() {
-    // Injected again on every rebind; one listener per page is enough.
-    const g = globalThis as { miratticNetflix?: true };
-    if (g.miratticNetflix) return;
-    g.miratticNetflix = true;
     serveAdapter(() => new NetflixAdapter());
   },
 });

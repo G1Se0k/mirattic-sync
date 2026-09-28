@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { openUrl, sameSeries, type Me, type MediaProviderAdapter, type PlaybackState, type PlayerSnapshot, type RoomContent, type RoomView, type ServerEvent } from "@mirattic/types";
-import { MockMediaProvider, publishHost, ServerClock, SyncFollower, type FollowerStatus } from "@mirattic/sync-core";
-import { api, platform } from "./session";
-import { clock, latest as latestOnly, PROVIDER_NAMES } from "./format";
+import { openUrl, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
+import type { FollowerStatus, RoomSyncState } from "@mirattic/sync-core";
+import { api, platform, type RoomHandle } from "./session";
+import { clock, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
 import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
+import { Avatar, IconButton } from "./Icons";
 
 /** "room|provider" already asked about in this session: the dialog comes up once per room and provider, not on every entry. */
 const askedExperiment = new Set<string>();
@@ -14,46 +15,37 @@ const askedExperiment = new Set<string>();
 type Props = {
   roomId: string;
   me: Me;
+  handle: RoomHandle;
   socket: Socket;
   status: SocketStatus;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
+  /** Back to the list; the extension stays in the room. */
   onClose: () => void;
   /** The room list decides notifications with it: tell it at once, not at its next refetch. */
   onMuted: (muted: boolean) => void;
 };
 
-const CLOCK_SAMPLES = 5;
-
 /**
- * Room screen: the host's player drives everyone else's. A mock room plays a fake video right here;
- * other providers play in the user's own provider page, driven through `platform.adapter`.
+ * Room screen: a view of the room's live side (`RoomHandle`). The host's player drives everyone else's; players
+ * are the user's own provider pages, driven by the extension.
  */
-export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }: Props) {
-  const [room, setRoom] = useState<RoomView | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [clockReady, setClockReady] = useState(false);
-  const [sync, setSync] = useState<FollowerStatus | null>(null);
-  const [lastCorrection, setLastCorrection] = useState<number | null>(null);
-  const [, tick] = useState(0);
+export function Room({ roomId, me, handle, socket, status, subscribe, onClose, onMuted }: Props) {
+  const s = useSyncExternalStore(handle.subscribe, handle.state);
   const [reporting, setReporting] = useState<{ id: string; name: string } | null>(null);
-  const serverClock = useMemo(() => new ServerClock(), []);
-  const latest = useRef<PlaybackState | null>(null);
-  const follower = useRef<SyncFollower | null>(null);
-  const sentAt = useRef(new Map<string, number>());
-
+  const [askingPause, setAskingPause] = useState(false);
+  const room = s.room;
   const content = room?.content;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
-  const mock = content?.provider === "mock";
   const experiment = isExperiment(content?.provider) ? content.provider : undefined;
   const experimentOn = useExperiment(experiment);
-  const player: MediaProviderAdapter | undefined = useMemo(
-    () =>
-      !content ? undefined
-        : mock ? new MockMediaProvider({ contentId: content.contentId, title: content.title, durationMs: content.durationMs ?? 600_000 })
-        : platform.adapter?.(content.provider),
-    [content?.provider, mock && content?.contentId, experimentOn],
-  );
+
+  // Closed, or no longer a member: back to the list, without a notice.
+  useEffect(() => {
+    if (!s.closed) return;
+    handle.exit();
+    onClose();
+  }, [s.closed, handle, onClose]);
+
   // Which provider the dialog asks about: the room may switch to another provider while it is open.
   const [asking, setAsking] = useState<Experiment | null>(null);
   useEffect(() => {
@@ -62,163 +54,15 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
     askedExperiment.add(key);
     setAsking(experiment);
   }, [experiment, experimentOn, roomId]);
-  // The content the host last announced. Set from the room only when the room's content changes, so a
-  // render between announcing and the room refetch can't make the host announce (and reset) it twice.
-  const announced = useRef<RoomContent | null>(null);
-  useEffect(() => {
-    announced.current = content ?? null;
-  }, [content?.provider, content?.contentId, content?.series]);
-  const [snapshot, setSnapshot] = useState<PlayerSnapshot | null>(null);
 
-  // A member whose host moved to another video: the next one of the same series (playlist, show) opens by
-  // itself; anything else is asked (plan.md decision 67). Not on entering the room, nor if it is already open.
-  const [switched, setSwitched] = useState<RoomContent | null>(null);
-  const shown = useRef<RoomContent | null>(null);
-  useEffect(() => {
-    const before = shown.current;
-    shown.current = content ?? null;
-    if (!content || !before || isHost || mock || !player) return;
-    if (before.provider === content.provider && before.contentId === content.contentId) return;
-    const url = openUrl(content);
-    if (!url) return;
-    let current = true; // the room may move on again before the tab answers
-    void player.getSnapshot().then((s) => {
-      if (!current || s?.contentId === content.contentId) return;
-      if (sameSeries(before, content)) platform.open(url);
-      else setSwitched(content);
-    });
-    return () => void (current = false);
-  }, [content?.provider, content?.contentId]);
-  // The same video joining a playlist mid-way: remember its series without asking anything.
-  useEffect(() => {
-    const before = shown.current;
-    if (content && before?.provider === content.provider && before.contentId === content.contentId) shown.current = content;
-  }, [content?.series]);
-
-  // Loads answer in any order: only the latest started one applies, and a newer local change (mute) drops those in flight.
-  const roomLoads = useMemo(() => latestOnly(), []);
-  const setMuted = (muted: boolean) => {
-    roomLoads.invalidate();
-    setRoom((r) => r && { ...r, muted });
-  };
-  useEffect(() => {
-    const load = () => {
-      const fresh = roomLoads.begin();
-      return api.room(roomId).then(
-        (r) => {
-          if (!fresh()) return;
-          setRoom(r);
-          setLoadFailed(false);
-        },
-        (e) => {
-          if (!fresh()) return;
-          if (e instanceof ApiError && e.status === 404) onClose(); // closed or no longer a member: back to the list
-          else setLoadFailed(true);
-        },
-      );
-    };
-    void load();
-    return subscribe((event) => {
-      if (event.roomId && event.roomId !== roomId) return;
-      if (event.type === "room:update") {
-        // Muted from another app of mine: the value comes along, applied before the refetch returns.
-        const muted = (event.payload as { muted?: unknown } | null)?.muted;
-        if (typeof muted === "boolean") setMuted(muted);
-        void load();
-      }
-      if (event.type === "playback:update") {
-        const state = event.payload as PlaybackState;
-        if (state.version > (latest.current?.version ?? -1)) latest.current = state;
-        follower.current?.apply(state);
-      }
-      if (event.type === "sync:response") {
-        const reqId = (event.payload as { reqId: string }).reqId;
-        const at = sentAt.current.get(reqId);
-        if (at === undefined) return;
-        sentAt.current.delete(reqId);
-        serverClock.addSample(at, event.serverTime);
-        setClockReady(true);
-      }
-    });
-  }, [roomId, subscribe, onClose, serverClock, attempt, roomLoads]);
-
-  // (Re)join and re-measure the clock on every (re)connect: the server forgets joins on disconnect.
-  useEffect(() => {
-    if (status !== "open") return;
-    socket.send({ type: "room:join", roomId, payload: {} });
-    const timers = Array.from({ length: CLOCK_SAMPLES }, (_, i) =>
-      setTimeout(() => {
-        const reqId = `clock-${Date.now()}-${i}`;
-        sentAt.current.set(reqId, Date.now());
-        socket.send({ type: "sync:request", reqId, payload: null });
-      }, i * 200),
-    );
-    return () => {
-      timers.forEach(clearTimeout);
-      socket.send({ type: "room:leave", roomId, payload: {} });
-    };
-  }, [status, socket, roomId]);
-
-  // Host publishes local changes; members follow the room state.
-  const connected = status === "open";
-  useEffect(() => {
-    if (!player || !room || !clockReady) return;
-    if (isHost) {
-      // Changes made offline would be lost; restarting on reconnect republishes the current state.
-      if (!connected) return;
-      return publishHost(player, serverClock, (type, payload, snapshot, gone) => {
-        // The video went away: pause the members on the content they are following, never on a new one.
-        if (gone) return snapshot.contentId === announced.current?.contentId && socket.send({ type, roomId, payload });
-        if (!mock) {
-          // The command is about `snapshot`'s video. Its metadata ("now watching") arrives with the change
-          // event; until then, skip — that event triggers another send.
-          const now = platform.nowWatching?.();
-          if (!now || now.contentId !== snapshot.contentId) return false;
-          // Also the same video joining a playlist (series): the server then keeps the playback as it is.
-          if (now.contentId !== announced.current?.contentId || now.series !== announced.current?.series) {
-            socket.send({ type: "playback:content-change", roomId, payload: now });
-            announced.current = now;
-          }
-        }
-        return socket.send({ type, roomId, payload });
-      });
-    }
-    const f = new SyncFollower({
-      adapter: player,
-      clock: serverClock,
-      onStatus: (s) => {
-        setSync(s);
-        if (s.kind === "corrected") setLastCorrection(Math.round(s.driftMs));
-      },
-    });
-    follower.current = f;
-    if (latest.current) f.apply(latest.current);
-    return () => {
-      f.stop();
-      follower.current = null;
-    };
-  }, [player, isHost, clockReady, room !== null, isHost && connected]);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      tick((n) => n + 1);
-      if (player && !mock) void player.getSnapshot().then(setSnapshot);
-    }, mock ? 250 : 1000);
-    return () => clearInterval(id);
-  }, [player, mock]);
-
-  if (!room) {
+  if (!room || !content) {
     return (
-      <main className="container">
-        {loadFailed ? (
-          <p className="row">
-            방을 불러오지 못했습니다.
-            <button className="link" onClick={() => setAttempt((n) => n + 1)}>다시 시도</button>
-            <button className="link" onClick={() => onClose()}>← 친구 목록</button>
-          </p>
-        ) : (
-          "방 불러오는 중…"
-        )}
+      <main className="room">
+        <header className="topbar">
+          <IconButton icon="back" label="친구 목록" onClick={onClose} />
+          <h1>{s.loadFailed ? "방을 불러오지 못했습니다" : "불러오는 중…"}</h1>
+          {s.loadFailed && <IconButton icon="refresh" label="다시 시도" onClick={() => handle.retry()} />}
+        </header>
       </main>
     );
   }
@@ -227,7 +71,7 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
     const muted = !room!.muted;
     try {
       await api.muteRoom(roomId, muted);
-      setMuted(muted);
+      handle.setMuted(muted);
       onMuted(muted);
     } catch {
       alert("알림 설정을 바꾸지 못했습니다. 다시 시도해 주세요.");
@@ -235,146 +79,149 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
   }
 
   async function leave() {
-    const message = isHost ? "방을 닫을까요? 모든 멤버가 나가게 됩니다." : "방에서 나갈까요?";
-    if (!confirm(message)) return;
+    if (!confirm(isHost ? "방을 닫을까요? 모든 멤버가 나가게 됩니다." : "방에서 나갈까요?")) return;
     try {
       await api.leaveRoom(roomId);
     } catch (e) {
       // 404: already gone. Anything else: the room may still be open, so stay and let the user retry.
       if (!(e instanceof ApiError && e.status === 404)) return alert("방을 나가지 못했습니다. 다시 시도해 주세요.");
     }
+    handle.exit();
     onClose();
   }
 
+  const position = async () => {
+    const snap = handle.state().snapshot;
+    if (!snap || snap.adPlaying || snap.contentId !== content.contentId) return undefined;
+    return Math.round(snap.positionMs + (snap.playing ? Date.now() - snap.capturedAt : 0));
+  };
+
   return (
-    <main className="container room">
-      <header className="row between">
-        <button className="link" onClick={() => onClose()}>← 친구 목록</button>
-        <div className="row">
-          <button className="link" onClick={() => void toggleMute()} title="다른 화면에 있을 때 이 방의 새 메시지 알림">
-            {room.muted ? "🔕 채팅 알림 켜기" : "🔔 채팅 알림 끄기"}
-          </button>
-          <button className="link danger" onClick={leave}>{isHost ? "방 닫기" : "방 나가기"}</button>
-        </div>
+    <main className="room">
+      <header className="topbar">
+        <IconButton icon="back" label="친구 목록" onClick={onClose} />
+        <h1 title={content.title}>{content.title}</h1>
+        <IconButton icon={room.muted ? "bellOff" : "bell"} label={room.muted ? "채팅 알림 켜기" : "채팅 알림 끄기"}
+          onClick={() => void toggleMute()} />
+        <IconButton icon="logout" tone="danger" label={isHost ? "방 닫기" : "방 나가기"} onClick={() => void leave()} />
       </header>
-      <h1>{room.content.title}</h1>
+
+      <div className="room-body">
+        <div className="members">
+          {room.members.map((m) => (
+            <span key={m.user.id} className="member" title={m.role === "HOST" ? "호스트" : m.present ? "참가 중" : "초대됨"}>
+              <Avatar name={m.user.displayName} on={m.present} />
+              {m.user.displayName}
+              {m.user.id === me.id && <span className="muted">(나)</span>}
+              {m.role === "HOST" && <span className="muted">· 호스트</span>}
+              {m.user.id !== me.id && (
+                <IconButton icon="flag" label="신고" onClick={() => setReporting({ id: m.user.id, name: m.user.displayName })} />
+              )}
+            </span>
+          ))}
+        </div>
+        <PlayerStatus content={content} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
+          onRequestPause={() => setAskingPause(true)} />
+      </div>
+
+      <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
+        subscribe={subscribe} position={position} onSeek={isHost && s.canPlay ? (ms) => handle.seek(ms) : undefined} />
+
+      {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
       {asking && asking === experiment && (
         <dialog open className="stack">
           <h2>{PROVIDER_NAMES[experiment]} 제어 (실험)</h2>
           <ExperimentControl provider={experiment} onDone={() => setAsking(null)} />
         </dialog>
       )}
-      <ul className="list">
-        {room.members.map((m) => (
-          <li key={m.user.id} className="friend">
-            <span className={`dot ${m.present ? "on" : ""}`} />
-            <span className="grow">{m.user.displayName}{m.user.id === me.id && " (나)"}</span>
-            <span className="muted">{m.role === "HOST" ? "호스트" : m.present ? "참가 중" : "초대됨"}</span>
-            {m.user.id !== me.id && (
-              <button className="link small" onClick={() => setReporting({ id: m.user.id, name: m.user.displayName })}>신고</button>
-            )}
-          </li>
-        ))}
-      </ul>
-      {switched && switched.contentId === room.content.contentId && (
-        <dialog open className="stack">
-          <h2>호스트가 영상을 바꿨습니다</h2>
-          <p>{switched.title}</p>
+      {s.switched && s.switched.contentId === content.contentId && <Switched content={s.switched} handle={handle} />}
+      {askingPause && <RequestPause handle={handle} onClose={() => setAskingPause(false)} />}
+      {s.pauseRequest && isHost && (
+        <dialog open className="stack" role="alertdialog">
+          <h2>{s.pauseRequest.name}님이 일시정지를 요청했습니다</h2>
+          {s.pauseRequest.reason && <p>{s.pauseRequest.reason}</p>}
+          <p className="muted">30초 후에 자동으로 닫힙니다.</p>
           <div className="row">
-            <button onClick={() => { platform.open(openUrl(switched)!); setSwitched(null); }}>이 영상 열기</button>
-            <button className="link" onClick={() => setSwitched(null)}>나중에</button>
+            <button className="secondary" onClick={() => handle.dismissPauseRequest()}>닫기</button>
+            <button onClick={() => handle.pauseAll()}>모두 일시정지</button>
           </div>
         </dialog>
       )}
-      {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
-
-      {player instanceof MockMediaProvider ? (
-        <MockPlayer player={player} isHost={isHost} clockReady={clockReady} sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} />
-      ) : (
-        <ProviderPlayer content={room.content} snapshot={snapshot} canPlay={player !== undefined} isHost={isHost}
-          sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} experimentOff={!!experiment && experimentOn === false} />
-      )}
-      <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status} subscribe={subscribe}
-        position={async () => {
-          const s = await player?.getSnapshot();
-          return s && !s.adPlaying && s.contentId === room.content.contentId ? Math.round(s.positionMs) : undefined;
-        }}
-        onSeek={isHost && player && player.seekable !== false ? (ms) => void player.seek(ms) : undefined} />
     </main>
   );
 }
 
-type PlayerProps = { isHost: boolean; sync: string; lastCorrection: number | null };
-
-function MockPlayer({ player, isHost, clockReady, sync, lastCorrection }: PlayerProps & { player: MockMediaProvider; clockReady: boolean }) {
-  const position = player.positionMs();
-  const duration = player.content.durationMs;
-  const nudge = (ms: number) => () => void player.seek(player.positionMs() + ms);
+function Switched({ content, handle }: { content: RoomContent; handle: RoomHandle }) {
   return (
-      <section className="stack">
-        <h2>Mock 플레이어</h2>
-        <progress className="grow" max={duration} value={position} />
-        <div className="row between">
-          <span className="code">{clock(position)} / {clock(duration)}</span>
-          <span className="muted">{player.isPlaying() ? "재생 중" : "일시정지"}</span>
-        </div>
-        {isHost ? (
-          <div className="row">
-            <button onClick={() => void (player.isPlaying() ? player.pause() : player.play())} disabled={!clockReady}>
-              {player.isPlaying() ? "일시정지" : "재생"}
-            </button>
-            <button onClick={nudge(-10_000)} disabled={!clockReady}>-10초</button>
-            <button onClick={nudge(10_000)} disabled={!clockReady}>+10초</button>
-          </div>
-        ) : (
-          <>
-            <p className="muted">
-              {sync}
-              {lastCorrection !== null && ` · 마지막 보정 ${lastCorrection}ms`}
-            </p>
-            <div className="row">
-              <span className="muted">어긋나게 하기:</span>
-              <button className="link" onClick={nudge(800)}>+0.8초</button>
-              <button className="link" onClick={nudge(-2_000)}>-2초</button>
-              <button className="link" onClick={nudge(-5_000)}>-5초</button>
-            </div>
-          </>
-        )}
-      </section>
+    <dialog open className="stack">
+      <h2>호스트가 영상을 바꿨습니다</h2>
+      <p>{content.title}</p>
+      <div className="row">
+        <button className="secondary" onClick={() => handle.dismissSwitched()}>나중에</button>
+        <button onClick={() => handle.openSwitched()}>이 영상 열기</button>
+      </div>
+    </dialog>
   );
 }
 
-/** A real provider plays in the user's own page (e.g. a YouTube tab); this only shows where it stands. */
-function ProviderPlayer({ content, snapshot, canPlay, isHost, sync, lastCorrection, experimentOff }: PlayerProps & {
-  content: RoomContent;
-  snapshot: PlayerSnapshot | null;
-  canPlay: boolean;
-  experimentOff: boolean;
-}) {
-  const url = openUrl(content);
-  const here = snapshot?.contentId === content.contentId;
+/** Only the host pauses the room: a member asks, with an optional reason. */
+function RequestPause({ handle, onClose }: { handle: RoomHandle; onClose: () => void }) {
+  const [reason, setReason] = useState("");
   return (
-    <section className="stack">
-      <h2>{PROVIDER_NAMES[content.provider]}</h2>
-      {!canPlay && experimentOff ? (
-        <p className="muted">{PROVIDER_NAMES[content.provider]} 제어(실험)가 꺼져 있어 동기화하지 않습니다. 친구 목록 아래 "실험 기능"에서 켤 수 있습니다.</p>
-      ) : !canPlay ? (
-        <p className="muted">이 방은 Chrome 확장 프로그램의 side panel에서 함께 볼 수 있습니다.</p>
-      ) : here && snapshot ? (
-        <div className="row between">
-          <span className="code">{clock(snapshot.positionMs)}{snapshot.durationMs !== undefined && ` / ${clock(snapshot.durationMs)}`}</span>
-          <span className="muted">{snapshot.adPlaying ? "광고 중" : snapshot.playing ? "재생 중" : "일시정지"}</span>
-        </div>
-      ) : (
-        <p className="muted">{snapshot ? "탭에서 다른 영상을 보고 있습니다." : "영상이 열린 탭이 없습니다."}</p>
-      )}
-      {url && (!canPlay || !here) && (
-        <button onClick={() => platform.open(url)}>{PROVIDER_NAMES[content.provider]}에서 이 영상 열기</button>
-      )}
-      {canPlay && (
+    <dialog open className="stack">
+      <h2>일시정지 요청</h2>
+      <p className="muted">호스트에게 알림이 갑니다. 30초에 한 번 보낼 수 있습니다.</p>
+      <textarea placeholder="사유 (선택)" maxLength={200} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+      <div className="row">
+        <button className="secondary" onClick={onClose}>취소</button>
+        <button onClick={() => { handle.requestPause(reason); onClose(); }}>요청 보내기</button>
+      </div>
+    </dialog>
+  );
+}
+
+/** A provider plays in the user's own page (e.g. a YouTube tab); this only shows where it stands. */
+function PlayerStatus({ content, s, isHost, experimentOff, onRequestPause }: {
+  content: RoomContent;
+  s: RoomSyncState;
+  isHost: boolean;
+  experimentOff: boolean;
+  onRequestPause: () => void;
+}) {
+  const name = PROVIDER_NAMES[content.provider];
+  const url = openUrl(content);
+  const snapshot = s.snapshot;
+  const here = snapshot?.contentId === content.contentId;
+  const cooldown = Math.ceil((s.pauseCooldownUntil - Date.now()) / 1000);
+  // Offered only once the player has been away from the room's video for a moment: never while entering
+  // the room or while the tab is still moving to the next episode.
+  const offerOpen = !!url && (!s.canPlay || s.away);
+  return (
+    <section className="card stack">
+      <div className="player">
+        <span className="pill">{name}</span>
+        {!s.canPlay && experimentOff ? (
+          <span className="muted grow">{name} 제어(실험)가 꺼져 있어 동기화하지 않습니다. 설정에서 켤 수 있습니다.</span>
+        ) : !s.canPlay ? (
+          <span className="muted grow">Chrome 확장 프로그램에서 함께 볼 수 있습니다.</span>
+        ) : here && snapshot ? (
+          <>
+            <span className="time grow">{clock(snapshot.positionMs)}{snapshot.durationMs !== undefined && ` / ${clock(snapshot.durationMs)}`}</span>
+            <span className="muted">{snapshot.adPlaying ? "광고 중" : snapshot.playing ? "재생 중" : "일시정지"}</span>
+          </>
+        ) : !s.away ? (
+          <span className="muted grow">영상 확인 중…</span>
+        ) : (
+          <span className="muted grow">{snapshot ? "탭에서 다른 영상을 보고 있습니다." : "영상이 열린 탭이 없습니다."}</span>
+        )}
+        {offerOpen && <IconButton icon="external" label={`${name}에서 이 영상 열기`} onClick={() => platform.open(url!)} />}
+        {!isHost && <IconButton icon="pause" label="일시정지 요청" disabled={cooldown > 0} onClick={onRequestPause} />}
+      </div>
+      {s.canPlay && (
         <p className="muted">
-          {isHost ? "탭에서 직접 재생·일시정지·이동하면 멤버에게 전달됩니다. 다른 영상으로 옮기면 방도 따라갑니다." : sync}
-          {!isHost && lastCorrection !== null && ` · 마지막 보정 ${lastCorrection}ms`}
+          {isHost ? "탭에서 재생·일시정지·이동하면 멤버에게 전달됩니다." : describeSync(s.sync, s.clockReady)}
+          {!isHost && s.lastCorrection !== null && ` · 마지막 보정 ${s.lastCorrection}ms`}
+          {!isHost && cooldown > 0 && ` · 일시정지 요청은 ${cooldown}초 후에 다시 보낼 수 있습니다`}
         </p>
       )}
     </section>

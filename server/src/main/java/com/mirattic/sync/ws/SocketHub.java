@@ -121,6 +121,25 @@ public class SocketHub {
 		return (T) result[0];
 	}
 
+	/**
+	 * Runs `close` only if no connection is in the room, under the room's entry lock — the one `joinRoom` takes, so
+	 * a join can't slip in between the check and the close (it then finds the room gone). ponytail: holds the
+	 * entry lock across one DB write, like joinRoom across one read.
+	 */
+	<T> T closeIfEmpty(String roomId, Supplier<T> close, T otherwise) {
+		Object[] result = {otherwise};
+		rooms.compute(roomId, (k, set) -> {
+			if (set != null && !set.isEmpty()) {
+				return set;
+			}
+			result[0] = close.get();
+			return null;
+		});
+		@SuppressWarnings("unchecked")
+		T out = (T) result[0];
+		return out;
+	}
+
 	void leaveRoom(String roomId, WebSocketSession session) {
 		rooms.computeIfPresent(roomId, (k, set) -> {
 			set.remove(session);

@@ -59,6 +59,41 @@ describe("estimatePosition / classifyDrift", () => {
 });
 
 describe("SyncFollower", () => {
+  it("undoes a member's own pause: only the host pauses the room", async () => {
+    const m = member();
+    m.follower.apply(state({ playing: true, capturedAt: Date.now() }));
+    await settle();
+    await m.player.pause();
+    await settle();
+    expect(m.player.isPlaying()).toBe(true);
+  });
+
+  it("tries play again when the player didn't take it (autoplay refused), even with no drift", async () => {
+    const m = member();
+    let refuse = true;
+    const play = m.player.play.bind(m.player);
+    m.player.play = async () => (refuse ? undefined : play());
+    m.follower.apply(state({ playing: true, positionMs: 0, capturedAt: Date.now() }));
+    await settle();
+    expect(m.player.isPlaying()).toBe(false);
+    refuse = false; // the user clicked the page once, say
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(m.player.isPlaying()).toBe(true);
+  });
+
+  it("keeps checking while there is no player yet", async () => {
+    const m = member();
+    const snapshot = m.player.getSnapshot.bind(m.player);
+    let ready = false;
+    (m.player as MediaProviderAdapter).getSnapshot = async () => (ready ? snapshot() : null);
+    m.follower.apply(state({ positionMs: 10_000, playing: true, capturedAt: Date.now() }));
+    await settle();
+    expect(m.statuses.at(-1)).toEqual({ kind: "waiting" });
+    ready = true; // the tab answers, without any event
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(m.player.isPlaying()).toBe(true);
+  });
+
   it("joins a playing room at the extrapolated position despite clock skew", async () => {
     const m = member();
     m.follower.apply(state({ positionMs: 10_000, playing: true, capturedAt: Date.now() - 1_000 }));

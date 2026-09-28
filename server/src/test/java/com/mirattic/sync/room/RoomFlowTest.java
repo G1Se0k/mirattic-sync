@@ -149,6 +149,89 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void roomsNobodyIsInCloseAfterTwoSweeps() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String empty = body(createRoom(host, friend)).path("id").asString();
+		String used = body(createRoom(friend, host)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", used, "{}"));
+		friendWs.nextOfType("playback:update");
+
+		emptyRooms.sweep(); // seen empty once: kept (a reconnect may be under way)
+		call(HttpMethod.GET, "/api/rooms/" + empty, host.accessToken(), null).andExpect(status().isOk());
+		emptyRooms.sweep(); // still nobody: closed, members told
+		call(HttpMethod.GET, "/api/rooms/" + empty, host.accessToken(), null).andExpect(status().isNotFound());
+		assertThat(friendWs.nextOfType("room:update")).isNotNull();
+		call(HttpMethod.GET, "/api/rooms/" + used, friend.accessToken(), null).andExpect(status().isOk());
+
+		// Someone back in time keeps it: empty at one sweep, joined before the next.
+		friendWs.send(event("room:leave", used, "{}"));
+		Thread.sleep(200);
+		emptyRooms.sweep();
+		friendWs.send(event("room:join", used, "{}"));
+		friendWs.nextOfType("playback:update");
+		emptyRooms.sweep();
+		call(HttpMethod.GET, "/api/rooms/" + used, friend.accessToken(), null).andExpect(status().isOk());
+	}
+
+	@Autowired
+	private com.mirattic.sync.ws.EmptyRooms emptyRooms;
+
+	@Test
+	void aMemberStillInTheRoomMarksWhatItSawAsRead() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		TestUser stranger = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		Client hostWs = connect(host);
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"while the panel was closed\"}"));
+		friendWs.nextOfType("chat:message");
+		assertThat(roomService.mine(friend.id()).get(0).unread()).isEqualTo(1); // joined, but not seen
+
+		friendWs.send(event("room:read", roomId, "{}"));
+		assertThat(friendWs.nextOfType("room:update")).isNotNull(); // my other apps refetch their counts
+		assertThat(roomService.mine(friend.id()).get(0).unread()).isZero();
+		Client strangerWs = connect(stranger);
+		strangerWs.send(event("room:read", roomId, "{}"));
+		assertThat(strangerWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_member");
+	}
+
+	@Test
+	void membersAskTheHostToPauseAtMostEveryThirtySeconds() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		TestUser stranger = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client hostWs = connect(host);
+		Client friendWs = connect(friend);
+		Client strangerWs = connect(stranger);
+
+		friendWs.send(event("pause:request", roomId, "{\"reason\":\" 화장실 \"}"));
+		JsonNode asked = hostWs.nextOfType("pause:request");
+		assertThat(asked.path("roomId").asString()).isEqualTo(roomId);
+		assertThat(asked.path("userId").asString()).isEqualTo(friend.id());
+		assertThat(asked.path("payload").path("reason").asString()).isEqualTo("화장실");
+
+		friendWs.send(event("pause:request", roomId, "{}"));
+		assertThat(friendWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("rate_limited");
+		assertThat(hostWs.nextOfType("pause:request")).isNull();
+
+		hostWs.send(event("pause:request", roomId, "{}"));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		strangerWs.send(event("pause:request", roomId, "{}"));
+		assertThat(strangerWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_member");
+		strangerWs.send(event("pause:request", roomId, "{\"reason\":\"%s\"}".formatted("x".repeat(201))));
+		assertThat(strangerWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+	}
+
+	@Test
 	void hostChangesContentAndMembersRestartOnIt() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
@@ -353,7 +436,7 @@ class RoomFlowTest extends IntegrationTest {
 		TestUser friend = signup();
 		befriend(host, friend);
 		String roomId = body(createRoom(host, friend)).path("id").asString();
-		String otherRoom = body(createRoom(host, friend)).path("id").asString();
+		String otherRoom = body(createRoom(friend, host)).path("id").asString(); // one room per host
 		// Saved in a burst: many share a millisecond, which the page boundary must not split badly.
 		for (int i = 0; i < 150; i++) {
 			chatMessages.save(new ChatMessage(roomId, host.id(), "m" + i, null, false));
@@ -492,10 +575,11 @@ class RoomFlowTest extends IntegrationTest {
 		TestUser friend = signup();
 		befriend(host, friend);
 		String hostsRoom = body(createRoom(host, friend)).path("id").asString();
-		String friendsRoom = body(createRoom(friend, host)).path("id").asString();
 		Client friendWs = connect(friend);
 		friendWs.send(event("room:join", hostsRoom, "{}"));
 		friendWs.nextOfType("playback:update");
+		// Created after joining the host's room, as a room of the friend's own.
+		String friendsRoom = body(createRoom(friend, host)).path("id").asString();
 		Client hostWs = connect(host);
 		hostWs.send(event("room:join", hostsRoom, "{}"));
 		hostWs.nextOfType("playback:update");

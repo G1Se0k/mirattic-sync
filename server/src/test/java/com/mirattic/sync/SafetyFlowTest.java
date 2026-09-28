@@ -33,7 +33,7 @@ class SafetyFlowTest extends IntegrationTest {
 		befriend(host, member);
 		befriend(host, other);
 		String roomId = room(host, member, other);
-		String elsewhere = room(host, member);
+		String elsewhere = room(member, host); // the member's own room (a host is in one room at a time)
 		Client memberWs = connect(member);
 		Client otherWs = connect(other);
 
@@ -52,8 +52,12 @@ class SafetyFlowTest extends IntegrationTest {
 		deleteMessage(host, roomId, otherSaid).andExpect(status().isNoContent()); // moderation
 		deleteMessage(host, roomId, otherSaid).andExpect(status().isNotFound());
 
-		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", member.accessToken(), null))
-				.findValuesAsString("text")).containsExactly("from the host");
+		// Deleted ones stay as placeholders with their text wiped.
+		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", member.accessToken(), null));
+		assertThat(history.findValuesAsString("text")).containsExactly("from the host", "", "");
+		assertThat(history.findValues("deleted")).extracting(JsonNode::asBoolean).containsExactly(false, true, true);
+		assertThat(jdbc.queryForObject("select count(*) from chat_messages where text in (?, ?)", Long.class,
+				"from a member", "from another member")).isZero();
 	}
 
 	@Test
