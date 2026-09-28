@@ -16,5 +16,8 @@ interface ChatMessageRepository extends JpaRepository<ChatMessage, String> {
 			order by m.createdAt desc, m.id desc""")
 	List<ChatMessage> findBefore(String roomId, long createdAt, String id, Limit limit);
 
-	long countByRoomIdAndUserIdNotAndReactionFalseAndCreatedAtGreaterThan(String roomId, String userId, long after);
+	long countByRoomIdAndUserIdNotAndReactionFalseAndSeqGreaterThan(String roomId, String userId, long seq);
+
+	@Query("select coalesce(max(m.seq), 0) from ChatMessage m where m.roomId = :roomId")
+	long lastSeq(String roomId);
 }

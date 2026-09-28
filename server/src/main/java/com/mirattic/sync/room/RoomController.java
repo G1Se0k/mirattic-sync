@@ -129,6 +129,10 @@ class RoomController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void mute(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody Mute body) {
 		rooms.mute(jwt.getSubject(), id, body.muted());
+		// After the commit, to my other apps (desktop / extension) only. The new value rides along, so they apply
+		// it before their refetch returns and no message notifies by the old setting meanwhile.
+		hub.sendEvent(jwt.getSubject(), new ServerEvent("room:update", id, null, null, System.currentTimeMillis(),
+				Map.of("muted", body.muted())));
 	}
 
 	/** Leave (or decline an invite). The host leaving closes the room; members then get 404 on refetch. */

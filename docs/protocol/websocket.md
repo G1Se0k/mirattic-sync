@@ -57,7 +57,7 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `room:leave` | C→S | `{}` | 이 연결만 방에서 빠짐 (멤버십은 유지). 멤버십 삭제는 REST. 멤버십을 확인하지 않음: 자기 연결만 빼는 멱등 동작이라 타인에게 영향·정보 노출이 없고, REST로 나간 뒤 화면 정리 때 보내는 `room:leave`가 오류가 되지 않게 하기 위함 |
 | `room:invite` | S→C | `RoomView` | 초대받은 사람에게 |
 | `watch:request` | S→C | `UserSummary` | 친구가 같이 보자고 요청함 (`POST /api/rooms/requests`). `userId` = 요청한 사람. 받은 사람은 초대(`POST /api/rooms` 또는 `/api/rooms/{id}/invites`)로 응답 |
-| `room:update` | S→C | 없음 | 참가 / 나감 / 방 닫힘 시 모든 멤버에게. 클라이언트는 `GET /api/rooms/{id}`로 다시 조회 (404면 닫힘) |
+| `room:update` | S→C | 없음, 또는 `{ muted }` | 참가 / 나감 / 방 닫힘 시 모든 멤버에게. 클라이언트는 `GET /api/rooms/{id}`로 다시 조회 (404면 닫힘). 채팅 알림 설정을 바꾸면 그 사용자의 연결에만 `{ muted }`를 담아 보냄 → 조회 응답 전에 바로 적용 |
 | `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt }` | HOST만 (`not_host`). `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회 |
 | `playback:content-change` | C→S | `RoomContent` | HOST만. 호스트 플레이어의 영상이 바뀌었을 때 다음 명령 전에 보냄. 방 콘텐츠를 바꾸고 0초·일시정지로 초기화, version 증가 → `playback:update` + `room:update`. YouTube는 contentId가 11자 영상 ID, Netflix는 1–12자리 숫자, Laftel은 `작품ID/에피소드ID`(각 1–10자리 숫자)여야 함 (`bad_payload`). playback 명령과 같은 초당 예산 |
 | `playback:update` | S→C | `PlaybackState` | 방에 참가한 연결 전부에게. envelope `version` = payload `version`, 방마다 1씩 증가 (DB 행 잠금으로 순서 보장) |
@@ -85,7 +85,7 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `reaction:add` | C→S | `{ emoji, mediaPositionMs? }` | `emoji`는 `❤️ 😂 😮 😭 🔥` 중 하나 (아니면 `bad_payload`). 멤버만, `chat:message`와 같은 초당 5회 한도 |
 | `chat:message` | S→C | `ChatMessage` `{ id, roomId, userId, text, mediaPositionMs?, reaction, createdAt }` | **방의 모든 멤버의 연결**에게 (참가하지 않은 멤버, 보낸 사람 포함). 리액션은 `reaction: true`, `text` = 이모지. envelope `userId` = 보낸 사람. 기록은 `GET /api/rooms/{id}/messages` |
 
-읽지 않은 수: 서버는 `room:join`, `room:leave`, 연결 끊김 때 그 멤버의 `last_read_at`을 지금으로 기록한다. `room:leave`·끊김은 기록한 뒤에 `room:update`를 보낸다.
+읽지 않은 수: 서버는 `room:join`, `room:leave`, 연결 끊김 때 그 멤버의 읽음 위치(`last_read_seq`)를 방의 마지막 메시지 순번으로 기록한다 (메시지 저장과 같은 방 행 잠금 아래). `room:leave`·끊김은 기록한 뒤에 `room:update`를 보낸다.
 
 타임스탬프(`mediaPositionMs`)를 누르면 호스트에게만 확인 창을 띄운 뒤 이동한다 (호스트의 이동이 방 전체에 전파됨). 멤버에게는 표시만.
 

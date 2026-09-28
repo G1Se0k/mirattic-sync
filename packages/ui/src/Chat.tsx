@@ -159,12 +159,15 @@ export function merge(a: ChatMessage[], b: ChatMessage[]) {
   return [...byId.values()].sort((x, y) => x.createdAt - y.createdAt || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
 }
 
-export type ReactionGroup = { id: string; emoji: string; positionMs?: number; userIds: string[] };
+export type ReactionGroup = { id: string; emoji: string; positionMs?: number; sentAt: number; userIds: string[] };
 
-/** Within this much of a run's first reaction, the same emoji joins it: "😂 ×4 · 24:32". */
+/**
+ * The same emoji joins a run ("😂 ×4 · 24:32") when sent within this much of the run's first reaction and
+ * at a video position within this much of it (the line shows one timestamp).
+ */
 const REACTION_RUN_MS = 10_000;
 
-/** Messages as shown: back-to-back reactions with the same emoji at about the same moment become one line. */
+/** Messages as shown: back-to-back reactions with the same emoji, sent together at about the same moment, become one line. */
 export function group(messages: ChatMessage[]): (ChatMessage | ReactionGroup)[] {
   const out: (ChatMessage | ReactionGroup)[] = [];
   for (const m of messages) {
@@ -174,8 +177,9 @@ export function group(messages: ChatMessage[]): (ChatMessage | ReactionGroup)[] 
     }
     const run = out[out.length - 1];
     const near = (a?: number, b?: number) => (a === undefined || b === undefined ? a === b : Math.abs(a - b) <= REACTION_RUN_MS);
-    if (run && "userIds" in run && run.emoji === m.text && near(run.positionMs, m.mediaPositionMs)) run.userIds.push(m.userId);
-    else out.push({ id: m.id, emoji: m.text, positionMs: m.mediaPositionMs, userIds: [m.userId] });
+    if (run && "userIds" in run && run.emoji === m.text && m.createdAt - run.sentAt <= REACTION_RUN_MS && near(run.positionMs, m.mediaPositionMs)) {
+      run.userIds.push(m.userId);
+    } else out.push({ id: m.id, emoji: m.text, positionMs: m.mediaPositionMs, sentAt: m.createdAt, userIds: [m.userId] });
   }
   return out;
 }

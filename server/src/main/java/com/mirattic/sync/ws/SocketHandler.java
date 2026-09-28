@@ -131,6 +131,7 @@ class SocketHandler extends TextWebSocketHandler {
 			case "room:join" -> {
 				PlaybackState state = hub.joinRoom(roomId, out(session), () -> rooms.join(me, roomId));
 				joined(session).add(roomId);
+				rooms.read(me, roomId); // outside joinRoom: never wait on the room row lock inside the hub's entry lock
 				hub.send(out(session), playbackEvent(roomId, state));
 				rooms.announce(roomId, rooms.memberIds(roomId));
 			}

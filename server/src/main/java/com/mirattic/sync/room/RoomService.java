@@ -188,20 +188,24 @@ public class RoomService {
 		return new Left(everyone, false);
 	}
 
-	/** For `room:join`: checks membership, marks the chat read and returns the state to start from. */
-	@Transactional
+	/** For `room:join`: checks membership and returns the state to start from. */
+	@Transactional(readOnly = true)
 	public PlaybackState join(String me, String roomId) {
-		requireMember(me, roomId).read(System.currentTimeMillis());
+		requireMember(me, roomId);
 		return rooms.findById(roomId).orElseThrow(RoomService::notFound).playback();
 	}
 
 	/**
-	 * Leaving the room live (`room:leave`, disconnect): what arrived while it was open has been seen.
-	 * Marked on the server, before the leave is announced, so a list refetched after it is already current.
+	 * Joining or leaving the room live (`room:join`, `room:leave`, disconnect): what arrived until now has been
+	 * seen. Marked on the server, before the change is announced, so a list refetched after it is already current.
 	 */
 	@Transactional
 	public void read(String me, String roomId) {
-		members.findByRoomIdAndUserId(roomId, me).ifPresent(m -> m.read(System.currentTimeMillis()));
+		// The room lock orders this against chat() inserts; taken first, before any read fixes the snapshot.
+		if (rooms.findForUpdate(roomId).isEmpty()) {
+			return;
+		}
+		members.findByRoomIdAndUserId(roomId, me).ifPresent(m -> m.read(messages.lastSeq(roomId)));
 	}
 
 	@Transactional
@@ -226,6 +230,8 @@ public class RoomService {
 	/** Any member may chat; the text is stored trimmed. A reaction's text must be one of {@link #REACTIONS}. */
 	@Transactional
 	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs, boolean reaction) {
+		// Under the room lock, so a read mark (read(), join()) sees every message inserted before it and none after.
+		rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		requireMember(me, roomId);
 		String trimmed = text == null ? "" : text.strip();
 		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)
@@ -319,8 +325,8 @@ public class RoomService {
 				.toList();
 		RoomMember self = list.stream().filter(m -> m.getUserId().equals(viewer)).findFirst().orElse(null);
 		long unread = self == null ? 0
-				: messages.countByRoomIdAndUserIdNotAndReactionFalseAndCreatedAtGreaterThan(room.getId(), viewer,
-						self.getLastReadAt());
+				: messages.countByRoomIdAndUserIdNotAndReactionFalseAndSeqGreaterThan(room.getId(), viewer,
+						self.getLastReadSeq());
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), unread,
 				self != null && self.isMuted());
 	}

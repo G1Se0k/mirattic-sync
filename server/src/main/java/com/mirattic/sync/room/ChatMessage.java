@@ -1,5 +1,6 @@
 package com.mirattic.sync.room;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
@@ -21,6 +22,9 @@ public class ChatMessage {
 	private String text;
 	private Long mediaPositionMs;
 	private boolean reaction;
+	/** Insert order (AUTO_INCREMENT), for read marks. */
+	@Column(insertable = false, updatable = false)
+	private long seq;
 	private long createdAt;
 
 	protected ChatMessage() {

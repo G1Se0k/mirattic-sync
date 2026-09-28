@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
-import type { RoomContent, RoomView } from "@mirattic/types";
-import { roomToInvite } from "./Home";
+import type { ChatMessage, RoomContent, RoomView } from "@mirattic/types";
+import { roomToInvite, settleUnlisted } from "./Home";
+import { latest } from "./format";
 
 const content = (provider: RoomContent["provider"], contentId: string): RoomContent => ({ provider, contentId, title: contentId });
 const room = (id: string, c: RoomContent, hostId: string): RoomView => ({
@@ -25,4 +26,35 @@ it("invites into my room showing what I watch, never one showing something else"
 it("without anything being watched (desktop), prefers the open room I host", () => {
   expect(roomToInvite(rooms, "me", "other-video", null)?.id).toBe("other-video");
   expect(roomToInvite(rooms, "me", "theirs", null)?.id).toBe("mock");
+});
+
+it("drops a room list that was requested before a newer load or a local count change", async () => {
+  const loads = latest();
+  let rooms = "start";
+  const load = (value: string, delay: number) => {
+    const current = loads.begin();
+    return new Promise((r) => setTimeout(r, delay)).then(() => void (current() && (rooms = value)));
+  };
+  const slow = load("stale", 20); // read unread = 0 on the server …
+  loads.invalidate(); // … then a message arrived and the badge went to 1
+  await slow;
+  expect(rooms).toBe("start");
+
+  const older = load("older", 20);
+  const newer = load("newer", 0);
+  await Promise.all([older, newer]);
+  expect(rooms).toBe("newer");
+});
+
+it("keeps a message whose room a list doesn't show yet, and notifies it once a later list shows it", () => {
+  const first: ChatMessage = { id: "m1", roomId: "new", userId: "friend", text: "hi", reaction: false, createdAt: 0 };
+  const before = settleUnlisted([first], rooms, null); // a list read before the invite
+  expect(before.listed).toEqual([]);
+  expect(before.waiting).toEqual([first]);
+
+  const invited = room("new", video, "friend");
+  const after = settleUnlisted(before.waiting, [...rooms, invited], null);
+  expect(after.listed).toEqual([[invited, first]]);
+  expect(after.waiting).toEqual([]);
+  expect(settleUnlisted([first], [invited], "new").listed).toEqual([]); // open: the room shows it
 });

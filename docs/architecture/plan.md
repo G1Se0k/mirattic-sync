@@ -60,8 +60,8 @@
 | 52 | Laftel은 seek함 (`seekable` 기본값) | Netflix M7375 같은 알려진 차단 없음. 실제 플레이어에서 문제가 보이면 `SEEKABLE`에서 끔 |
 | 53 | 리액션은 `chat_messages`의 한 종류 (`reaction = true`, text = 이모지 5개 중 하나). WS `reaction:add`로 보내고 `chat:message`로 받음. 채팅 목록 안에서 연속된 같은 이모지·10초 이내를 "😂 ×4 · 24:32"로 묶어 표시 | 별도 테이블 없이 기록·순서·페이지·방 삭제 정리를 그대로 씀. 영상 위 overlay 없음 (기획서 §13) |
 | 54 | `chat:message`는 방에 참가한 연결이 아니라 **모든 멤버의 연결**로 보냄 | 방 밖(친구 목록)에서 읽지 않은 수를 올리고 알림을 띄우기 위해. 멤버는 어차피 기록을 볼 수 있어 공개 범위 변화 없음 |
-| 55 | 읽지 않은 수는 서버 `room_members.last_read_at` 이후 다른 사람의 메시지 수 (리액션 제외). `room:join`, `room:leave`, 연결 끊김 때 서버가 기록 (읽음 REST 없음). `RoomView.unread` | leave 처리 안에서 `room:update` 알림 전에 기록하므로 그 알림으로 다시 조회한 목록이 이미 0. 탭을 닫아도 끊김으로 기록 |
-| 56 | 알림 끄기는 멤버별 서버 저장 (`room_members.muted`, `PUT /members/me/muted`). 끄면 채팅 알림만 없고 읽지 않은 수는 흐리게 표시. 채팅 알림은 앱에 포커스가 없고 열린 방이 아닐 때만 (Desktop만, Extension은 알림 권한 없음) | Desktop과 Extension이 같은 설정을 봄. 보고 있는 방은 알리지 않음 |
+| 55 | 읽지 않은 수는 서버 `room_members.last_read_seq`보다 순번(`chat_messages.seq`, AUTO_INCREMENT)이 큰 다른 사람의 메시지 수 (리액션 제외). 메시지 저장과 읽음 기록은 방 행 잠금으로 순서를 정함 (시각 기준은 같은 밀리초를 구별 못 함). `room:join`, `room:leave`, 연결 끊김 때 서버가 기록 (읽음 REST 없음). `RoomView.unread` | leave 처리 안에서 `room:update` 알림 전에 기록하므로 그 알림으로 다시 조회한 목록이 이미 0. 탭을 닫아도 끊김으로 기록 |
+| 56 | 알림 끄기는 멤버별 서버 저장 (`room_members.muted`, `PUT /members/me/muted`). 끄면 채팅 알림만 없고 읽지 않은 수는 흐리게 표시. 채팅 알림은 앱에 포커스가 없고 열린 방이 아닐 때만 (Desktop만, Extension은 알림 권한 없음) | Desktop과 Extension이 같은 설정을 봄 (바꾸면 내 모든 연결에 새 값을 담은 `room:update { muted }`). 보고 있는 방은 알리지 않음 |
 | 57 | 기록은 100개씩, `before=<메시지 ID>` 커서 (`createdAt`, `id` 순) | 같은 밀리초 메시지도 페이지 경계에서 빠지거나 겹치지 않음 |
 
 ## 사용자 식별 (UID + Identity)

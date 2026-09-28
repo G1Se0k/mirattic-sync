@@ -9,3 +9,15 @@ export function clock(ms: number) {
   const ss = String(s % 60).padStart(2, "0");
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
+
+/** Only the latest started load may apply; `invalidate` also drops the ones in flight (a newer local change). */
+export function latest() {
+  let generation = 0;
+  return {
+    begin: () => {
+      const mine = ++generation;
+      return () => mine === generation;
+    },
+    invalidate: () => void generation++,
+  };
+}

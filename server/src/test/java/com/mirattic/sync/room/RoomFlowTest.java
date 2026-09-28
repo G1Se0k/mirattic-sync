@@ -250,6 +250,19 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void aMessageRightAfterAReadMarkIsUnreadEvenInTheSameMillisecond() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		for (int i = 0; i < 200; i++) {
+			roomService.read(friend.id(), roomId);
+			chatMessages.save(new ChatMessage(roomId, host.id(), "m" + i, null, false));
+			assertThat(roomService.mine(friend.id()).get(0).unread()).as("message %d", i).isEqualTo(1);
+		}
+	}
+
+	@Test
 	void membersMuteTheirOwnChatNotifications() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
@@ -257,8 +270,17 @@ class RoomFlowTest extends IntegrationTest {
 		befriend(host, friend);
 		String roomId = body(createRoom(host, friend)).path("id").asString();
 		String path = "/api/rooms/" + roomId + "/members/me/muted";
+		Client desktop = connect(friend);
+		Client extension = connect(friend);
+		Client hostWs = connect(host);
 
 		call(HttpMethod.PUT, path, friend.accessToken(), "{\"muted\":true}").andExpect(status().isNoContent());
+		// Every app of mine refetches (and so notifies by the new setting); nobody else is told.
+		JsonNode onDesktop = desktop.nextOfType("room:update");
+		assertThat(onDesktop.path("roomId").asString()).isEqualTo(roomId);
+		assertThat(onDesktop.path("payload").path("muted").asBoolean()).isTrue(); // applied before any refetch
+		assertThat(extension.nextOfType("room:update").path("payload").path("muted").asBoolean()).isTrue();
+		assertThat(hostWs.nextOfType("room:update")).isNull();
 		assertThat(myRoom(friend).path("muted").asBoolean()).isTrue();
 		assertThat(myRoom(host).path("muted").asBoolean()).isFalse();
 		call(HttpMethod.PUT, path, friend.accessToken(), "{\"muted\":false}").andExpect(status().isNoContent());

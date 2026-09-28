@@ -15,7 +15,7 @@ import { api, platform, SOCKET_URL } from "./session";
 import { Privacy } from "./Privacy";
 import { ExperimentalSettings } from "./Experimental";
 import { Room } from "./Room";
-import { clock, PROVIDER_NAMES } from "./format";
+import { clock, latest, PROVIDER_NAMES } from "./format";
 
 /** Shared when the app sees nothing being watched (desktop, or no YouTube tab): a fake video. */
 const MOCK_CONTENT: RoomContent = { provider: "mock", contentId: "mock-1", title: "Mock 영상", durationMs: 10 * 60_000 };
@@ -38,6 +38,32 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   // Read by the socket handler, which outlives renders.
   const current = useRef({ rooms, openRoom });
   current.current = { rooms, openRoom };
+  // Room lists answer in any order; one started before a count changed locally must not overwrite it.
+  const roomsLoad = useRef(latest()).current;
+  const refetchRooms = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** Messages of rooms not in the list yet (an invite racing its first message): notified once listed. */
+  const unlisted = useRef<ChatMessage[]>([]);
+
+  /** A local change to the list, visible to the socket handler at once; loads started before it are dropped. */
+  const updateRooms = useCallback((change: (list: RoomView[]) => RoomView[]) => {
+    roomsLoad.invalidate();
+    current.current.rooms = change(current.current.rooms);
+    setRooms(change);
+  }, [roomsLoad]);
+
+  const notifyChat = useCallback((room: RoomView, m: ChatMessage) => {
+    const from = room.members.find((x) => x.user.id === m.userId)?.user.displayName ?? "친구";
+    if (!room.muted) notify(`${from} · ${room.content.title}`, m.text);
+  }, []);
+
+  /** The server's list (its unread counts include the unlisted messages). */
+  const applyRooms = useCallback((rs: RoomView[]) => {
+    current.current.rooms = rs;
+    setRooms(rs);
+    const { listed, waiting } = settleUnlisted(unlisted.current, rs, current.current.openRoom);
+    unlisted.current = waiting;
+    listed.forEach(([room, m]) => notifyChat(room, m));
+  }, [notifyChat]);
 
   const subscribe = useCallback((listener: (event: ServerEvent) => void) => {
     listeners.current.add(listener);
@@ -51,15 +77,16 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   const reload = useCallback(async () => {
     try {
+      const fresh = roomsLoad.begin();
       const [f, r, b, rs] = await Promise.all([api.friends(), api.friendRequests(), api.blocked(), api.rooms()]);
       setFriends(f);
       setRequests(r);
       setBlocked(b);
-      setRooms(rs);
+      if (fresh()) applyRooms(rs);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onSignedOut();
     }
-  }, [onSignedOut]);
+  }, [onSignedOut, applyRooms]);
 
   useEffect(() => {
     const socket = connectSocket({
@@ -72,6 +99,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       },
       onEvent: (event) => {
         listeners.current.forEach((l) => l(event));
+        if (event.type === "room:update" && typeof (event.payload as { muted?: unknown } | null)?.muted === "boolean") {
+          // Muted from another app of mine: applied now, so no message notifies by the old setting meanwhile.
+          const muted = (event.payload as { muted: boolean }).muted;
+          updateRooms((list) => list.map((r) => (r.id === event.roomId ? { ...r, muted } : r)));
+        }
         if (event.type === "friend:update" || event.type === "room:invite" || event.type === "room:update") {
           void reload();
         }
@@ -87,12 +119,21 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         }
         if (event.type === "chat:message") {
           const m = event.payload as ChatMessage;
-          const room = current.current.rooms.find((r) => r.id === m.roomId);
           // The open room shows it; reactions and my own messages are never unread.
-          if (m.roomId !== current.current.openRoom && m.userId !== me.id && !m.reaction && room) {
-            setRooms((list) => list.map((r) => (r.id === m.roomId ? { ...r, unread: r.unread + 1 } : r)));
-            const from = room.members.find((x) => x.user.id === m.userId)?.user.displayName ?? "친구";
-            if (!room.muted) notify(`${from} · ${room.content.title}`, m.text);
+          if (m.roomId !== current.current.openRoom && m.userId !== me.id && !m.reaction) {
+            const room = current.current.rooms.find((r) => r.id === m.roomId);
+            // Known room: count and notify now. A room not listed yet (just invited): once the refetch lists it.
+            if (room) {
+              updateRooms((list) => list.map((r) => (r.id === m.roomId ? { ...r, unread: r.unread + 1 } : r)));
+              notifyChat(room, m);
+            } else unlisted.current.push(m);
+            // Then the server's count, once the burst settles.
+            clearTimeout(refetchRooms.current);
+            refetchRooms.current = setTimeout(async () => {
+              const fresh = roomsLoad.begin();
+              const rs = await api.rooms().catch(() => null);
+              if (rs && fresh()) applyRooms(rs);
+            }, ROOMS_REFETCH_MS);
           }
         }
         if (event.type === "presence:update" && event.userId) {
@@ -103,10 +144,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     });
     setSocket(socket);
     return () => {
+      clearTimeout(refetchRooms.current);
       socket.close();
       platform.connected?.(null);
     };
-  }, [reload, me.id]);
+  }, [reload, me.id, roomsLoad, updateRooms, notifyChat, applyRooms]);
 
   // Every action refetches; the other side learns via `friend:update`.
   const act = (fn: () => Promise<unknown>) => async () => {
@@ -121,7 +163,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   /** Opening a room reads its chat (the server marks it on `room:join`). */
   function enter(id: string) {
-    setRooms((list) => list.map((r) => (r.id === id ? { ...r, unread: 0 } : r)));
+    updateRooms((list) => list.map((r) => (r.id === id ? { ...r, unread: 0 } : r)));
     setOpenRoom(id);
   }
 
@@ -170,7 +212,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         {requestBanner}
         {error && <div className="container"><p className="error" role="alert">{error}</p></div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
-        <Room key={openRoom} roomId={openRoom} me={me} socket={socket} status={status} subscribe={subscribe} onClose={closeRoom} />
+        <Room key={openRoom} roomId={openRoom} me={me} socket={socket} status={status} subscribe={subscribe} onClose={closeRoom}
+          onMuted={(muted) => {
+            // A list read before the change would bring the old setting back: updateRooms drops it.
+            updateRooms((list) => list.map((r) => (r.id === openRoom ? { ...r, muted } : r)));
+          }} />
       </>
     );
   }
@@ -366,6 +412,25 @@ export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string |
 /** Only when the user isn't looking at the app: otherwise the screen already shows it. */
 function notify(title: string, body: string) {
   if (!document.hasFocus()) platform.notify?.(title, body);
+}
+
+const ROOMS_REFETCH_MS = 500;
+const MAX_UNLISTED = 20;
+
+/**
+ * Messages that arrived before their room was listed, against a list from the server: those now listed are
+ * due a notification (unless their room is open); the rest keep waiting (a list read before the invite).
+ * Capped, so a room never listed (left or closed meanwhile) can't keep messages forever.
+ */
+export function settleUnlisted(pending: ChatMessage[], rooms: RoomView[], openRoom: string | null) {
+  const listed: [RoomView, ChatMessage][] = [];
+  const waiting: ChatMessage[] = [];
+  for (const m of pending) {
+    const room = rooms.find((r) => r.id === m.roomId);
+    if (!room) waiting.push(m);
+    else if (m.roomId !== openRoom) listed.push([room, m]);
+  }
+  return { listed, waiting: waiting.slice(-MAX_UNLISTED) };
 }
 
 const noSubscribe = () => () => {};

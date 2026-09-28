@@ -1,10 +1,24 @@
 # Current Phase
-Phase 7 — Laftel Experimental Adapter (완료, 2026-09-28)
+Phase 8 — Chat / Reaction Polish (완료, 2026-09-28. 1차 커밋 `9285bf1` + 검증 수정, Codex Sol PASS)
 
-이전: Phase 6 (커밋 `f03134d`), Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
+이전: Phase 7 (커밋 `dc61f6a`), Phase 6 (커밋 `f03134d`), Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Phase 8
+- **리액션** ❤️ 😂 😮 😭 🔥 (서버가 이 다섯 개만 허용): 채팅 입력 위 버튼, 지금 재생 위치를 붙여 WS `reaction:add`
+  - `chat_messages`에 `reaction = true`로 저장, `chat:message`로 전달 (기록·페이지·방 삭제 정리 공유)
+  - 채팅 목록 안에 표시. 연속된 같은 이모지가 첫 리액션 후 10초 안에, 영상 위치도 10초 안이면 "❤️ ×2 · 1:05"로 묶음. 이름은 툴팁. 호스트는 타임스탬프로 이동 (메시지와 같은 확인 창)
+- **`chat:message`는 방의 모든 멤버의 연결로** (방에 들어와 있지 않아도)
+- **읽지 않은 수**: 방 목록에 배지 (99+). 서버 `room_members.last_read_seq` (메시지 순번 `chat_messages.seq`)로 계산, `RoomView.unread`
+  - 서버가 `room:join` · `room:leave` · 연결 끊김 때 기록 (방 행 잠금 아래, `room:update` 전에). 리액션과 내 메시지는 세지 않음
+  - 목록에서는 실시간으로 올리고, 0.5초 뒤 서버 수로 다시 맞춤. 늦게 온 이전 목록 응답은 버림 (`latest()`)
+- **방 알림 끄기** (방 화면 "채팅 알림 끄기/켜기", 서버 저장 `room_members.muted`, `PUT /api/rooms/{id}/members/me/muted`): 끈 방은 목록에 🔕와 흐린 배지. 바꾸면 내 모든 연결에 `room:update`
+- **채팅 알림** (Desktop): 앱에 포커스가 없고 열린 방이 아니며 알림을 끄지 않은 방의 메시지 → "보낸 사람 · 방 제목". Extension은 알림 권한이 없어 배지만
+- **기록 더 보기**: `GET /messages?before=<메시지 ID>` 100개씩 (`createdAt`, `id` 순 커서). "이전 메시지 더 보기"는 보던 위치 유지. 위를 읽는 중 새 메시지는 "새 메시지 ↓", 맨 아래이거나 내가 보낸 것은 따라 내려감
+- Flyway V7(`reaction`, `muted`, `last_read_at`), V8(`seq`, `last_read_seq`로 교체)
+- 결정 53–57 (`plan.md`)
+
 ### Phase 7
 - 정책: **사용자가 직접 확인** (2026-09-28) — 라프텔은 제3자 개발자 정책이 없고, 위험은 Netflix보다 낮다고 판단 → Netflix와 같은 방식으로 진행 (사용자 결정). Claude는 약관 원문을 열람하지 못해 조항 원문은 미기록 (`docs/platform-policy/laftel.md`)
 - **Extension**
@@ -153,6 +167,11 @@ Phase 7 — Laftel Experimental Adapter (완료, 2026-09-28)
 - `POST /api/me/friend-code`로 재발급. 이메일 검색 API는 삭제
 - Desktop: "내 친구 코드" (복사, 확인 창을 거친 재발급), 코드 입력으로 친구 추가
 
+## Major Files Changed (Phase 8)
+- `server/.../room/{ChatMessage,ChatMessageRepository,RoomMember,RoomService,RoomController}.java`, `ws/SocketHandler.java`, `db/migration/V7__chat_polish.sql`, `V8__chat_read_seq.sql`, `RoomFlowTest.java`
+- `packages/ui/src/{Chat.tsx,Chat.test.ts,Home.tsx,Home.test.ts,Room.tsx,App.css}`, `packages/types/src/index.ts`, `packages/client/src/api.ts`
+- `docs/protocol/{rest,websocket}.md`, `docs/architecture/plan.md`
+
 ## Major Files Changed (Phase 7)
 - `apps/extension/{wxt.config.ts}`, `providers/{laftel,laftel.test,page-video}.ts`, `entrypoints/laftel.content.ts`, `entrypoints/sidepanel/{watch.ts,watch.test.ts}`
 - `packages/ui/src/{Experimental.tsx,Room.tsx,session.ts}`, `packages/types/src/index.ts`
@@ -212,6 +231,7 @@ Phase 7 — Laftel Experimental Adapter (완료, 2026-09-28)
 - 20. 친구 추가는 친구 코드로만 (이메일 검색 제거)
 - 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 21–28 (Phase 2): mock provider, playback/version DB 저장, 초대=멤버십, `room:update` 후 재조회, 서버 시각 기준 `capturedAt`, seek 구간 재확인, echo 억제 창 없음, 호스트 명령 모으기 + 초당 제한 — `plan.md` 참고
+- 53–57 (Phase 8): 리액션은 채팅 메시지의 한 종류, 채팅은 모든 멤버 연결로, 읽지 않은 수는 서버 순번 기준, 알림 끄기는 멤버별 서버 저장, 기록은 커서 페이지 — `plan.md` 참고
 - 50–52 (Phase 7): Laftel도 기본 꺼짐 · 선택 권한 · 따라가는 탭에만 주입(provider별 켜기), contentId `작품/에피소드`, Laftel은 seek함 — `plan.md` 참고
 - 45–49 (Phase 6): Netflix는 기본 꺼짐 · 선택 권한, 따라가는 탭에만 주입, 재생/일시정지만 (seek 안내), provider별 view, 채팅은 side panel — `plan.md` 참고
 - 41–44 (Phase 5): 합류는 요청 → 초대, 차단 시 호스트가 아닌 쪽이 빠짐, IN_ROOM 없음 · DND 보류, Desktop 트레이 · 알림 — `plan.md` 참고
@@ -220,6 +240,36 @@ Phase 7 — Laftel Experimental Adapter (완료, 2026-09-28)
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
+### Phase 8
+- `RoomFlowTest` 20 (추가 4): 방 밖 멤버에게도 메시지·리액션 전달, 리액션 검증(`👍`, 숫자, `text` 키 → `bad_payload`), 읽지 않은 수(리액션·내 메시지 제외, 입장 · `room:leave` · 연결 끊김으로 읽음), 읽음 기록 직후 저장된 메시지 200회 반복 → 매번 1, 알림 끄기(비멤버 404, 내 두 연결에만 `room:update`), 150개 페이지(같은 밀리초 포함, 빠짐·겹침 없음, 다른 방 커서 404). 전체 server 43
+  - 되돌리면 실패 확인: 연결 끊김 읽음 기록, 알림 끄기 `room:update`
+- `packages/ui` 7: 같은 밀리초 id 순, 리액션 묶기(시간·위치), `latest()`(늦은 응답·무효화). extension 8 · sync-core 14 · client 3, `pnpm typecheck` / `pnpm build` ✅
+- 수동 E2E (2026-09-28, 기존 로컬 DB에 V7 · V8 적용)
+  - 확장 side panel 2개(360px), Mock 방: 목록 배지 1 (리액션 제외) → 새로고침 후에도 1 → 입장 시 리액션 표시, 같은 순간 ❤️ 두 개 → "❤️ ×2" → 나오면 배지 없음 → 알림 끄기 후 🔕 · 흐린 배지 → 105개: 맨 아래에서 100개, "이전 메시지 더 보기"로 앞 페이지 + 위치 유지 → 위를 읽는 중 "새 메시지 ↓", 맨 아래에서는 따라감
+  - Desktop web dev (포커스 없음, `Notification` 가짜): 메시지 알림 "Sender · Movie Night", 리액션·열린 방·끈 방은 알림 없음, 방에서 다시 켜고 나오면 바로 알림 (방→목록 전달을 빼면 실패 확인)
+  - Laftel E2E 재실행 통과 (채팅 타임스탬프 이동 포함)
+- Codex Sol 검증 1차 FAIL (2026-09-28, 검사 모두 통과, blocking 3) → 수정
+  - 리액션을 영상 위치로만 묶어 멈춘 영상에서 1분 간격도 한 줄 → 보낸 시각 10초 안 + 위치 10초 안
+  - 읽음 시각과 같은 밀리초의 메시지가 영구히 누락 → 메시지 순번(`seq`)과 방 행 잠금으로 (V8). 입장 읽음 기록은 소켓 허브 잠금 밖으로
+  - 늦게 온 방 목록 응답이 실시간 배지를 덮어씀 → `latest()`로 오래된 응답 버림 + 0.5초 뒤 서버 수로 재조회
+- Codex 재검증 1회차 FAIL (이전 3개 해결 확인, blocking 1) → 방 안에서 바꾼 알림 설정이 목록에 늦게 반영 → `onMuted`로 즉시 반영, 진행 중 목록 응답 무효화
+- Codex 재검증 2회차 FAIL (이전 4개 해결 확인, blocking 1) → 같은 계정의 다른 앱에 알림 설정이 전달되지 않음 → 저장 후 내 모든 연결에 `room:update`
+- Codex 재검증 3회차(자동 재검증 마지막) FAIL (검사 모두 통과, server 43, 이전 5개 해결 확인, blocking 2) → 사용자 보고
+  - 초대된 방이 아직 목록에 없을 때 온 첫 `chat:message`를 버리고, 그 전에 시작된 목록 조회가 unread 0을 적용해 배지·알림이 누락될 수 있음
+  - 다른 연결에서 알림을 끈 뒤 `room:update` 재조회가 끝나기 전에 온 메시지는 이전 설정으로 알림
+- 사용자 요청으로 수정 (2026-09-28)
+  - 목록에 없는 방의 메시지는 버리지 않고 대기 → 서버 목록(`applyRooms`, 재조회·reload 공통)에 나타나면 알림, 배지는 서버 수. 목록의 로컬 변경은 `updateRooms` 하나로 (진행 중 조회 무효화 + 소켓 처리기에 즉시 반영)
+  - 알림 설정 변경의 `room:update`에 `{ muted }`를 담아 보내고, 받은 쪽은 조회 전에 바로 적용
+  - E2E 추가 (Desktop web dev): 새 방 초대 직후 첫 메시지 3회 → 배지 1 · 알림, 다른 앱(REST)에서 알림 끈 직후 메시지 5회 (방 목록 GET을 1.5초 늦춤) → 알림 없음. 각 수정을 빼면 해당 E2E 실패 확인. `RoomFlowTest`는 `room:update`의 `muted` 값 확인. 채팅 E2E 재실행 통과
+- Codex 추가 검증 (사용자 요청) FAIL (검사 모두 통과, server 43, blocking 2) → 수정
+  - 목록을 적용할 때 아직 목록에 없는 방의 대기 메시지까지 지움 → 목록에 나타난 것만 알리고 나머지는 계속 대기 (최대 20개). `settleUnlisted` 순수 함수 + 테스트 (ui 8)
+  - V8이 V7의 `last_read_at`을 그냥 지워 업그레이드 시 읽은 메시지가 모두 읽지 않음으로 → 기존 메시지에 시간순(`created_at`, `id`)으로 `seq`를 매긴 뒤 AUTO_INCREMENT로 바꾸고, `last_read_seq`를 "읽음 시각 이전 메시지의 최대 seq"로 채운 뒤 삭제. `ChatReadMigrationTest` (root로 별도 스키마를 V7까지 올리고 순서가 섞인 데이터 → V8: 읽음 유지, seq는 시간순, 새 메시지는 이어서). 이전 V8로 되돌리면 실패 확인. 로컬 DB는 이전 V8을 되돌린 뒤 새 V8 적용 (메시지 439개 → seq 1–439). server 44, E2E 두 개 재실행 통과
+- Codex 추가 검증 2 FAIL (검사 모두 통과, server 44, blocking 1) → 수정
+  - 방 화면의 `room:update` 재조회가 응답 순서를 구분하지 않아, 다른 앱에서 알림을 끄고 바로 켜면 늦게 온 이전 응답이 "꺼짐"으로 되돌림 → Room도 `latest()`(`format.ts`로 이동, Home과 공유)로 최신 조회만 반영, `room:update`의 `muted`는 바로 적용하고 진행 중 조회 무효화
+  - E2E: 방을 연 채 다른 앱(REST)에서 끄고 0.2초 뒤 켬, 첫 방 조회 응답을 1.5초 늦춤 → "끄기" 버튼 유지 (가드를 빼면 실패 확인). 알림 · 채팅 E2E 재실행 통과, ui 8 · extension 8 · sync-core 14 · client 3, typecheck · build ✅
+  - Room/Home 컴포넌트 테스트 도구가 없어 자동 컴포넌트 테스트는 없음 (`latest()` 단위 테스트 + E2E)
+- Codex 추가 검증 3 (사용자 요청) **PASS** (2026-09-28, 검사 모두 통과: extension 8, sync-core 14, client 3, ui 8, typecheck, build, server verify 44, `git diff --check`. 이전 지적 모두 해결 확인, 발견 사항 없음)
+
 ### Phase 7
 - `apps/extension` 8/8: `watch.test.ts` 추가 (Laftel은 켜졌을 때만 따라감, Netflix를 꺼도 Laftel 탭은 그대로 — 켜짐 확인·끌 때 provider 비교를 각각 되돌리면 실패 확인. "주입 중 끄면 연결 안 함"을 Netflix · Laftel 둘 다), `laftel.test.ts` 탭 제목 1
 - `RoomFlowTest`: Laftel contentId 형식 (REST `40522` → 400, `40522/40523` → 생성, WS `40522/../x`·`40522/` → `bad_payload`). 전체 server 39/39
@@ -378,6 +428,14 @@ Phase 7 — Laftel Experimental Adapter (완료, 2026-09-28)
   - 가입 → 이메일로 친구 요청 → 상대 화면에 실시간 표시 → 수락 → 온라인 표시 → 탭 닫으면 오프라인 → 새로고침해도 세션 유지 ✅
 
 ## Known Issues
+- **Phase 8**
+  - Extension은 채팅 알림 없음 (`notifications` 권한을 추가하지 않음, 배지만)
+  - 같은 방을 한 기기에서 보고 있어도 다른 기기의 목록에서는 배지가 잠시 오름 (그 기기가 방을 열거나 서버 수로 재조회하면 맞춰짐). 읽음은 방에 "들어와 있던" 기준이라 여러 기기 중 하나만 열어도 모두 읽음
+  - 열린 방이 아닌 다른 방의 새 메시지는 포커스가 있을 때 방 화면에서 표시되지 않음 (목록으로 돌아와야 보임)
+  - Home / Room 컴포넌트 테스트 도구 없음 → 스크롤, 방→목록 알림 설정 전달은 E2E로만
+  - Desktop 실제 OS 알림은 확인하지 않음 (웹 dev에서 가짜 `Notification`)
+  - 리액션 되돌리기·삭제 없음, 채팅 신고·삭제는 Phase 9
+  - 목록에 없는 방의 메시지 알림은 다음 목록 조회가 반영될 때까지 늦어짐 (보통 0.5초). 그 조회가 더 새 변경으로 버려지면 그다음 조회 때
 - **Phase 7**
   - **라프텔 약관 조항 원문·개정일 미기록** (사용자 확인 결과만). 스토어 공개 전 원문 확인과 법률 검토 필요 (`laftel.md`)
   - **실제 라프텔 사이트로 검증하지 않음**: 플레이어 URL 형식(`/player/<작품>/<에피소드>`), 탭 제목 형식, `<video>` 하나인지, `currentTime` seek가 라프텔 플레이어와 어긋나지 않는지 모두 가짜 페이지로만 확인. URL 형식이 다르면 extension · types · server 세 곳의 형식을 함께 수정
@@ -444,7 +502,7 @@ Phase 7 — Laftel Experimental Adapter (완료, 2026-09-28)
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Next Task
-Phase 8 — Chat / Reaction Polish (`Mirattic_Sync_PLAN.md`)
-1. 현재 채팅(`Chat.tsx`, WS `chat:message`, `chat_messages`)에서 빠진 것 확인: 타임스탬프 메시지는 있음(Phase 4), 기록은 최근 100개
-2. 리액션 (WS 이벤트 + 저장 여부 결정), 읽지 않은 메시지 수, 방 알림 끄기(mute)
-3. 기록 더 불러오기 (페이지네이션) 필요 여부 판단
+Phase 9 — Privacy / Safety (`Mirattic_Sync_PLAN.md`)
+1. 현재 상태 확인: presence 공개 범위(Phase 1), 차단(Phase 1·5), 방 권한(호스트 전용 조작)
+2. 신고 (사용자 · 채팅 메시지), 채팅 메시지 삭제
+3. 계정 삭제 / 데이터 삭제 (FK cascade 확인), 개인정보처리방침 초안(스토어 제출 전 필요)

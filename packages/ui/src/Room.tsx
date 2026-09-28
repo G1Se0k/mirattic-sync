@@ -3,7 +3,7 @@ import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
 import { watchUrl, type Me, type MediaProviderAdapter, type PlaybackState, type PlayerSnapshot, type RoomContent, type RoomView, type ServerEvent } from "@mirattic/types";
 import { MockMediaProvider, publishHost, ServerClock, SyncFollower, type FollowerStatus } from "@mirattic/sync-core";
 import { api, platform } from "./session";
-import { clock, PROVIDER_NAMES } from "./format";
+import { clock, latest as latestOnly, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
 
@@ -17,6 +17,8 @@ type Props = {
   status: SocketStatus;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   onClose: (note?: string) => void;
+  /** The room list decides notifications with it: tell it at once, not at its next refetch. */
+  onMuted: (muted: boolean) => void;
 };
 
 const CLOCK_SAMPLES = 5;
@@ -25,7 +27,7 @@ const CLOCK_SAMPLES = 5;
  * Room screen: the host's player drives everyone else's. A mock room plays a fake video right here;
  * other providers play in the user's own provider page, driven through `platform.adapter`.
  */
-export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) {
+export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }: Props) {
   const [room, setRoom] = useState<RoomView | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -66,22 +68,37 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
   }, [content?.provider, content?.contentId]);
   const [snapshot, setSnapshot] = useState<PlayerSnapshot | null>(null);
 
+  // Loads answer in any order: only the latest started one applies, and a newer local change (mute) drops those in flight.
+  const roomLoads = useMemo(() => latestOnly(), []);
+  const setMuted = (muted: boolean) => {
+    roomLoads.invalidate();
+    setRoom((r) => r && { ...r, muted });
+  };
   useEffect(() => {
-    const load = () =>
-      api.room(roomId).then(
+    const load = () => {
+      const fresh = roomLoads.begin();
+      return api.room(roomId).then(
         (r) => {
+          if (!fresh()) return;
           setRoom(r);
           setLoadFailed(false);
         },
         (e) => {
+          if (!fresh()) return;
           if (e instanceof ApiError && e.status === 404) onClose("방이 닫혔거나 더 이상 멤버가 아닙니다.");
           else setLoadFailed(true);
         },
       );
+    };
     void load();
     return subscribe((event) => {
       if (event.roomId && event.roomId !== roomId) return;
-      if (event.type === "room:update") void load();
+      if (event.type === "room:update") {
+        // Muted from another app of mine: the value comes along, applied before the refetch returns.
+        const muted = (event.payload as { muted?: unknown } | null)?.muted;
+        if (typeof muted === "boolean") setMuted(muted);
+        void load();
+      }
       if (event.type === "playback:update") {
         const state = event.payload as PlaybackState;
         if (state.version > (latest.current?.version ?? -1)) latest.current = state;
@@ -96,7 +113,7 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
         setClockReady(true);
       }
     });
-  }, [roomId, subscribe, onClose, serverClock, attempt]);
+  }, [roomId, subscribe, onClose, serverClock, attempt, roomLoads]);
 
   // (Re)join and re-measure the clock on every (re)connect: the server forgets joins on disconnect.
   useEffect(() => {
@@ -180,7 +197,8 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
     const muted = !room!.muted;
     try {
       await api.muteRoom(roomId, muted);
-      setRoom((r) => r && { ...r, muted });
+      setMuted(muted);
+      onMuted(muted);
     } catch {
       alert("알림 설정을 바꾸지 못했습니다. 다시 시도해 주세요.");
     }

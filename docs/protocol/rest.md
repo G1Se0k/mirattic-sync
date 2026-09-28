@@ -53,7 +53,7 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
 | GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt, unread, muted }` |
 | GET | `/api/rooms/{id}/messages?before=` | 채팅 100개 `ChatMessage[]`, 오래된 순: 최근 것, 또는 메시지 ID `before`보다 앞 (`createdAt`, `id` 순). 멤버가 아니거나 `before`가 이 방 메시지가 아니면 404 |
-| PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204. 이 방의 내 채팅 알림 끄기/켜기. 멤버가 아니면 404 |
+| PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204. 이 방의 내 채팅 알림 끄기/켜기. 저장 후 **내 모든 연결에만** `room:update { muted }` (다른 앱이 조회를 기다리지 않고 새 설정으로 알림). 멤버가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/me` | 나가기 / 초대 거절. HOST가 나가면 방 삭제. 모든 멤버에게 `room:update` |
 
 `RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만) }`. `unread`(다른 사람의 리액션이 아닌 메시지 중 내가 마지막으로 방을 연 뒤의 수)와 `muted`는 요청한 사람 기준 (초대 이벤트·초대 응답의 `RoomView`에서는 0 / false). 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
