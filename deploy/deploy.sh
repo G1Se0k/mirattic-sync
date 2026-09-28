@@ -18,6 +18,26 @@ if [ ! -f .env ]; then
   } > .env
 fi
 
+# Daily DB backup (backup.sh) as a launchd agent, refreshed on every deploy.
+support="$HOME/Library/Application Support/mirattic-sync"
+agent="$HOME/Library/LaunchAgents/com.mirattic.sync.backup.plist"
+mkdir -p "$support" "$HOME/Library/LaunchAgents"
+cp backup.sh "$support/backup.sh"
+cat > "$agent" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.mirattic.sync.backup</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$support/backup.sh</string></array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>$HOME/mirattic-sync-backups/backup.log</string>
+  <key>StandardErrorPath</key><string>$HOME/mirattic-sync-backups/backup.log</string>
+</dict></plist>
+PLIST
+mkdir -p "$HOME/mirattic-sync-backups" && chmod 700 "$HOME/mirattic-sync-backups"
+launchctl bootout "gui/$(id -u)/com.mirattic.sync.backup" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$agent" || echo "backup agent not loaded (no GUI session?)" >&2
+
 healthy() {
   for _ in $(seq 60); do
     curl -fsS http://127.0.0.1:8090/actuator/health >/dev/null 2>&1 && return 0
