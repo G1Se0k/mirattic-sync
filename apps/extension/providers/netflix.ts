@@ -6,8 +6,32 @@ import { PageVideoAdapter } from './page-video';
 // the tab title, and the <video>'s play state — no other page content.
 const WATCH_PATH = /^\/watch\/(\d{1,12})(?:\/|$)/;
 
+function watchId(pathname: string) {
+  const found = WATCH_PATH.exec(pathname)?.[1] ?? null;
+  return found && watchUrl({ provider: 'netflix', contentId: found }) ? found : null;
+}
+
+/** The page's Navigation API (Chrome 102+), shared with content scripts like other DOM events. */
+const navigation = () => (globalThis as { navigation?: EventTarget }).navigation;
+
 export class NetflixAdapter extends PageVideoAdapter {
   readonly provider = 'netflix' as const;
+  private run: string | null = null;
+  // Every in-page navigation, however quick (a poll could miss /watch/A → /browse → /watch/B in one second).
+  private readonly onNavigate = (e: Event) => {
+    const url = (e as Event & { destination?: { url: string } }).destination?.url;
+    if (url) this.run = episodeRun(this.run, watchId(new URL(url).pathname));
+  };
+
+  constructor() {
+    super();
+    navigation()?.addEventListener('navigate', this.onNavigate);
+  }
+
+  override destroy() {
+    navigation()?.removeEventListener('navigate', this.onNavigate);
+    super.destroy();
+  }
 
   protected video() {
     // A watch page plays a single <video>; previews elsewhere don't count as contentId() is null there.
@@ -15,8 +39,13 @@ export class NetflixAdapter extends PageVideoAdapter {
   }
 
   protected contentId() {
-    const id = WATCH_PATH.exec(location.pathname)?.[1] ?? null;
-    return id && watchUrl({ provider: 'netflix', contentId: id }) ? id : null;
+    const id = watchId(location.pathname);
+    this.run = episodeRun(this.run, id); // also polled every second
+    return id;
+  }
+
+  protected override series() {
+    return this.run ?? undefined;
   }
 
   protected title() {
@@ -49,6 +78,15 @@ export function seekInPage(positionMs: number): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The URL has no show id, and we read nothing else from the page. Episodes the player moves through without
+ * leaving the watch page (next episode, autoplay) count as one series, named after the first one; leaving the
+ * watch page (or a reload) starts a new one, so the members are asked again.
+ */
+export function episodeRun(run: string | null, id: string | null) {
+  return id === null ? null : (run ?? id);
 }
 
 /** The tab title if it names the title ("Title - Netflix"); the watch page is often just "Netflix". */

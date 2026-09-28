@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { watchUrl, type Me, type MediaProviderAdapter, type PlaybackState, type PlayerSnapshot, type RoomContent, type RoomView, type ServerEvent } from "@mirattic/types";
+import { openUrl, sameSeries, type Me, type MediaProviderAdapter, type PlaybackState, type PlayerSnapshot, type RoomContent, type RoomView, type ServerEvent } from "@mirattic/types";
 import { MockMediaProvider, publishHost, ServerClock, SyncFollower, type FollowerStatus } from "@mirattic/sync-core";
 import { api, platform } from "./session";
 import { clock, latest as latestOnly, PROVIDER_NAMES } from "./format";
@@ -67,8 +67,33 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
   const announced = useRef<RoomContent | null>(null);
   useEffect(() => {
     announced.current = content ?? null;
-  }, [content?.provider, content?.contentId]);
+  }, [content?.provider, content?.contentId, content?.series]);
   const [snapshot, setSnapshot] = useState<PlayerSnapshot | null>(null);
+
+  // A member whose host moved to another video: the next one of the same series (playlist, show) opens by
+  // itself; anything else is asked (plan.md decision 67). Not on entering the room, nor if it is already open.
+  const [switched, setSwitched] = useState<RoomContent | null>(null);
+  const shown = useRef<RoomContent | null>(null);
+  useEffect(() => {
+    const before = shown.current;
+    shown.current = content ?? null;
+    if (!content || !before || isHost || mock || !player) return;
+    if (before.provider === content.provider && before.contentId === content.contentId) return;
+    const url = openUrl(content);
+    if (!url) return;
+    let current = true; // the room may move on again before the tab answers
+    void player.getSnapshot().then((s) => {
+      if (!current || s?.contentId === content.contentId) return;
+      if (sameSeries(before, content)) platform.open(url);
+      else setSwitched(content);
+    });
+    return () => void (current = false);
+  }, [content?.provider, content?.contentId]);
+  // The same video joining a playlist mid-way: remember its series without asking anything.
+  useEffect(() => {
+    const before = shown.current;
+    if (content && before?.provider === content.provider && before.contentId === content.contentId) shown.current = content;
+  }, [content?.series]);
 
   // Loads answer in any order: only the latest started one applies, and a newer local change (mute) drops those in flight.
   const roomLoads = useMemo(() => latestOnly(), []);
@@ -141,13 +166,16 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
     if (isHost) {
       // Changes made offline would be lost; restarting on reconnect republishes the current state.
       if (!connected) return;
-      return publishHost(player, serverClock, (type, payload, snapshot) => {
+      return publishHost(player, serverClock, (type, payload, snapshot, gone) => {
+        // The video went away: pause the members on the content they are following, never on a new one.
+        if (gone) return snapshot.contentId === announced.current?.contentId && socket.send({ type, roomId, payload });
         if (!mock) {
           // The command is about `snapshot`'s video. Its metadata ("now watching") arrives with the change
           // event; until then, skip — that event triggers another send.
           const now = platform.nowWatching?.();
           if (!now || now.contentId !== snapshot.contentId) return false;
-          if (now.contentId !== announced.current?.contentId) {
+          // Also the same video joining a playlist (series): the server then keeps the playback as it is.
+          if (now.contentId !== announced.current?.contentId || now.series !== announced.current?.series) {
             socket.send({ type: "playback:content-change", roomId, payload: now });
             announced.current = now;
           }
@@ -248,6 +276,16 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
           </li>
         ))}
       </ul>
+      {switched && switched.contentId === room.content.contentId && (
+        <dialog open className="stack">
+          <h2>호스트가 영상을 바꿨습니다</h2>
+          <p>{switched.title}</p>
+          <div className="row">
+            <button onClick={() => { platform.open(openUrl(switched)!); setSwitched(null); }}>이 영상 열기</button>
+            <button className="link" onClick={() => setSwitched(null)}>나중에</button>
+          </div>
+        </dialog>
+      )}
       {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
 
       {player instanceof MockMediaProvider ? (
@@ -313,7 +351,7 @@ function ProviderPlayer({ content, snapshot, canPlay, isHost, sync, lastCorrecti
   canPlay: boolean;
   experimentOff: boolean;
 }) {
-  const url = watchUrl(content);
+  const url = openUrl(content);
   const here = snapshot?.contentId === content.contentId;
   return (
     <section className="stack">

@@ -16,6 +16,10 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
   /** The content id in the URL, or null off a watch page. */
   protected abstract contentId(): string | null;
   protected abstract title(): string;
+  /** What the content belongs to (playlist, show): members follow the host within it without being asked. */
+  protected series(): string | undefined {
+    return undefined;
+  }
   protected adPlaying() {
     return false;
   }
@@ -29,7 +33,7 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
     // An ad starting / ending and in-page navigation change no media event we can rely on: poll them.
     let last = '';
     const poll = setInterval(() => {
-      const key = `${this.contentId()}|${this.adPlaying()}`;
+      const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}`; // series: a playlist joined mid-video
       if (key !== last) {
         last = key;
         this.emit();
@@ -67,6 +71,7 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
       contentId: s.contentId,
       title: this.title(),
       canonicalUrl: watchUrl({ provider: this.provider, contentId: s.contentId }),
+      series: this.series(),
       // During an ad the <video> reports the ad's time and length.
       positionMs: s.adPlaying ? undefined : s.positionMs,
       durationMs: s.adPlaying ? undefined : s.durationMs,

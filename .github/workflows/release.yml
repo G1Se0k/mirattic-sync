@@ -1,7 +1,7 @@
 name: Release
 
-# Push a tag like v0.1.0: builds the extension zip and the desktop installers (unsigned) into a draft
-# release. Both point at https://sync.mirattic.com (.env.production).
+# Push a tag like v0.0.1: builds the extension zip into a draft release, pointing at
+# https://sync.mirattic.com (.env.production). No desktop installers: the extension does everything.
 on:
   push:
     tags: ['v*']
@@ -11,7 +11,6 @@ permissions:
 
 jobs:
   extension:
-    needs: desktop # tauri-action creates the draft release; this adds the zip to it
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,43 +21,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @mirattic/extension zip
-      - run: gh release upload "$GITHUB_REF_NAME" apps/extension/.output/*.zip --clobber
+      - run: gh release create "$GITHUB_REF_NAME" --draft --title "$GITHUB_REF_NAME" apps/extension/.output/*.zip
         env:
           GH_TOKEN: ${{ github.token }}
-
-  desktop:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            args: --target universal-apple-darwin
-            targets: aarch64-apple-darwin,x86_64-apple-darwin
-          - os: windows-latest
-            args: ''
-            targets: ''
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.targets }}
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-      - run: pnpm install --frozen-lockfile
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseDraft: true
-          tauriScript: pnpm tauri
-          args: ${{ matrix.args }}

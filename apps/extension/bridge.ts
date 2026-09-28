@@ -66,6 +66,7 @@ export class RemoteAdapter implements MediaProviderAdapter {
   private nextId = 0;
   private replies = new Map<number, (s: PlayerSnapshot | null) => void>();
   private listeners = new Set<(s: PlayerSnapshot) => void>();
+  private goneListeners = new Set<() => void>();
 
   constructor(
     /** Every change of what the tab shows, including losing it (null). */
@@ -95,6 +96,7 @@ export class RemoteAdapter implements MediaProviderAdapter {
       }
       this.setPresence(m.presence);
       if (m.change) for (const l of this.listeners) l(m.change);
+      else this.goneListeners.forEach((l) => l()); // left the watch page
     });
     // Also fires right away when the tab has no content script (not YouTube, or opened before install).
     port.onDisconnect.addListener(() => {
@@ -154,9 +156,16 @@ export class RemoteAdapter implements MediaProviderAdapter {
     return () => void this.listeners.delete(callback);
   }
 
+  /** The video went away: left the watch page, or the tab closed / moved to another site. */
+  onGone(callback: () => void) {
+    this.goneListeners.add(callback);
+    return () => void this.goneListeners.delete(callback);
+  }
+
   destroy() {
     this.disconnect();
     this.listeners.clear();
+    this.goneListeners.clear();
   }
 
   /**
@@ -180,6 +189,8 @@ export class RemoteAdapter implements MediaProviderAdapter {
       pause: async () => void (mine() && (await this.pause())),
       seek: async (ms) => void (mine() && (await this.seek(ms))),
       onChange: (callback) => this.onChange((s) => mine() && callback(s)),
+      // Not `mine()`: the connection is already gone when a closed tab reports it.
+      onGone: (callback) => this.onGone(() => this.provider === provider && callback()),
       destroy: () => {},
     };
     this.views.set(provider, view);
@@ -204,11 +215,13 @@ export class RemoteAdapter implements MediaProviderAdapter {
   }
 
   private drop() {
+    const had = this.port !== null;
     this.port = null;
     this.tabId = null;
     for (const reply of this.replies.values()) reply(null);
     this.replies.clear();
     this.setPresence(null);
+    if (had) this.goneListeners.forEach((l) => l());
   }
 
   private setPresence(presence: MediaPresence | null) {

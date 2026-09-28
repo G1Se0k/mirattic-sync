@@ -26,6 +26,16 @@ export class YouTubeAdapter extends PageVideoAdapter {
   protected title() {
     return title();
   }
+
+  protected override series() {
+    return playlist();
+  }
+}
+
+/** The playlist in the URL (`list=`), if any: videos of one playlist are one series. */
+export function playlist(search = location.search) {
+  const list = new URLSearchParams(search).get('list');
+  return list && /^[A-Za-z0-9_-]{2,128}$/.test(list) ? list : undefined;
 }
 
 /** "(3) Title - YouTube" → "Title" (the count is unread notifications). */

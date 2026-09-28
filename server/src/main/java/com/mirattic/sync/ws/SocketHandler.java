@@ -9,6 +9,7 @@ import com.mirattic.sync.room.RoomService;
 import com.mirattic.sync.user.UserRepository;
 import jakarta.validation.Validator;
 import java.util.Locale;
+import java.util.function.BooleanSupplier;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -88,6 +89,7 @@ class SocketHandler extends TextWebSocketHandler {
 			for (String roomId : joined(session)) {
 				hub.leaveRoom(roomId, out(session));
 				rooms.read(userId(session), roomId);
+				pauseIfHostGone(userId(session), roomId);
 				rooms.announce(roomId, rooms.memberIds(roomId));
 			}
 			if (offline) {
@@ -150,6 +152,7 @@ class SocketHandler extends TextWebSocketHandler {
 				if (joined(session).remove(roomId)) {
 					hub.leaveRoom(roomId, out(session));
 					rooms.read(me, roomId);
+					pauseIfHostGone(me, roomId);
 					rooms.announce(roomId, rooms.memberIds(roomId));
 				}
 			}
@@ -181,7 +184,9 @@ class SocketHandler extends TextWebSocketHandler {
 					return;
 				}
 				PlaybackState state = rooms.changeContent(me, roomId, content);
-				hub.sendToRoom(roomId, playbackEvent(roomId, state));
+				if (state != null) {
+					hub.sendToRoom(roomId, playbackEvent(roomId, state));
+				}
 				rooms.announce(roomId, rooms.memberIds(roomId)); // members refetch the room's new content
 			}
 			default -> {
@@ -213,6 +218,18 @@ class SocketHandler extends TextWebSocketHandler {
 			window[1] = 0;
 		}
 		return ++window[1] <= max;
+	}
+
+	/** With none of the host's connections left in the room, the members are paused (plan.md decision 67). */
+	private void pauseIfHostGone(String userId, String roomId) {
+		BooleanSupplier stillThere = () -> hub.presentIn(roomId).contains(userId); // e.g. from another app
+		if (stillThere.getAsBoolean()) {
+			return;
+		}
+		PlaybackState state = rooms.hostLeft(userId, roomId, stillThere);
+		if (state != null) {
+			hub.sendToRoom(roomId, playbackEvent(roomId, state));
+		}
 	}
 
 	private static ServerEvent playbackEvent(String roomId, PlaybackState state) {

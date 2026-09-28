@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlaybackCommand, PlaybackState, PlayerSnapshot } from "@mirattic/types";
+import type { MediaProviderAdapter, PlaybackCommand, PlaybackState, PlayerSnapshot } from "@mirattic/types";
 import { ServerClock } from "./clock";
 import { MockMediaProvider } from "./mock";
 import { classifyDrift, estimatePosition, publishHost, SyncFollower, type FollowerStatus } from "./sync";
@@ -200,6 +200,30 @@ describe("host → server → member", () => {
 });
 
 describe("publishHost", () => {
+  it("pauses members where the video was when it goes away, and resumes with a play", async () => {
+    const clock = new ServerClock();
+    clock.addSample(Date.now(), Date.now(), Date.now());
+    const host: MockMediaProvider & MediaProviderAdapter = new MockMediaProvider(CONTENT);
+    let goneListener = () => {};
+    host.onGone = (cb: () => void) => ((goneListener = cb), () => {});
+    const sent: [string, PlaybackCommand, boolean | undefined][] = [];
+    publishHost(host, clock, (type, cmd, _s, gone) => void sent.push([type, cmd, gone]));
+    await settle();
+    await host.seek(10_000);
+    await host.play();
+    await vi.advanceTimersByTimeAsync(3_000);
+    sent.length = 0;
+
+    goneListener(); // left the watch page while playing
+    expect(sent).toEqual([["playback:pause", { positionMs: 13_000, capturedAt: Date.now() }, true]]);
+    goneListener(); // already paused: nothing more
+    expect(sent).toHaveLength(1);
+
+    await host.seek(20_000); // back on the video and playing again
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sent.at(-1)?.[0]).toBe("playback:play");
+  });
+
   it("republishes the current state when restarted after a disconnect", async () => {
     const clock = new ServerClock();
     clock.addSample(Date.now(), Date.now(), Date.now());

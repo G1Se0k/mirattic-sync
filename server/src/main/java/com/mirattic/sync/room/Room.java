@@ -20,6 +20,7 @@ public class Room {
 	private String title;
 	private Long durationMs;
 	private String canonicalUrl;
+	private String series;
 	private long positionMs;
 	private boolean playing;
 	private long capturedAt;
@@ -37,6 +38,7 @@ public class Room {
 		this.title = content.title();
 		this.durationMs = content.durationMs();
 		this.canonicalUrl = content.canonicalUrl();
+		this.series = content.series();
 		this.createdAt = this.capturedAt = System.currentTimeMillis();
 		this.playbackBy = hostId;
 	}
@@ -45,7 +47,7 @@ public class Room {
 	public long getCreatedAt() { return createdAt; }
 
 	RoomContent content() {
-		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl);
+		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl, series);
 	}
 
 	PlaybackState playback() {
@@ -62,13 +64,25 @@ public class Room {
 		this.playbackVersion++;
 	}
 
-	void changeContent(String userId, RoomContent content, long now) {
+	/** @return false if it is the same video (new metadata such as a playlist only): the playback stays as it is. */
+	boolean changeContent(String userId, RoomContent content, long now) {
+		boolean restart = provider != content.provider() || !contentId.equals(content.contentId());
 		this.provider = content.provider();
 		this.contentId = content.contentId();
 		this.title = content.title();
 		this.durationMs = content.durationMs();
 		this.canonicalUrl = content.canonicalUrl();
-		applyPlayback(userId, 0, false, now);
+		this.series = content.series();
+		if (restart) {
+			applyPlayback(userId, 0, false, now);
+		}
+		return restart;
+	}
+
+	/** Where playback is at `now`, extrapolated like the clients do. */
+	long positionAt(long now) {
+		long position = positionMs + (playing ? Math.max(0, now - capturedAt) : 0);
+		return durationMs == null ? position : Math.min(position, durationMs);
 	}
 
 	boolean isPlaying() {

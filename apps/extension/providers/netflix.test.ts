@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { seekInPage } from './netflix';
+import { episodeRun, seekInPage } from './netflix';
 
 const g = globalThis as { window?: unknown };
 afterEach(() => delete g.window);
@@ -33,4 +33,13 @@ it('does nothing once the tab has navigated off Netflix', () => {
   g.window = page(['watch-1'], seeks, { origin: 'https://www.youtube.com' });
   expect(seekInPage(1000)).toBe(false);
   expect(seeks).toEqual([]);
+});
+
+it('counts episodes played in a row as one series, until the watch page is left', () => {
+  let run = episodeRun(null, '100'); // first episode
+  expect(run).toBe('100');
+  run = episodeRun(run, '101'); // next episode, still on the watch page
+  expect(run).toBe('100');
+  run = episodeRun(run, null); // back to browsing
+  expect(episodeRun(run, '200')).toBe('200'); // another title starts its own series
 });

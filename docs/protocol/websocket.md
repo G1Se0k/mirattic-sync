@@ -60,12 +60,14 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `watch:request` | S→C | `UserSummary` | 친구가 같이 보자고 요청함 (`POST /api/rooms/requests`). `userId` = 요청한 사람. 받은 사람은 초대(`POST /api/rooms` 또는 `/api/rooms/{id}/invites`)로 응답 |
 | `room:update` | S→C | 없음, 또는 `{ muted }` | 참가 / 나감 / 방 닫힘 시 모든 멤버에게. 클라이언트는 `GET /api/rooms/{id}`로 다시 조회 (404면 닫힘). 채팅 알림 설정을 바꾸면 그 사용자의 연결에만 `{ muted }`를 담아 보냄 → 조회 응답 전에 바로 적용 |
 | `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt }` | HOST만 (`not_host`). `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회 |
-| `playback:content-change` | C→S | `RoomContent` | HOST만. 호스트 플레이어의 영상이 바뀌었을 때 다음 명령 전에 보냄. 방 콘텐츠를 바꾸고 0초·일시정지로 초기화, version 증가 → `playback:update` + `room:update`. YouTube는 contentId가 11자 영상 ID, Netflix는 1–12자리 숫자, Laftel은 `작품ID/에피소드ID`(각 1–10자리 숫자)여야 함 (`bad_payload`). playback 명령과 같은 초당 예산 |
+| `playback:content-change` | C→S | `RoomContent` | HOST만. 호스트 플레이어의 영상이 바뀌었을 때 다음 명령 전에 보냄. 방 콘텐츠를 바꾸고 0초·일시정지로 초기화, version 증가 → `playback:update` + `room:update`. YouTube는 contentId가 11자 영상 ID, Netflix는 1–12자리 숫자, Laftel은 `작품ID/에피소드ID`(각 1–10자리 숫자)여야 함 (`bad_payload`). playback 명령과 같은 초당 예산. `series`가 이전 콘텐츠와 같으면 멤버 클라이언트가 묻지 않고 새 영상을 열고, 다르면 팝업으로 물음 (결정 67) |
+
+호스트 이탈 (결정 67): 호스트 탭의 영상이 사라지면(시청 페이지를 벗어남, 탭 닫힘) 호스트 클라이언트가 재생 중이던 위치로 `playback:pause`를 보냄. 호스트의 연결이 방에서 모두 빠지면(`room:leave`, 연결 끊김 — 창 · side panel 닫기, 방 화면 나가기) 서버가 재생 중인 방을 지금 위치로 일시정지하고 `playback:update`를 보냄.
 | `playback:update` | S→C | `PlaybackState` | 방에 참가한 연결 전부에게. envelope `version` = payload `version`, 방마다 1씩 증가 (DB 행 잠금으로 순서 보장) |
 | `sync:request` | C→S | 없음 (`reqId` 필수) | |
 | `sync:response` | S→C | `{ reqId }` | `serverTime`으로 시계 offset 추정: `offset = serverTime − (보낸 시각 + RTT/2)`, RTT가 가장 작은 샘플 사용 |
 
-멤버는 방 콘텐츠가 자기 플레이어와 다르면 동기화하지 않고(`other-content`) "이 영상 열기"를 보여준다. 탭을 자동으로 이동시키지 않는다.
+멤버는 방 콘텐츠가 자기 플레이어와 다르면 동기화하지 않고(`other-content`) "이 영상 열기"를 보여준다. 호스트가 영상을 바꾸면 팝업으로 묻고, 이전 콘텐츠와 `series`가 같을 때만 묻지 않고 탭을 새 영상으로 이동한다 (결정 67). 같은 영상에서 `series`만 바뀐 `playback:content-change`는 재생 상태를 초기화하지 않고 `room:update`만 보낸다.
 
 ### 동기화 (`packages/sync-core`)
 

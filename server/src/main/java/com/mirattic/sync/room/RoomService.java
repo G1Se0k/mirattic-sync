@@ -12,6 +12,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -224,6 +225,25 @@ public class RoomService {
 		requireMember(me, roomId).mute(muted);
 	}
 
+	/**
+	 * The host's last connection left the room (window or side panel closed, left the room screen): the members
+	 * stop where the host was instead of playing on alone. null if nothing changed (not the host, or paused).
+	 */
+	@Transactional
+	public PlaybackState hostLeft(String me, String roomId, BooleanSupplier stillThere) {
+		Room room = rooms.findForUpdate(roomId).orElse(null);
+		boolean host = room != null && members.findByRoomIdAndUserId(roomId, me)
+				.filter(m -> m.getRole() == RoomMember.Role.HOST).isPresent();
+		// Asked again under the row lock: a host connection that joined meanwhile keeps the room going, and its
+		// later commands wait for this lock, so they land after (and over) this pause.
+		if (!host || !room.isPlaying() || stillThere.getAsBoolean()) {
+			return null;
+		}
+		long now = System.currentTimeMillis();
+		room.applyPlayback(me, room.positionAt(now), false, now);
+		return room.playback();
+	}
+
 	@Transactional
 	public PlaybackState playback(String me, String roomId, Command command, long positionMs, long capturedAt) {
 		Room room = lockAsHost(me, roomId);
@@ -297,13 +317,15 @@ public class RoomService {
 		return views;
 	}
 
-	/** The host moved on to another content (e.g. the next video): the room restarts paused at 0 on it. */
+	/**
+	 * The host moved on to another content (e.g. the next video): the room restarts paused at 0 on it.
+	 * @return the new playback state, or null if it is the same video with new metadata (playback unchanged)
+	 */
 	@Transactional
 	public PlaybackState changeContent(String me, String roomId, RoomContent content) {
 		requireKnownId(content);
 		Room room = lockAsHost(me, roomId);
-		room.changeContent(me, content, System.currentTimeMillis());
-		return room.playback();
+		return room.changeContent(me, content, System.currentTimeMillis()) ? room.playback() : null;
 	}
 
 	/**

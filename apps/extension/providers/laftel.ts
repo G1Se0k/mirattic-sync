@@ -23,9 +23,16 @@ export class LaftelAdapter extends PageVideoAdapter {
   protected title() {
     return title();
   }
+
+  // The item id: every episode of a show shares it.
+  protected override series() {
+    return PLAYER_PATH.exec(location.pathname)?.[1];
+  }
 }
 
-/** The tab title without the site name ("Title - 라프텔"); just the site name → a generic label. */
+/** The tab title without the site name ("Title - 라프텔") or "다시보기"; just the site name → a generic label. */
 export function title(raw = document.title) {
-  return raw.replace(/\s*[-|]\s*(라프텔|laftel).*$/i, '').trim().slice(0, 300).replace(/^(라프텔|laftel)$/i, '') || 'Laftel 콘텐츠';
+  return raw.replace(/\s*[-|]\s*(라프텔|laftel).*$/i, '').replace(/\s*다시\s*보기\s*/g, ' ')
+    .replace(/^[\s|-]+|[\s|-]+$/g, '').slice(0, 300)
+    .replace(/^(라프텔|laftel)$/i, '') || 'Laftel 콘텐츠';
 }

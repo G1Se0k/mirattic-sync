@@ -13,5 +13,7 @@ public record RoomContent(
 		@NotBlank @Size(max = 512) String contentId,
 		@NotBlank @Size(max = 300) String title,
 		@PositiveOrZero Long durationMs,
-		@Size(max = 2048) @Pattern(regexp = "https://\\S+") String canonicalUrl) {
+		@Size(max = 2048) @Pattern(regexp = "https://\\S+") String canonicalUrl,
+		/** Same value = same series: members follow the host's next video without asking. */
+		@Size(max = 128) @Pattern(regexp = "[A-Za-z0-9_-]+") String series) {
 }

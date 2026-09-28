@@ -19,6 +19,8 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 - **WebSocket ping** 30초 (결정 64, Cloudflare 100초 유휴 종료 방지)
 - **클라이언트 운영 주소** (결정 65): `apps/{desktop,extension}/.env.production`, Desktop CSP에 `https/wss://sync.mirattic.com`
 - **Netflix seek** (결정 66, 결정 47 대체 · 사용자 결정): 따라가는 Netflix 탭에만 page world에서 Netflix 내부 플레이어 API로 이동, 실패하면 기존 "직접 이동" 안내. 켜기 안내 문구 갱신. `providers/netflix.test.ts` (세션 선택 · 반올림 · API 없음 → false · Netflix 밖 문서면 아무것도 안 함)
+- **호스트 이탈 · 영상 변경** (결정 67, 사용자 요청): 호스트가 영상을 떠나면(뒤로가기 · 탭 닫기 → 호스트가 보냄, 창 · side panel 닫기 → 서버가) 멤버 일시정지. 영상이 바뀌면 멤버에게 팝업, 같은 묶음(`series`: YouTube 재생목록 · Laftel 작품 · Netflix 이어 본 화)이면 팝업 없이 자동 이동. Flyway V10 (`rooms.series`). Laftel 제목의 "다시보기" 제거
+- **빌드 규칙 (2026-09-29 사용자 결정)**: Desktop 설치 파일(dmg 등)은 더 만들지 않음 — 확장으로 모든 기능이 됨. `release.yml`은 확장 zip만. 빌드할 때마다 확장 버전 +0.0.1 (지금 0.0.1)
 - **릴리스 자동화**: `v*` 태그 → `release.yml`이 Desktop 설치 파일(macOS universal `.dmg`, Windows `.exe`/`.msi`, 서명 없음)과 확장 zip을 draft release로. `v0.1.0` draft 생성 확인
   - 첫 실행에서 `@tauri-apps/plugin-opener` npm(2.5.5) · crate(2.6.0) 불일치로 Tauri CLI가 거부 → npm 2.6으로 맞춤 (기존 문제, Windows 빌드도 이번에 처음 통과)
 
@@ -293,6 +295,8 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 - 백업 Codex Sol 검증 FAIL (p10run3, 검사 통과, blocking 2) → 수정: 덤프 실패 시 부분 `.tmp`가 남고 보관 정리를 건너뜀 → 정리를 덤프 전에, 실패 시 `.tmp` 삭제(로컬에서 실패 재현 확인), 방침 문구에 서버 중단 시 예외 추가. launchd agent 로드 실패가 경고뿐 → 이미지 교체 전에 배포 실패로
 - 백업 Codex 재검증 1회차 **PASS** (p10run4, `bash -n` · `sh -n` · server verify · typecheck · diff check · 실패 재현 · `plutil -lint`)
 - Netflix seek (결정 66) Codex Sol: 1차 FAIL (p10run5, blocking 2: 이전 탭의 늦은 실패 응답이 새 연결을 seek 불가로 만듦, 탭이 다른 사이트로 옮겨 가는 사이 Netflix 함수가 그 탭에서 실행될 수 있음) → 호출 시 연결을 기억해 같은 연결일 때만 반영, 실행 전 탭 URL 확인. 재검증 1회차 FAIL (p10run6, URL 확인과 실행 사이 이동 경쟁) → 함수 안에서 실행 문서의 origin이 Netflix인지 먼저 확인 (테스트 추가, 빼면 실패 확인). 재검증 2회차 **PASS** (p10run7, extension 11)
+- 호스트 이탈 · 영상 변경 (결정 67): server 49 (`membersPauseWhenTheHostsLastConnectionLeaves`, content-change `series` 저장 · 형식 검증), sync-core 15 (`publishHost` 영상 사라짐 → 그 위치로 pause, 돌아와 재생하면 play), extension 14 (YouTube 재생목록, Netflix 이어 본 화, Laftel "다시보기"). E2E(가짜 페이지, 확장 2개): 호스트 뒤로가기 → 멤버 정지 · 복귀 후 재생, 다른 영상 → 팝업 · 클릭 시 열기, 재생목록 진입 → 팝업, 같은 재생목록 다음 영상 → 자동 이동, 호스트 side panel 닫기 → 서버가 멤버 정지. Netflix: 플레이어 안 다음 화 → 자동, 목록 거쳐 다른 작품 → 팝업, 내부 API seek(M7375 없음) · API 없으면 직접 이동 안내. Laftel: 같은 작품 다음 화 → 자동, 다른 작품 → 팝업. 기존 yt · nf · lf E2E 갱신 후 통과
+- 결정 67 Codex Sol: 1차 FAIL (p10run8, blocking 3) → 늦은 스냅샷 응답이 이전 영상으로 이동시키지 않게 무효화, 같은 영상에 재생목록만 붙어도 호스트가 알리고 서버는 재생 초기화 없이 방 정보만 갱신(`room:update`만), Netflix 묶음을 Navigation API `navigate` 이벤트로 즉시 끊음 (빼면 E2E 실패 확인), 문서 수정. 재검증 1회차 FAIL (p10run9, blocking 2) → 재생목록만 바뀐 URL을 1초 확인에서도 감지(빼면 URL만 바꾸는 E2E 실패 확인), 서버는 방 행 잠금 뒤 호스트 재접속 여부를 다시 확인(다시 들어온 연결의 재생은 이 정지 뒤에 적용). server 49 (RoomFlowTest: 같은 영상 메타데이터 변경 · 잠금 뒤 재확인). 재검증 2회차 **PASS** (p10run10, 지적 없음)
 - Release: `v0.1.0` → macOS universal · Windows 설치 파일 + 확장 zip draft release
 - Codex Sol 검증 1차 FAIL (2026-09-29, 검사 12개 모두 통과, blocking 1) → 수정
   - `docker compose up -d`가 실패하면 `set -e`로 바로 종료되어 롤백하지 않음 → compose와 헬스 체크를 `if` 안에서 실행해 모든 실패가 롤백 경로로, 롤백 후에도 헬스 체크 (로컬에서 재현 · 확인). 수정본이 CI로 배포되어 운영 UP 확인
@@ -504,6 +508,10 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 
 ## Known Issues
 - **Phase 10**
+  - 호스트가 방 화면에서 친구 목록으로만 나가도(`room:leave`) 멤버가 일시정지됨 (탭에서 계속 보고 있어도). 그동안 호스트 조작은 원래도 전달되지 않음
+  - Netflix "같은 작품"은 플레이어 안에서 넘어간 것으로 판단 → 엔딩 추천작을 바로 재생해도 멤버가 자동으로 따라감. 호스트 탭을 새로고침하면 다음 화도 팝업으로 물음
+  - **Netflix 다음 화 문제(사용자 보고)는 실제 사이트에서 미확인**: 멤버가 이전 화에 남던 문제는 자동 이동으로 해결. 호스트 쪽이 넘어가지 않는 증상이라면 실제 증상 확인 필요
+  - 탭을 다른 영상 탭으로 바꿔 따라가는 순간에도 "영상 사라짐"으로 멤버가 잠시 일시정지됐다가 새 탭 상태로 맞춰짐
   - **백업이 같은 호스트에만 있음** (디스크 · 호스트 장애 시 함께 잃음). 외부 보관(다른 기기 · 클라우드, 암호화) 필요. 백업 실패 알림 없음 (`~/mirattic-sync-backups/backup.log`만)
   - 백업 agent는 GUI 로그인 세션에 설치됨 → 호스트 사용자가 로그아웃하면 백업 안 됨 (OrbStack도 같은 조건)
   - 배포 호스트 1대(가정용 Mac) → 호스트 · 회선 장애 시 서비스 중단. 배포 중 수 초 중단(무중단 배포 아님), 접속 중인 WebSocket은 재연결

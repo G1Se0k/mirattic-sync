@@ -45,10 +45,11 @@ export async function watch(): Promise<Platform> {
   const adapter = new RemoteAdapter((p) => {
     presence = p;
     const next: RoomContent | null = p?.contentId
-      ? { provider: p.provider, contentId: p.contentId, title: p.title, durationMs: p.durationMs, canonicalUrl: p.canonicalUrl }
+      ? { provider: p.provider, contentId: p.contentId, title: p.title, durationMs: p.durationMs, canonicalUrl: p.canonicalUrl, series: p.series }
       : null;
     // Same object while the video is the same, as useSyncExternalStore requires.
-    if (next?.contentId !== content?.contentId || next?.title !== content?.title || (next?.durationMs ?? 0) !== (content?.durationMs ?? 0)) {
+    if (next?.contentId !== content?.contentId || next?.title !== content?.title || (next?.durationMs ?? 0) !== (content?.durationMs ?? 0)
+      || next?.series !== content?.series) {
       content = next;
       changed();
     }

@@ -163,12 +163,14 @@ export type PlaybackCommandType = "playback:play" | "playback:pause" | "playback
  * stale one — from before an ad started, or from the previous video. Nothing is sent during an ad or
  * without a player. `send` gets that snapshot too, so the caller can check which content it is about.
  * `capturedAt` is converted to server time so members can extrapolate.
+ * When the video goes away while playing (the host went back, closed the tab), members are paused where it
+ * was: `send` then gets `gone = true` with the last sent snapshot, now paused at the extrapolated position.
  */
 export function publishHost(
   adapter: MediaProviderAdapter,
   clock: ServerClock,
   /** @returns false if the command was not sent (e.g. the caller skipped it). */
-  send: (type: PlaybackCommandType, command: PlaybackCommand, snapshot: PlayerSnapshot) => boolean | void,
+  send: (type: PlaybackCommandType, command: PlaybackCommand, snapshot: PlayerSnapshot, gone?: boolean) => boolean | void,
   minIntervalMs = 200,
 ) {
   let last: PlayerSnapshot | null = null;
@@ -206,11 +208,25 @@ export function publishHost(
     else timer = setTimeout(() => void flush(), wait);
   };
 
+  const gone = () => {
+    if (stopped || !last?.playing) return;
+    clearTimeout(timer);
+    timer = undefined;
+    dirty = false;
+    flushes++; // a flush still reading a snapshot must not send after this
+    const now = Date.now();
+    const s = { ...last, positionMs: last.positionMs + Math.max(0, now - last.capturedAt), playing: false, capturedAt: now };
+    const command = { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(now)) };
+    if (send("playback:pause", command, s, true) !== false) last = s;
+  };
+
   void adapter.getSnapshot().then((s) => s && !last && !dirty && queue(s));
   const unsubscribe = adapter.onChange(queue);
+  const unsubscribeGone = adapter.onGone?.(gone);
   return () => {
     stopped = true;
     clearTimeout(timer);
     unsubscribe();
+    unsubscribeGone?.();
   };
 }

@@ -14,6 +14,8 @@ export type MediaPresence = {
   episode?: number;
   thumbnailUrl?: string;
   canonicalUrl?: string;
+  /** Same value = same series (YouTube playlist, Laftel item, a Netflix run of episodes). */
+  series?: string;
   positionMs?: number;
   durationMs?: number;
   playing: boolean;
@@ -68,6 +70,8 @@ export interface MediaProviderAdapter {
   seek(positionMs: number): Promise<void>;
 
   onChange(callback: (snapshot: PlayerSnapshot) => void): () => void;
+  /** The video went away (left the watch page, tab closed). Optional: the mock player never goes. */
+  onGone?(callback: () => void): () => void;
   destroy(): void;
 }
 
@@ -133,6 +137,8 @@ export type RoomContent = {
   title: string;
   durationMs?: number;
   canonicalUrl?: string;
+  /** See `MediaPresence.series`. */
+  series?: string;
 };
 
 const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -155,6 +161,21 @@ export function watchUrl(content: { provider: MediaProvider; contentId: string }
     return `https://laftel.net/player/${content.contentId}`;
   }
   return undefined;
+}
+
+const SERIES = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** The host moved on within the same series: members follow without being asked. */
+export function sameSeries(a: RoomContent | undefined, b: RoomContent | undefined) {
+  return !!a?.series && a.provider === b?.provider && a.series === b.series;
+}
+
+/** `watchUrl`, keeping a YouTube playlist so its next video stays in the same series. */
+export function openUrl(content: RoomContent): string | undefined {
+  const url = watchUrl(content);
+  return url && content.provider === "youtube" && content.series && SERIES.test(content.series)
+    ? `${url}&list=${content.series}`
+    : url;
 }
 
 export type RoomRole = "HOST" | "MEMBER";

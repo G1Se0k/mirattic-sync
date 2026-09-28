@@ -109,6 +109,46 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void membersPauseWhenTheHostsLastConnectionLeaves() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		Client hostApp = connect(host);
+		Client hostTab = connect(host);
+		hostApp.send(event("room:join", roomId, "{}"));
+		hostTab.send(event("room:join", roomId, "{}"));
+		hostTab.send(event("playback:play", roomId, "{\"positionMs\":1000,\"capturedAt\":%d}"
+				.formatted(System.currentTimeMillis())));
+		assertThat(friendWs.nextOfType("playback:update").path("payload").path("playing").asBoolean()).isTrue();
+
+		// Still in the room from the other app: nothing changes.
+		hostTab.send(event("room:leave", roomId, "{}"));
+		assertThat(friendWs.nextOfType("playback:update")).isNull();
+
+		// The last one goes (window closed): members stop where the host was.
+		Thread.sleep(200);
+		hostApp.session().close();
+		JsonNode paused = friendWs.nextOfType("playback:update");
+		assertThat(paused.path("payload").path("playing").asBoolean()).isFalse();
+		assertThat(paused.path("payload").path("positionMs").asLong()).isGreaterThan(1000).isLessThan(10_000);
+		assertThat(paused.path("version").asLong()).isEqualTo(2);
+
+		// A host connection that (re)joined before the room lock was taken keeps it playing.
+		Client back = connect(host);
+		back.send(event("room:join", roomId, "{}"));
+		back.send(event("playback:play", roomId, "{\"positionMs\":3000,\"capturedAt\":%d}"
+				.formatted(System.currentTimeMillis())));
+		assertThat(friendWs.nextOfType("playback:update").path("payload").path("playing").asBoolean()).isTrue();
+		assertThat(roomService.hostLeft(host.id(), roomId, () -> true)).isNull();
+		assertThat(roomService.hostLeft(friend.id(), roomId, () -> false)).isNull(); // not the host
+		assertThat(roomService.hostLeft(host.id(), roomId, () -> false).playing()).isFalse();
+	}
+
+	@Test
 	void hostChangesContentAndMembersRestartOnIt() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
@@ -139,13 +179,16 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(friendWs.nextOfType("playback:update").path("version").asLong()).isEqualTo(1);
 
 		String next = """
-				{"provider":"youtube","contentId":"9bZkp7q19f0","title":"Second"}""";
+				{"provider":"youtube","contentId":"9bZkp7q19f0","title":"Second","series":"PLx_1-a"}""";
 		friendWs.send(event("playback:content-change", roomId, next));
 		assertThat(friendWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_host");
 		hostWs.send(event("playback:content-change", roomId, """
 				{"provider":"youtube","contentId":"bad","title":"x"}"""));
 		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
 		hostWs.send(event("playback:content-change", roomId, "{\"provider\":\"youtube\"}"));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		hostWs.send(event("playback:content-change", roomId, """
+				{"provider":"youtube","contentId":"9bZkp7q19f0","title":"x","series":"PL x/../"}"""));
 		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
 		for (String[] bad : new String[][] {{"netflix", "81a"}, {"netflix", "1234567890123"},
 				{"laftel", "40522/../x"}, {"laftel", "40522/"}}) {
@@ -163,6 +206,21 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(friendWs.nextOfType("room:update")).isNotNull();
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, friend.accessToken(), null))
 				.path("content").path("title").asString()).isEqualTo("Second");
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, friend.accessToken(), null))
+				.path("content").path("series").asString()).isEqualTo("PLx_1-a");
+
+		// The same video with other metadata (joined another playlist): no restart, members refetch the room.
+		hostWs.send(event("playback:play", roomId, "{\"positionMs\":7000,\"capturedAt\":0}"));
+		assertThat(friendWs.nextOfType("playback:update").path("version").asLong()).isEqualTo(3);
+		hostWs.send(event("playback:content-change", roomId,
+				"{\"provider\":\"youtube\",\"contentId\":\"9bZkp7q19f0\",\"title\":\"Second\",\"series\":\"PLother\"}"));
+		assertThat(friendWs.nextOfType("room:update")).isNotNull();
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, friend.accessToken(), null))
+				.path("content").path("series").asString()).isEqualTo("PLother");
+		hostWs.send(event("playback:pause", roomId, "{\"positionMs\":8000,\"capturedAt\":0}"));
+		JsonNode kept = friendWs.nextOfType("playback:update");
+		assertThat(kept.path("version").asLong()).isEqualTo(4); // no restart in between
+		assertThat(kept.path("payload").path("positionMs").asLong()).isEqualTo(8000);
 	}
 
 	@Test
@@ -471,7 +529,7 @@ class RoomFlowTest extends IntegrationTest {
 		try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
 			// A room creation that has checked the friendship and added the friend, but not committed yet.
 			Future<String> room = pool.submit(() -> new TransactionTemplate(transactions).execute(tx -> {
-				String id = roomService.create(host.id(), new RoomContent(MediaProvider.mock, "c1", "Fake", null, null),
+				String id = roomService.create(host.id(), new RoomContent(MediaProvider.mock, "c1", "Fake", null, null, null),
 						List.of(friend.id())).id();
 				created.countDown();
 				try {
