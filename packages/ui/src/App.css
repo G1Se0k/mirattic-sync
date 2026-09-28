@@ -42,3 +42,4 @@ input.code::placeholder { font-family: system-ui, sans-serif; letter-spacing: no
 .chat { max-height: 40vh; overflow-y: auto; }
 .chat li { padding: 0.3rem 0; }
 .message { white-space: pre-wrap; overflow-wrap: anywhere; }
+.banner { padding-top: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line); }

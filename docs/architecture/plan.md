@@ -46,6 +46,10 @@
 | 38 | 앱별 차이는 `configure(api, socketUrl, platform)`의 `Platform`으로 주입 (adapter, 지금 보는 영상, presence 전송, 페이지 열기) | Desktop은 mock만 재생하고 실제 provider는 브라우저로 연다 |
 | 39 | Extension ↔ content script는 side panel이 여는 port (`bridge.ts`). side panel은 이 창의 YouTube 탭(활성 → 마지막 → 아무거나)을 따라감 | 결정 29 (side panel이 소켓 소유)와 일관, 중계 없음 |
 | 40 | 채팅은 DB(`chat_messages`, 방 삭제 시 함께 삭제)에 저장하고 WS로 참가자에게 전송, 입장·재연결 시 REST로 최근 100개 | 새로고침·재연결에도 대화 유지. 참가하지 않은 멤버는 입장할 때 기록으로 봄 |
+| 41 | 친구 영상에 합류 = 합류 요청(`watch:request`) → 친구가 "같이 보기"로 초대 (호스트 방이 있으면 그 방에, 없으면 지금 보는 영상으로 새 방). 온라인 친구에게만, 같은 쌍 30초에 1회 (서버 메모리) | 남을 동의 없이 방에 넣거나 방을 만들게 하지 않음. 보고 있는 사람이 호스트가 되어야 위치가 맞음 |
+| 42 | 차단하면 공유 방에서 호스트가 아닌 쪽이 빠짐 (차단한 사람의 방에서는 차단당한 사람, 그 외 방에서는 차단한 사람) | 호스트를 빼면 방이 닫혀 다른 멤버까지 영향 |
+| 43 | `IN_ROOM` presence 상태는 추가하지 않음. DND는 보류 | 방 참여 여부는 비공개로 둠. `WATCHING`과 영상 정보로 합류 요청에 충분 |
+| 44 | Desktop 창을 닫으면 트레이로 숨김 (접속·알림 유지, 트레이 "종료"로 끝냄). 초대·합류 요청 알림은 앱에 포커스가 없을 때만 (Tauri notification plugin). Extension은 알림 없음 | Extension에 `notifications` 권한을 더하지 않음 (side panel 배너로 충분) |
 
 ## 사용자 식별 (UID + Identity)
 

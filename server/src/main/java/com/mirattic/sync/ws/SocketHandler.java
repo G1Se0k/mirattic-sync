@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -80,7 +81,7 @@ class SocketHandler extends TextWebSocketHandler {
 			if (offline) {
 				presence.offline(userId(session));
 			}
-		} catch (BeansException | IllegalStateException e) {
+		} catch (BeansException | IllegalStateException | TransactionException e) {
 			// Sessions are closed after JPA during shutdown; nobody is left to notify.
 			log.debug("skip disconnect broadcast: {}", e.getMessage());
 		}

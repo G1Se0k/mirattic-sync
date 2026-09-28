@@ -1,10 +1,25 @@
 # Current Phase
-Phase 4 — YouTube + Chat (완료, 2026-09-28)
+Phase 5 — Desktop Integration (완료, 2026-09-28)
 
-이전: Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
+이전: Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Phase 5
+- **합류 요청**: 친구가 YouTube를 보고 있으면 "합류 요청" → 친구에게 `watch:request` → 친구가 "같이 보기"를 누르면 내가 초대됨
+  - 서버 `POST /api/rooms/requests` (친구만, 온라인일 때만, 같은 쌍 30초에 1회)
+  - 받은 쪽 "같이 보기": 내가 호스트인 방이 있으면 그 방에 초대 (`POST /api/rooms/{id}/invites`, 신규), 없으면 지금 보는 영상으로 새 방
+  - 요청은 방 화면에서도 배너로 보임
+- **Desktop**
+  - 초대 · 합류 요청 알림 (Tauri notification plugin, 앱에 포커스가 없을 때만. 브라우저 dev 모드는 Web Notification)
+  - 트레이 아이콘 (열기 / 종료), 창을 닫으면 트레이로 숨김, macOS Dock 클릭으로 다시 열기
+  - YouTube 방 → "YouTube에서 이 영상 열기"로 브라우저에서 열고, 그 브라우저의 side panel로 입장
+- **차단 시 공유 방 정리**: 호스트가 아닌 쪽이 빠지고 실시간 이벤트도 끊김 (Phase 2 known issue 해결)
+- `IN_ROOM`은 추가하지 않고 DND는 보류 (결정 43)
+- `packages/client`: 본문 없는 응답(202)도 처리
+- 서버 종료 중 WebSocket 정리에서 나던 `TransactionException` 경고 제거
+- 결정 41–44 (`plan.md`)
+
 ### Phase 4
 - 정책 확인: `docs/platform-policy/youtube.md` (2026-09-28). 약관 해석이 불확실한 부분은 보수적으로 구현하고 스토어 공개 전 재검토로 기록
 - **Extension**
@@ -110,6 +125,12 @@ Phase 4 — YouTube + Chat (완료, 2026-09-28)
 - `POST /api/me/friend-code`로 재발급. 이메일 검색 API는 삭제
 - Desktop: "내 친구 코드" (복사, 확인 창을 거친 재발급), 코드 입력으로 친구 추가
 
+## Major Files Changed (Phase 5)
+- `server/.../room/{RoomService,RoomController}.java`, `friend/FriendController.java`, `ws/SocketHandler.java`, `RoomFlowTest.java`
+- `packages/ui/src/{Home.tsx,session.ts,App.css}`, `packages/client/src/api.ts`
+- `apps/desktop/src/main.tsx`, `apps/desktop/src-tauri/{src/lib.rs,Cargo.toml,capabilities/default.json}`, `apps/desktop/package.json`
+- `docs/protocol/{rest,websocket}.md`, `docs/architecture/plan.md`
+
 ## Major Files Changed (Phase 4)
 - `apps/extension/{bridge.ts,providers/youtube.ts,wxt.config.ts}`, `entrypoints/youtube.content.ts`, `entrypoints/sidepanel/{main.tsx,Consent.tsx,watch.ts}`
 - `packages/ui/src/{session.ts,index.ts,Home.tsx,Room.tsx,Chat.tsx,format.ts,App.css}`, `apps/desktop/src/main.tsx`
@@ -150,11 +171,38 @@ Phase 4 — YouTube + Chat (완료, 2026-09-28)
 - 20. 친구 추가는 친구 코드로만 (이메일 검색 제거)
 - 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 21–28 (Phase 2): mock provider, playback/version DB 저장, 초대=멤버십, `room:update` 후 재조회, 서버 시각 기준 `capturedAt`, seek 구간 재확인, echo 억제 창 없음, 호스트 명령 모으기 + 초당 제한 — `plan.md` 참고
+- 41–44 (Phase 5): 합류는 요청 → 초대, 차단 시 호스트가 아닌 쪽이 빠짐, IN_ROOM 없음 · DND 보류, Desktop 트레이 · 알림 — `plan.md` 참고
 - 33–40 (Phase 4): YouTube는 사용자 탭의 `<video>` 제어, URL은 contentId로 생성, content-change, 광고 중 명령 없음, 동의 화면, Platform 주입, side panel ⇄ content script port, 채팅 저장 — `plan.md` 참고
 - 29–32 (Phase 3): Extension은 side panel이 소켓 소유, refresh token은 `storage.session`, 화면은 `packages/ui` 공유, 최소 권한 — `plan.md` 참고
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
+### Phase 5
+- `./mvnw test` RoomFlowTest 14/14, 전체 39/39 (추가 6, 동시 초대 · 동시 합류 요청 · 방 생성 중 차단 포함: 기존 방에 초대 — 호스트만·친구만·비멤버 404·이미 멤버는 재초대 안 함, 차단 시 양쪽 방 정리와 이벤트 차단, 합류 요청 — 오프라인 409·비친구 404·전달·30초 제한)
+- `packages/client` 3/3, `sync-core` 13/13, `ui` 3/3, `pnpm typecheck` / `pnpm build`, `cargo check` ✅
+- 수동 E2E (Playwright, 2026-09-28): 친구 A = 확장 + 가짜 youtube.com에서 재생 중, 나 B = Desktop 웹 빌드를 확장이 설치된 브라우저에서
+  - B 친구 목록에 "YouTube · 제목 시청 중" → 합류 요청 → 다시 누르면 "방금 요청했습니다"
+  - A side panel에 "B님이 같이 보자고 합니다" → 같이 보기 → A의 영상으로 방
+  - B는 포커스가 없을 때 "A님의 같이 보기 초대 | 제목" 알림 → 입장 → "YouTube에서 이 영상 열기"로 브라우저 탭
+  - 그 브라우저의 side panel에서 로그인 → 입장 → 동기화 (A 90.3s / B 90.1s)
+  - Phase 4 E2E 전체 재실행 통과, 360px 친구 목록 확인
+- 트레이 / 창 숨기기 / OS 알림은 Tauri 앱을 실제로 띄워 확인하지 않음 (cargo check만)
+- Codex Sol 검증 1차 FAIL (2026-09-28, 검사 7개 모두 통과, blocking 2 · non-blocking 2) → 수정
+  - 합류 요청 30초 제한의 조회와 기록이 분리돼 동시 요청이 모두 통과 → `compute`로 원자적으로. 동시 5개 → 202 1개 테스트 (분리된 버전으로 되돌리면 실패 확인)
+  - 초대 인원 검사가 잠금 없이 이뤄져 동시 초대로 7명 초과 → 방 행 잠금 후 검사. 동시 7명씩 2번 → 한쪽만 성공 테스트
+    - 이 테스트로 추가 발견: 잠금 전에 멤버십을 읽으면 MySQL REPEATABLE READ 스냅샷이 고정돼 대기한 트랜잭션이 이전 멤버 목록을 봄 → `lockAsHost`가 잠금을 먼저 잡도록 순서 변경 (playback 명령에도 적용)
+  - (non-blocking) 같은 ID를 여러 번 넣으면 `room:invite`가 여러 번 감 → 실제로 추가된 멤버에게 한 번씩. 테스트 추가
+  - (non-blocking) 합류 요청 수락이 실패해도 배너가 사라짐 → 성공 후에만 제거
+  - 동시성 테스트 3회 반복 통과, Phase 5 E2E 재실행 통과
+- Codex 재검증 1회차 FAIL (1차 지적 4개 해결 확인, blocking 1 · non-blocking 1) → 수정
+  - 합류 요청에 응답할 때 지금 보는 영상과 상관없이 첫 호스트 방(예: Mock 방)에 초대 → 지금 보는 영상과 같은 내 방만 재사용, 없으면 새 방 (`roomToInvite`, 테스트 2개. 영상 비교를 빼면 실패 확인). 보는 영상이 없는 Desktop은 열린 방 → 아무 내 방
+  - (non-blocking) 방 화면에서 초대 실패 메시지가 보이지 않음 → 방 화면에도 오류 표시
+- Codex 재검증 2회차 FAIL (2회차 지적 해결 확인, blocking 1 · non-blocking 1) → 수정
+  - 방 생성 · 초대가 친구 관계를 확인한 뒤 커밋 전에 차단이 끝나면, 차단 후 방 정리가 그 방을 못 봐 두 사람이 방을 공유함 → 친구 확인을 공유 잠금(`FOR SHARE`)으로 읽어 차단의 친구 관계 삭제가 그 트랜잭션 커밋까지 기다림. 방 정리는 차단 커밋 후라 새 방도 봄
+    - 순서 고정 테스트: 방 생성 트랜잭션을 열어 둔 채 차단 → 차단이 기다리는지, 커밋 후 차단한 사람이 새 방에서 빠지는지 (잠금 없는 읽기로 되돌리면 실패 확인, 반복 통과)
+  - (non-blocking) 합류 요청 제한 맵이 계속 커짐 → 요청마다 만료 항목 제거
+- Codex 재검증 3회차 **PASS** (검사 7개 통과). non-blocking 1개: 열린 방에서 다른 방으로 바꾸면 Room 상태(재생 version 등)가 남음 → `key={openRoom}`으로 수정 (PASS 이후 한 줄 수정, typecheck · 테스트 · E2E로 확인)
+
 ### Phase 4
 - `./mvnw test` RoomFlowTest 8/8 (추가 2: content-change 호스트만·형식 검증·0초 초기화·version, 채팅 멤버만·공백 제거·길이·위치·기록)
 - `packages/sync-core` vitest 13/13 (추가: 광고 중 위치를 publish하지 않음, 보낼 때의 최신 스냅샷만 보냄. 수정을 되돌리면 실패 확인)
@@ -239,6 +287,12 @@ Phase 4 — YouTube + Chat (완료, 2026-09-28)
   - 가입 → 이메일로 친구 요청 → 상대 화면에 실시간 표시 → 수락 → 온라인 표시 → 탭 닫으면 오프라인 → 새로고침해도 세션 유지 ✅
 
 ## Known Issues
+- **Phase 5**
+  - Tauri 앱을 실제로 실행해 트레이, 창 숨기기, OS 알림을 확인하지 않음 (기존 키체인 항목과 같이 첫 `tauri dev`에서 확인 필요)
+  - 알림을 눌러도 해당 방으로 이동하지 않음 (앱만 보임)
+  - Extension은 side panel이 닫혀 있으면 합류 요청 · 초대를 받지 못함 (접속 자체가 side panel 기준, 결정 29)
+  - 합류 요청 제한은 서버 메모리 (서버 1대 전제)
+  - 제3자가 호스트인 방에서는 차단한 사람이 빠짐 (차단당한 사람은 남음). 제3자가 차단한 두 사람을 같은 방에 초대하는 것은 막지 않음
 - **Phase 4**
   - YouTube 약관상 content script 제어의 허용 여부 불확실 → 스토어 공개 전 재검토 (`youtube.md`)
   - 실제 YouTube 광고로 `ad-showing` 감지를 검증하지 못함 (가짜 페이지로만). 바뀌면 광고 중 동기화가 틀어질 수 있음
@@ -259,7 +313,6 @@ Phase 4 — YouTube + Chat (완료, 2026-09-28)
 - `IN_ROOM`, `DND` 상태는 아직 없음 (Phase 5)
 - **Phase 2**
   - 방 안에서의 `positionVisibility=ROOM_ONLY` 규칙은 따로 적용하지 않음 (방 멤버는 재생 상태를 받음. presence 위치는 여전히 친구에게 숨김)
-  - 차단해도 기존 방 멤버십은 남음 → Phase 5(같이 보기)에서 차단 시 공통 방 정리 필요
   - `playback:content-change` 없음 (Phase 4)
   - 호스트 위임 없음. 호스트가 나가면 방이 닫힘
   - 방 참가(present) 상태가 서버 메모리에 있음 (서버 1대 전제)
@@ -284,9 +337,7 @@ Phase 4 — YouTube + Chat (완료, 2026-09-28)
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Next Task
-Phase 5 — Desktop Integration (`Mirattic_Sync_PLAN.md`)
-1. 차단 시 공통 방 정리 (Phase 2 known issue)
-2. presence에 `IN_ROOM` 표시 여부 결정, DND
-3. Desktop: 친구가 보는 콘텐츠에 "같이 보기"로 합류 (친구 presence의 영상으로 방 만들기 / 초대 수락 → 브라우저에서 열기)
-4. Room invite 알림: Desktop notification (Tauri notification plugin), tray
-5. 완료 조건: 친구가 보고 있는 콘텐츠에 Desktop에서 합류 가능
+Phase 6 — Netflix Experimental Adapter (`Mirattic_Sync_PLAN.md`)
+1. 정책 확인: Netflix 이용약관 · 브랜드/기술 정책 — content script로 netflix.com 플레이어를 제어하는 것이 허용 범위인지, `video.currentTime` 직접 변경 시 알려진 오류(plan.md 위험 5) → `docs/platform-policy/netflix.md` (확인 날짜). 불명확하면 보수적 선택 또는 중단하고 사용자에게 보고
+2. 정책상 가능할 때만: `providers/netflix.ts` adapter (작품/에피소드 감지, play/pause/seek), host_permissions · content script를 netflix.com에만 추가, 동의 화면 문구 갱신
+3. 계정·회선 제한 우회 금지 확인, 실험 기능 표시

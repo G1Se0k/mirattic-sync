@@ -28,6 +28,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [openRoom, setOpenRoom] = useState<string | null>(null);
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [watchRequests, setWatchRequests] = useState<UserSummary[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
   const listeners = useRef(new Set<(event: ServerEvent) => void>());
   const watching = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatching ?? nothing);
@@ -68,6 +70,16 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         if (event.type === "friend:update" || event.type === "room:invite" || event.type === "room:update") {
           void reload();
         }
+        if (event.type === "watch:request") {
+          const from = event.payload as UserSummary;
+          setWatchRequests((list) => [...list.filter((u) => u.id !== from.id), from]);
+          notify(`${from.displayName}님이 같이 보자고 합니다`, "눌러서 같이 보기 방을 만들 수 있습니다.");
+        }
+        if (event.type === "room:invite") {
+          const room = event.payload as RoomView;
+          const host = room.members.find((m) => m.role === "HOST")?.user.displayName ?? "친구";
+          notify(`${host}님의 같이 보기 초대`, room.content.title);
+        }
         if (event.type === "presence:update" && event.userId) {
           const presence = event.payload as PresenceView;
           setFriends((list) => list.map((f) => (f.user.id === event.userId ? { ...f, presence } : f)));
@@ -94,19 +106,52 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   const sorted = [...friends].sort((a, b) => rank(a.presence) - rank(b.presence));
 
-  if (openRoom && socket) {
-    return (
-      <Room roomId={openRoom} me={me} socket={socket} status={status} subscribe={subscribe} onClose={closeRoom} />
-    );
-  }
-
+  /** Invites into my room for what I watch now, or starts one with it. */
   async function watchTogether(friend: UserSummary) {
     setError(null);
+    const hosted = roomToInvite(rooms, me.id, openRoom, watching);
     try {
-      setOpenRoom((await api.createRoom(watching ?? MOCK_CONTENT, [friend.id])).id);
+      if (hosted) await api.inviteToRoom(hosted.id, [friend.id]);
+      setOpenRoom(hosted?.id ?? (await api.createRoom(watching ?? MOCK_CONTENT, [friend.id])).id);
+      setWatchRequests((list) => list.filter((u) => u.id !== friend.id)); // answered; kept on failure to retry
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
     }
+  }
+
+  async function requestWatch(friend: UserSummary) {
+    setError(null);
+    setNotice(null);
+    try {
+      await api.requestWatch(friend.id);
+      setNotice(`${friend.displayName}님에게 같이 보자고 요청했습니다. 초대가 오면 알려드립니다.`);
+    } catch (e) {
+      const status = e instanceof ApiError ? e.status : 0;
+      setError(status === 409 ? "친구가 오프라인입니다." : status === 429 ? "방금 요청했습니다. 잠시 후 다시 시도하세요." : "요청하지 못했습니다.");
+    }
+  }
+
+  const requestBanner = watchRequests.length > 0 && (
+    <div className="container banner">
+      {watchRequests.map((u) => (
+        <div key={u.id} className="row">
+          <span className="grow">{u.displayName}님이 같이 보자고 합니다</span>
+          <button onClick={() => void watchTogether(u)}>같이 보기</button>
+          <button className="link" onClick={() => setWatchRequests((list) => list.filter((x) => x.id !== u.id))}>무시</button>
+        </div>
+      ))}
+    </div>
+  );
+
+  if (openRoom && socket) {
+    return (
+      <>
+        {requestBanner}
+        {error && <div className="container"><p className="error" role="alert">{error}</p></div>}
+        {/* keyed: another room starts from fresh state (versions, clock, player) */}
+        <Room key={openRoom} roomId={openRoom} me={me} socket={socket} status={status} subscribe={subscribe} onClose={closeRoom} />
+      </>
+    );
   }
 
   return (
@@ -119,7 +164,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           <button className="link" onClick={onSignedOut}>로그아웃</button>
         </div>
       </header>
+      {requestBanner}
       {error && <p className="error" role="alert">{error}</p>}
+      {notice && <p className="muted">{notice}</p>}
       <p className="muted">
         {watching ? `지금 보는 영상: ${watching.title} · "같이 보기"로 공유` : `"같이 보기"는 Mock 영상으로 방을 만듭니다`}
       </p>
@@ -134,7 +181,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 <strong>{f.user.displayName}</strong>
                 <div className="muted">{describe(f.presence)}</div>
               </div>
-              <button onClick={() => void watchTogether(f.user)}>같이 보기</button>
+              {f.presence.status === "WATCHING" && (
+                <button onClick={() => void requestWatch(f.user)} title="친구가 보는 영상으로 같이 보자고 요청합니다">합류 요청</button>
+              )}
+              <button onClick={() => void watchTogether(f.user)} title="내 방에 초대합니다">같이 보기</button>
               <button className="link" onClick={act(() => api.removeFriend(f.user.id))}>삭제</button>
               <button className="link danger" onClick={act(() => api.block(f.user.id))}>차단</button>
             </li>
@@ -271,6 +321,25 @@ function AddFriend({ onSent }: { onSent: () => void }) {
       {note && <p className="muted">{note}</p>}
     </section>
   );
+}
+
+/**
+ * The room I host to invite a friend into: the one showing what I watch now (the open one first). When I
+ * watch nothing the app can see (desktop), any room I host. undefined = start a new room.
+ */
+export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string | null, watching: RoomContent | null) {
+  return [...rooms]
+    .sort((a, b) => Number(b.id === openRoom) - Number(a.id === openRoom))
+    .find(
+      (r) =>
+        r.members.some((m) => m.user.id === meId && m.role === "HOST") &&
+        (!watching || (r.content.provider === watching.provider && r.content.contentId === watching.contentId)),
+    );
+}
+
+/** Only when the user isn't looking at the app: otherwise the screen already shows it. */
+function notify(title: string, body: string) {
+  if (!document.hasFocus()) platform.notify?.(title, body);
 }
 
 const noSubscribe = () => () => {};

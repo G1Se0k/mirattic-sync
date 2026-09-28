@@ -49,7 +49,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
       const problem = await res.json().catch(() => null);
       throw new ApiError(res.status, problem?.detail ?? res.statusText);
     }
-    return (res.status === 204 ? undefined : await res.json()) as T;
+    const text = await res.text(); // 202 / 204 have no body
+    return (text ? JSON.parse(text) : undefined) as T;
   }
 
   async function adopt(tokens: AuthTokens) {
@@ -124,6 +125,10 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** Creates a room you host; invitees must be friends and get `room:invite`. */
     createRoom: (content: RoomContent, inviteIds: string[]) =>
       authed<RoomView>("POST", "/api/rooms", { content, inviteIds }),
+    /** Host only: adds friends to an existing room; they get `room:invite`. */
+    inviteToRoom: (id: string, userIds: string[]) => authed<RoomView>("POST", `/api/rooms/${id}/invites`, { userIds }),
+    /** Asks an online friend to watch together; they get `watch:request`. 409 offline, 429 asked recently. */
+    requestWatch: (friendId: string) => authed<void>("POST", "/api/rooms/requests", { friendId }),
     rooms: () => authed<RoomView[]>("GET", "/api/rooms"),
     /** 404 once the room is closed or you left it. */
     room: (id: string) => authed<RoomView>("GET", `/api/rooms/${id}`),

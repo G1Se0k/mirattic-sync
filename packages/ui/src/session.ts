@@ -12,6 +12,8 @@ export type Platform = {
   connected?(socket: Socket | null): void;
   /** Opens a watch page (built with `watchUrl`, never a URL from another user). */
   open(url: string): void;
+  /** A system notification, shown only while the app isn't focused. */
+  notify?(title: string, body: string): void;
 };
 
 // Each app (desktop, extension) builds its own client and platform and hands them over here before

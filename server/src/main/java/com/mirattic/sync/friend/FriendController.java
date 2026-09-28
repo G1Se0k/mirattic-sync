@@ -1,5 +1,6 @@
 package com.mirattic.sync.friend;
 
+import com.mirattic.sync.room.RoomService;
 import com.mirattic.sync.user.UserSummary;
 import com.mirattic.sync.ws.SocketHub;
 import jakarta.validation.Valid;
@@ -28,9 +29,11 @@ class FriendController {
 	}
 
 	private final FriendService friends;
+	private final RoomService rooms;
 	private final SocketHub hub;
 
-	FriendController(FriendService friends, SocketHub hub) {
+	FriendController(FriendService friends, RoomService rooms, SocketHub hub) {
+		this.rooms = rooms;
 		this.friends = friends;
 		this.hub = hub;
 	}
@@ -81,6 +84,10 @@ class FriendController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void block(@AuthenticationPrincipal Jwt jwt, @PathVariable String userId) {
 		friends.block(jwt.getSubject(), userId);
+		for (RoomService.Separation s : rooms.separate(jwt.getSubject(), userId)) {
+			hub.removeFromRoom(s.roomId(), s.removedUserId());
+			rooms.announce(s.roomId(), s.memberIds());
+		}
 		notify(jwt.getSubject(), userId);
 	}
 

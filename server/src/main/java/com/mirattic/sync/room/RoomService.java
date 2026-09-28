@@ -36,6 +36,10 @@ public class RoomService {
 	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt) {
 	}
 
+	/** A member removed from a room because of a block, and who to tell (before the removal). */
+	public record Separation(String roomId, String removedUserId, List<String> memberIds) {
+	}
+
 	/** Who to notify after a leave, and whether the room was closed (host left). */
 	public record Left(List<String> memberIds, boolean closed) {
 	}
@@ -76,7 +80,7 @@ public class RoomService {
 		if (invitees.size() > MAX_INVITES) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "too many invites");
 		}
-		if (!new HashSet<>(friendships.friendIds(me)).containsAll(invitees)) {
+		if (!areFriends(me, invitees)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "can only invite friends");
 		}
 		Room room = rooms.save(new Room(content, me));
@@ -85,6 +89,69 @@ public class RoomService {
 			members.save(new RoomMember(room.getId(), id, RoomMember.Role.MEMBER));
 		}
 		return view(room, members.findByRoomId(room.getId()));
+	}
+
+	/** The room after an invite, and who was a member before it. */
+	public record Invited(RoomView room, List<String> before) {
+	}
+
+	/** Host adds friends to an existing room. Existing members are skipped. */
+	@Transactional
+	public Invited invite(String me, String roomId, Collection<String> inviteIds) {
+		// The row lock serializes concurrent invites, so together they can't pass the member limit.
+		lockAsHost(me, roomId);
+		List<String> before = memberIds(roomId);
+		Set<String> current = new HashSet<>(before);
+		Set<String> invitees = new HashSet<>(inviteIds);
+		invitees.removeAll(current);
+		if (current.size() - 1 + invitees.size() > MAX_INVITES) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "too many invites");
+		}
+		if (!areFriends(me, invitees)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "can only invite friends");
+		}
+		for (String id : invitees) {
+			members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER));
+		}
+		return new Invited(view(rooms.findById(roomId).orElseThrow(RoomService::notFound), members.findByRoomId(roomId)),
+				before);
+	}
+
+	/**
+	 * Runs after the block is committed. Room creation and invites share-lock the friendship they rely on, so
+	 * the block's delete of it waited for them: every room they made is visible here.
+	 * After `blocker` blocks `blocked`, the two stop sharing rooms: whoever doesn't host the shared room leaves it
+	 * (the blocked user from the blocker's rooms, the blocker from any other room).
+	 */
+	@Transactional
+	public List<Separation> separate(String blocker, String blocked) {
+		Set<String> theirs = members.findByUserId(blocked).stream().map(RoomMember::getRoomId)
+				.collect(Collectors.toSet());
+		List<Separation> result = new ArrayList<>();
+		for (RoomMember mine : members.findByUserId(blocker)) {
+			if (!theirs.contains(mine.getRoomId())) {
+				continue;
+			}
+			String leaving = mine.getRole() == RoomMember.Role.HOST ? blocked : blocker;
+			List<String> everyone = memberIds(mine.getRoomId());
+			members.delete(requireMember(leaving, mine.getRoomId()));
+			result.add(new Separation(mine.getRoomId(), leaving, everyone));
+		}
+		return result;
+	}
+
+	/** Checked with a share lock held to the end of the transaction, so a concurrent block waits (see separate). */
+	private boolean areFriends(String me, Set<String> others) {
+		return others.isEmpty() || friendships.lockFriendships(me, others).size() == others.size();
+	}
+
+	/** A watch request goes only to a friend. @return the requester, as the friend will see them. */
+	@Transactional(readOnly = true)
+	public UserSummary requestWatch(String me, String friendId) {
+		if (!friendships.friendIds(me).contains(friendId)) {
+			throw notFound();
+		}
+		return UserSummary.of(users.findById(me).orElseThrow(RoomService::notFound));
 	}
 
 	@Transactional(readOnly = true)
@@ -165,12 +232,17 @@ public class RoomService {
 		return room.playback();
 	}
 
-	/** Membership first (404 for outsiders), then the host role (403), then the row lock. */
+	/**
+	 * Locks the room row, then checks membership (404) and the host role (403). The lock comes first: under
+	 * REPEATABLE READ the first plain read fixes the snapshot, so reading members before the lock would let
+	 * a transaction that waited on it see members as they were before the one it waited for.
+	 */
 	private Room lockAsHost(String me, String roomId) {
+		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		if (requireMember(me, roomId).getRole() != RoomMember.Role.HOST) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "only the host controls playback");
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "host only");
 		}
-		return rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+		return room;
 	}
 
 	/**

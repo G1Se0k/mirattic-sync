@@ -3,9 +3,13 @@ package com.mirattic.sync.room;
 import com.mirattic.sync.ws.ServerEvent;
 import com.mirattic.sync.ws.SocketHub;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import com.mirattic.sync.user.UserSummary;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -17,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/rooms")
@@ -24,6 +29,17 @@ class RoomController {
 
 	record CreateRoom(@NotNull @Valid RoomContent content, @NotNull @Size(max = 32) List<String> inviteIds) {
 	}
+
+	record Invite(@NotNull @Size(min = 1, max = 32) List<String> userIds) {
+	}
+
+	record WatchRequest(@NotBlank String friendId) {
+	}
+
+	/** One watch request per (requester, friend) per this interval. */
+	static final long WATCH_REQUEST_INTERVAL_MS = 30_000;
+	// ponytail: in-memory, pruned on each request (O(pairs asked in the last 30s)); single server, like presence.
+	private final Map<String, Long> lastWatchRequest = new ConcurrentHashMap<>();
 
 	private final RoomService rooms;
 	private final SocketHub hub;
@@ -37,14 +53,53 @@ class RoomController {
 	@PostMapping
 	RoomService.RoomView create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateRoom body) {
 		RoomService.RoomView room = rooms.create(jwt.getSubject(), body.content(), body.inviteIds());
-		ServerEvent invite = new ServerEvent("room:invite", room.id(), jwt.getSubject(), null,
-				System.currentTimeMillis(), room);
+		sendInvites(jwt.getSubject(), room, List.of(jwt.getSubject()));
+		return room;
+	}
+
+	/** Host invites more friends; they get `room:invite`, current members `room:update`. */
+	@PostMapping("/{id}/invites")
+	RoomService.RoomView invite(@AuthenticationPrincipal Jwt jwt, @PathVariable String id,
+			@Valid @RequestBody Invite body) {
+		RoomService.Invited invited = rooms.invite(jwt.getSubject(), id, body.userIds());
+		sendInvites(jwt.getSubject(), invited.room(), invited.before());
+		rooms.announce(id, invited.before());
+		return invited.room();
+	}
+
+	/**
+	 * Asks a friend to start (or open) a room with the caller: the friend gets `watch:request` with the caller,
+	 * and answers by inviting them. 409 if the friend is offline (nobody would see it), 429 if asked recently.
+	 */
+	@PostMapping("/requests")
+	@ResponseStatus(HttpStatus.ACCEPTED)
+	void requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body) {
+		UserSummary me = rooms.requestWatch(jwt.getSubject(), body.friendId());
+		if (!hub.isOnline(body.friendId())) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "friend is offline");
+		}
+		long now = System.currentTimeMillis();
+		boolean[] allowed = {false};
+		lastWatchRequest.values().removeIf(at -> now - at >= WATCH_REQUEST_INTERVAL_MS); // expired
+		// Check and record in one atomic step, or concurrent requests would all pass.
+		lastWatchRequest.compute(me.id() + ">" + body.friendId(), (k, last) -> {
+			allowed[0] = last == null || now - last >= WATCH_REQUEST_INTERVAL_MS;
+			return allowed[0] ? now : last;
+		});
+		if (!allowed[0]) {
+			throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
+		}
+		hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now, me));
+	}
+
+	/** `room:invite`, once each, to the room's members who aren't in `alreadyIn`. */
+	private void sendInvites(String hostId, RoomService.RoomView room, List<String> alreadyIn) {
+		ServerEvent invite = new ServerEvent("room:invite", room.id(), hostId, null, System.currentTimeMillis(), room);
 		for (RoomService.MemberView m : room.members()) {
-			if (!m.user().id().equals(jwt.getSubject())) {
+			if (!alreadyIn.contains(m.user().id())) {
 				hub.sendEvent(m.user().id(), invite);
 			}
 		}
-		return room;
 	}
 
 	@GetMapping

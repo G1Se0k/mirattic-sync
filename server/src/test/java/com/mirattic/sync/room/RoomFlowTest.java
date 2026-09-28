@@ -4,9 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.mirattic.sync.IntegrationTest;
+import com.mirattic.sync.presence.MediaProvider;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 class RoomFlowTest extends IntegrationTest {
@@ -171,6 +182,201 @@ class RoomFlowTest extends IntegrationTest {
 
 		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", friend.accessToken(), null));
 		assertThat(history.findValuesAsString("text")).containsExactly("look at this", "no position");
+	}
+
+	@Test
+	void hostInvitesMoreFriendsIntoAnExistingRoom() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		TestUser late = signup();
+		TestUser stranger = signup();
+		befriend(host, friend);
+		befriend(host, late);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		Client lateWs = connect(late);
+
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", friend.accessToken(),
+				"{\"userIds\":[\"%s\"]}".formatted(late.id())).andExpect(status().isForbidden());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(),
+				"{\"userIds\":[\"%s\"]}".formatted(stranger.id())).andExpect(status().isBadRequest());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", stranger.accessToken(),
+				"{\"userIds\":[\"%s\"]}".formatted(late.id())).andExpect(status().isNotFound());
+
+		JsonNode room = body(call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(),
+				"{\"userIds\":[\"%s\",\"%s\"]}".formatted(late.id(), friend.id())).andExpect(status().isOk()));
+		assertThat(room.path("members")).hasSize(3);
+		assertThat(lateWs.nextOfType("room:invite").path("roomId").asString()).isEqualTo(roomId);
+		assertThat(friendWs.nextOfType("room:update")).isNotNull();
+		assertThat(friendWs.nextOfType("room:invite")).isNull(); // already a member: not invited again
+	}
+
+	@Test
+	void concurrentInvitesStayWithinTheLimitAndInviteOnce() throws Exception {
+		TestUser host = signup();
+		String roomId = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(),
+				"{\"content\":%s,\"inviteIds\":[]}".formatted(CONTENT))).path("id").asString();
+		List<String> ids = new ArrayList<>();
+		for (int i = 0; i < 2 * RoomService.MAX_INVITES; i++) {
+			TestUser friend = signup();
+			befriend(host, friend);
+			ids.add(friend.id());
+		}
+		List<List<String>> batches = List.of(ids.subList(0, RoomService.MAX_INVITES), ids.subList(RoomService.MAX_INVITES, ids.size()));
+		CountDownLatch start = new CountDownLatch(1);
+		List<Future<Integer>> results = new ArrayList<>();
+		try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+			for (List<String> batch : batches) {
+				results.add(pool.submit(() -> {
+					start.await();
+					return call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(),
+							"{\"userIds\":%s}".formatted(json(batch))).andReturn().getResponse().getStatus();
+				}));
+			}
+			start.countDown();
+			List<Integer> statuses = new ArrayList<>();
+			for (Future<Integer> r : results) {
+				statuses.add(r.get());
+			}
+			assertThat(statuses).containsExactlyInAnyOrder(200, 400);
+		}
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, host.accessToken(), null)).path("members"))
+				.hasSize(1 + RoomService.MAX_INVITES);
+
+		TestUser once = signup();
+		befriend(host, once);
+		String small = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(),
+				"{\"content\":%s,\"inviteIds\":[]}".formatted(CONTENT))).path("id").asString();
+		Client onceWs = connect(once);
+		call(HttpMethod.POST, "/api/rooms/" + small + "/invites", host.accessToken(),
+				"{\"userIds\":[\"%1$s\",\"%1$s\"]}".formatted(once.id())).andExpect(status().isOk());
+		assertThat(onceWs.nextOfType("room:invite")).isNotNull();
+		assertThat(onceWs.nextOfType("room:invite")).isNull(); // a repeated id is invited once
+	}
+
+	@Test
+	void concurrentWatchRequestsSendOnlyOne() throws Exception {
+		TestUser me = signup();
+		TestUser friend = signup();
+		befriend(me, friend);
+		Client friendWs = connect(friend);
+		CountDownLatch start = new CountDownLatch(1);
+		List<Future<Integer>> results = new ArrayList<>();
+		try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+			for (int i = 0; i < 5; i++) {
+				results.add(pool.submit(() -> {
+					start.await();
+					return call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(),
+							"{\"friendId\":\"%s\"}".formatted(friend.id())).andReturn().getResponse().getStatus();
+				}));
+			}
+			start.countDown();
+			List<Integer> statuses = new ArrayList<>();
+			for (Future<Integer> r : results) {
+				statuses.add(r.get());
+			}
+			assertThat(statuses).containsExactlyInAnyOrder(202, 429, 429, 429, 429);
+		}
+		assertThat(friendWs.nextOfType("watch:request")).isNotNull();
+		assertThat(friendWs.nextOfType("watch:request")).isNull();
+	}
+
+	private static String json(List<String> ids) {
+		return ids.stream().map(id -> "\"" + id + "\"").collect(Collectors.joining(",", "[", "]"));
+	}
+
+	@Test
+	void blockingSeparatesSharedRooms() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String hostsRoom = body(createRoom(host, friend)).path("id").asString();
+		String friendsRoom = body(createRoom(friend, host)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", hostsRoom, "{}"));
+		friendWs.nextOfType("playback:update");
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", hostsRoom, "{}"));
+		hostWs.nextOfType("playback:update");
+
+		call(HttpMethod.PUT, "/api/blocks/" + friend.id(), host.accessToken(), null).andExpect(status().isNoContent());
+		// The blocked user leaves the blocker's room (and its live events); the blocker leaves theirs.
+		call(HttpMethod.GET, "/api/rooms/" + hostsRoom, friend.accessToken(), null).andExpect(status().isNotFound());
+		call(HttpMethod.GET, "/api/rooms/" + friendsRoom, host.accessToken(), null).andExpect(status().isNotFound());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + hostsRoom, host.accessToken(), null)).path("members"))
+				.hasSize(1);
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + friendsRoom, friend.accessToken(), null)).path("members"))
+				.hasSize(1);
+		assertThat(friendWs.nextOfType("room:update")).isNotNull();
+		hostWs.send(event("playback:play", hostsRoom, "{\"positionMs\":0,\"capturedAt\":0}"));
+		assertThat(hostWs.nextOfType("playback:update")).isNotNull();
+		assertThat(friendWs.nextOfType("playback:update")).isNull();
+	}
+
+	@Autowired
+	private RoomService roomService;
+	@Autowired
+	private PlatformTransactionManager transactions;
+
+	@Test
+	void aBlockDuringRoomCreationStillSeparatesThePair() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		CountDownLatch created = new CountDownLatch(1);
+		CountDownLatch commit = new CountDownLatch(1);
+		try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+			// A room creation that has checked the friendship and added the friend, but not committed yet.
+			Future<String> room = pool.submit(() -> new TransactionTemplate(transactions).execute(tx -> {
+				String id = roomService.create(host.id(), new RoomContent(MediaProvider.mock, "c1", "Fake", null, null),
+						List.of(friend.id())).id();
+				created.countDown();
+				try {
+					commit.await();
+				} catch (InterruptedException e) {
+					throw new IllegalStateException(e);
+				}
+				return id;
+			}));
+			created.await();
+			Future<Integer> block = pool.submit(() -> call(HttpMethod.PUT, "/api/blocks/" + host.id(),
+					friend.accessToken(), null).andReturn().getResponse().getStatus());
+			try {
+				Thread.sleep(500);
+				assertThat(block.isDone()).as("the block waits for the creation holding the friendship").isFalse();
+			} finally {
+				commit.countDown(); // never leave the pool waiting on the held transaction
+			}
+			assertThat(block.get()).isEqualTo(204);
+			// The blocker leaves the blocked user's new room.
+			call(HttpMethod.GET, "/api/rooms/" + room.get(), friend.accessToken(), null)
+					.andExpect(status().isNotFound());
+		}
+	}
+
+	@Test
+	void watchRequestsGoToOnlineFriendsOnlyAndAreThrottled() throws Exception {
+		TestUser me = signup();
+		TestUser friend = signup();
+		TestUser stranger = signup();
+		befriend(me, friend);
+		String to = "{\"friendId\":\"%s\"}";
+
+		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), to.formatted(friend.id()))
+				.andExpect(status().isConflict()); // offline: nobody would see it
+		Client friendWs = connect(friend);
+		Client strangerWs = connect(stranger);
+		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), to.formatted(stranger.id()))
+				.andExpect(status().isNotFound());
+		assertThat(strangerWs.nextOfType("watch:request")).isNull();
+
+		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), to.formatted(friend.id()))
+				.andExpect(status().isAccepted());
+		JsonNode request = friendWs.nextOfType("watch:request");
+		assertThat(request.path("userId").asString()).isEqualTo(me.id());
+		assertThat(request.path("payload").path("id").asString()).isEqualTo(me.id());
+		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), to.formatted(friend.id()))
+				.andExpect(status().isTooManyRequests());
 	}
 
 	@Test
