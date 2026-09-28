@@ -57,6 +57,12 @@ class RoomController {
 		return rooms.get(jwt.getSubject(), id);
 	}
 
+	/** The last 100 chat messages, oldest first. New ones arrive as `chat:message`. */
+	@GetMapping("/{id}/messages")
+	List<ChatMessage.View> messages(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
+		return rooms.history(jwt.getSubject(), id);
+	}
+
 	/** Leave (or decline an invite). The host leaving closes the room; members then get 404 on refetch. */
 	@DeleteMapping("/{id}/members/me")
 	@ResponseStatus(HttpStatus.NO_CONTENT)

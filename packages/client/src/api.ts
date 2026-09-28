@@ -1,5 +1,6 @@
 import type {
   AuthTokens,
+  ChatMessage,
   FriendRequests,
   FriendView,
   Me,
@@ -128,6 +129,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     room: (id: string) => authed<RoomView>("GET", `/api/rooms/${id}`),
     /** Leave or decline. The host leaving closes the room. */
     leaveRoom: (id: string) => authed<void>("DELETE", `/api/rooms/${id}/members/me`),
+    /** The last 100 chat messages, oldest first; new ones arrive as `chat:message`. */
+    messages: (id: string) => authed<ChatMessage[]>("GET", `/api/rooms/${id}/messages`),
 
     wsTicket: () => authed<{ ticket: string }>("POST", "/api/ws-ticket").then((r) => r.ticket),
   };

@@ -1,10 +1,37 @@
 # Current Phase
-Phase 3 — Extension Base (완료, 2026-09-28, 미커밋)
+Phase 4 — YouTube + Chat (완료, 2026-09-28)
 
-이전: Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
+이전: Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Phase 4
+- 정책 확인: `docs/platform-policy/youtube.md` (2026-09-28). 약관 해석이 불확실한 부분은 보수적으로 구현하고 스토어 공개 전 재검토로 기록
+- **Extension**
+  - 처음 사용 시 공개·동의 화면 (`Consent.tsx`). 동의 전에는 YouTube 탭에 연결하지 않음
+  - YouTube content script (`https://www.youtube.com/*`만) + `providers/youtube.ts` adapter
+    - 영상 ID(URL), 제목(탭 제목), `<video>` 재생 상태만 읽음. 선택자는 이 파일에만
+    - 광고 중(`#movie_player.ad-showing`)에는 play/pause/seek 무시
+  - `bridge.ts`: side panel ⇄ content script port. side panel 쪽은 `MediaProviderAdapter`로 보임
+  - side panel이 이 창의 YouTube 탭을 따라가며 room player / 지금 보는 영상 / presence로 사용 (`watch.ts`)
+  - presence: 시청 중인 영상을 친구에게 (공개 범위 규칙 그대로), 300ms 모아서 전송
+  - host_permissions `https://www.youtube.com/*` 추가 (content script와 같은 범위)
+- **packages/ui**
+  - `configure(api, socketUrl, platform)`: 앱별 adapter / 지금 보는 영상 / presence / 페이지 열기
+  - "같이 보기"는 지금 보는 YouTube 영상으로 방 생성 (없으면 Mock)
+  - Room: YouTube 방은 탭 상태 표시, 다른 영상이면 "YouTube에서 이 영상 열기"(누를 때만 이동)
+  - 호스트 탭의 영상이 바뀌면 `playback:content-change`로 방도 따라감
+  - **채팅** (`Chat.tsx`): 보낼 때 내 재생 위치 첨부, 호스트는 타임스탬프를 누르면 확인 후 모두 이동, 멤버는 표시만
+- **Desktop**: YouTube 방은 안내 + 기본 브라우저로 열기 (Tauri opener)
+- **sync-core**: `publishHost`는 광고 중 스냅샷을 보내지 않음
+- **types**: `watchUrl` (provider + contentId로 URL 생성)
+- **Server**
+  - WS `playback:content-change` (호스트만, 0초·일시정지로 초기화 + version 증가)
+  - YouTube contentId 형식 검증 (방 생성, content-change)
+  - 채팅: Flyway V6 `chat_messages`, WS `chat:message`(멤버만, 1–1000자, 초당 5회), `GET /api/rooms/{id}/messages`
+  - WS의 400은 `bad_payload`로 응답 (전에는 `not_member`)
+- 결정 33–40 (`plan.md`)
+
 ### Phase 3
 - 정책 확인: `docs/platform-policy/chrome-web-store.md` (2026-09-28)
 - **packages/ui** (신규): Desktop 화면(Login / Home / Room / Privacy, CSS)을 옮겨 Desktop과 Extension이 공유
@@ -83,6 +110,13 @@ Phase 3 — Extension Base (완료, 2026-09-28, 미커밋)
 - `POST /api/me/friend-code`로 재발급. 이메일 검색 API는 삭제
 - Desktop: "내 친구 코드" (복사, 확인 창을 거친 재발급), 코드 입력으로 친구 추가
 
+## Major Files Changed (Phase 4)
+- `apps/extension/{bridge.ts,providers/youtube.ts,wxt.config.ts}`, `entrypoints/youtube.content.ts`, `entrypoints/sidepanel/{main.tsx,Consent.tsx,watch.ts}`
+- `packages/ui/src/{session.ts,index.ts,Home.tsx,Room.tsx,Chat.tsx,format.ts,App.css}`, `apps/desktop/src/main.tsx`
+- `packages/sync-core/src/{sync.ts,sync.test.ts}`, `packages/types/src/index.ts`, `packages/client/src/api.ts`
+- `server/.../room/{RoomService,RoomController,Room,ChatMessage,ChatMessageRepository}.java`, `ws/SocketHandler.java`, `db/migration/V6__chat_messages.sql`, `RoomFlowTest.java`
+- `docs/platform-policy/{youtube.md,chrome-web-store.md}`, `docs/protocol/{websocket,rest}.md`, `docs/architecture/plan.md`
+
 ## Major Files Changed (Phase 3)
 - `packages/ui/` (신규, `apps/desktop/src/*.tsx`에서 이동), `apps/desktop/src/main.tsx`
 - `apps/extension/{wxt.config.ts,package.json}`, `entrypoints/sidepanel/{main.tsx,session.ts}`, `entrypoints/youtube.content.ts` 삭제
@@ -116,10 +150,46 @@ Phase 3 — Extension Base (완료, 2026-09-28, 미커밋)
 - 20. 친구 추가는 친구 코드로만 (이메일 검색 제거)
 - 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 21–28 (Phase 2): mock provider, playback/version DB 저장, 초대=멤버십, `room:update` 후 재조회, 서버 시각 기준 `capturedAt`, seek 구간 재확인, echo 억제 창 없음, 호스트 명령 모으기 + 초당 제한 — `plan.md` 참고
+- 33–40 (Phase 4): YouTube는 사용자 탭의 `<video>` 제어, URL은 contentId로 생성, content-change, 광고 중 명령 없음, 동의 화면, Platform 주입, side panel ⇄ content script port, 채팅 저장 — `plan.md` 참고
 - 29–32 (Phase 3): Extension은 side panel이 소켓 소유, refresh token은 `storage.session`, 화면은 `packages/ui` 공유, 최소 권한 — `plan.md` 참고
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
+### Phase 4
+- `./mvnw test` RoomFlowTest 8/8 (추가 2: content-change 호스트만·형식 검증·0초 초기화·version, 채팅 멤버만·공백 제거·길이·위치·기록)
+- `packages/sync-core` vitest 13/13 (추가: 광고 중 위치를 publish하지 않음, 보낼 때의 최신 스냅샷만 보냄. 수정을 되돌리면 실패 확인)
+- `pnpm typecheck` / `pnpm build` ✅
+- 수동 E2E (Playwright Chromium 2개 = 서로 다른 두 사용자, 빌드된 확장 로드, youtube.com을 가짜 페이지(무음 WAV `<video>`)로 route, 2026-09-28)
+  - 동의 → 가입, `storage.local`에는 동의 키만
+  - 호스트 side panel이 YouTube 탭을 인식, 멤버 친구 목록에 "YouTube · 제목 시청 중"
+  - 같이 보기 → 멤버 입장 → 다른 영상이면 "이 영상 열기"로 자기 탭 이동
+  - 호스트 seek·재생 → 멤버 60.2s/60.1s, 일시정지 반영
+  - 호스트 광고 중 위치(3초)가 멤버에 가지 않음, 광고 후 재개
+  - 멤버 광고 중 보정 안 함, 광고 후 보정
+  - 호스트가 페이지 안에서 다음 영상으로 이동 → 방 제목 변경 → 멤버 "이 영상 열기" → 새 영상에서 동기화
+  - 채팅: 멤버 메시지에 위치 첨부, 멤버에게는 타임스탬프 버튼 없음, 호스트 클릭 → 확인 창 → 모두 이동
+  - 따라가던 탭을 닫거나 다른 사이트로 이동하면 창의 다른 YouTube 탭으로 넘어가고, 호스트 플레이어를 따라 방 영상도 바뀜
+- `packages/ui` vitest 1/1 (신규 test 스크립트: 채팅 기록과 실시간 메시지 병합)
+- Codex Sol 검증 1차 FAIL (2026-09-28, 검사 5개는 모두 통과, 리뷰에서 blocking 3개) → 수정
+  - 200ms 창에서 대기 중이던 호스트 명령이 광고가 시작된 뒤 전송될 수 있음 → 광고 스냅샷이 오면 대기 명령 취소. 테스트 추가(수정을 되돌리면 실패 확인)
+  - 따라가던 YouTube 탭을 닫으면 같은 창의 다른 YouTube 탭을 다시 찾지 않음 → 닫힐 때 다시 선택. E2E에 추가
+  - 채팅 기록 응답이 그사이 받은 실시간 메시지를 덮어씀 → id로 병합 후 시간순 정렬
+- Codex 재검증 1회차 FAIL (1차 지적 3개는 해결 확인, 새 blocking 3개) → 수정
+  - content script가 동의 전에도 adapter를 만들어 영상 ID·광고 상태를 1초마다 읽음 → 동의한 side panel이 연결했을 때만 생성, 끊기면 정리
+  - 따라가던 탭이 YouTube를 떠나면 다른 YouTube 탭을 찾지 않음 → 다시 선택 (없으면 그 탭 유지). E2E에 추가
+  - 광고 시작 이벤트(1초 폴링)보다 200ms 대기 명령이 먼저 나가면 광고 중 전송 → 전송 직전 스냅샷의 광고 여부 재확인. 테스트 추가(수정을 되돌리면 실패 확인)
+- Codex 재검증 2회차 FAIL (2회차 지적 3개 중 2개 해결 확인, 광고 처리를 파고든 blocking 1개) → 수정
+  - 비동기 flush가 대기 중이던 이전 영상의 스냅샷을 새 영상의 content-change 뒤에 보내거나, 탭이 사라져도 보낼 수 있음
+  - → `publishHost`는 변경을 "dirty" 표시만 하고, 보낼 때 읽은 최신 스냅샷을 보냄 (없거나 광고면 안 보냄, 더 새 flush가 시작됐으면 버림). 방 화면은 스냅샷의 영상이 "지금 보는 영상"과 같을 때만 보내고, 다르면 그 영상의 변경 이벤트가 다시 보내게 둠
+  - 테스트 추가: 다음 영상으로 바뀐 뒤 대기 명령, 사라진 플레이어, 느린 읽기를 앞지른 flush (가드를 되돌리면 실패 확인). 전체 E2E 재실행 통과
+- Codex 재검증 3회차(자동 재검증 마지막) FAIL (2회차 수정은 확인, blocking 1개)
+  - 새 영상에서 첫 명령이 `seek`로 나가 content-change로 일시정지된 방이 계속 일시정지될 수 있음 (Room이 명령을 건너뛰어도 보낸 것으로 기록 + 영상이 바뀌어도 이전 재생 상태와 비교). 실제 YouTube처럼 다음 영상이 자동 재생되면 항상 발생
+  - → 수정: 새 영상의 첫 명령은 항상 play/pause, `send`가 false를 반환하면 보낸 것으로 기록하지 않음. 테스트 추가(두 수정 각각 되돌리면 실패 확인), E2E 가짜 페이지를 자동 재생으로 바꿔 전체 재실행 통과
+  - 자동 재검증 횟수를 다 써서 멈추고 보고 → 사용자 요청으로 추가 검증
+- Codex 추가 검증 PASS (사용자 요청): sync-core 13, client 3, ui 1, typecheck, build, server verify 33 통과, 발견 사항 없음. lint 없음, desktop / extension / types에 test 스크립트 없음
+- 실제 youtube.com (확장 없이 Playwright): `#movie_player video`, 탭 제목 형식, `currentTime` seek 동작 확인. 광고(`ad-showing`)는 실제로 관찰하지 못함
+- Desktop dev: YouTube 방 입장 → 안내 + "YouTube에서 이 영상 열기"가 올바른 URL을 엶
+
 ### Phase 3
 - `pnpm typecheck` / `pnpm build` ✅ (packages/ui 포함)
 - 수동 E2E (Playwright Chromium에 빌드된 확장 로드, side panel 페이지를 360px 탭으로 열고 Desktop dev 탭과 함께, 2026-09-28)
@@ -169,6 +239,18 @@ Phase 3 — Extension Base (완료, 2026-09-28, 미커밋)
   - 가입 → 이메일로 친구 요청 → 상대 화면에 실시간 표시 → 수락 → 온라인 표시 → 탭 닫으면 오프라인 → 새로고침해도 세션 유지 ✅
 
 ## Known Issues
+- **Phase 4**
+  - YouTube 약관상 content script 제어의 허용 여부 불확실 → 스토어 공개 전 재검토 (`youtube.md`)
+  - 실제 YouTube 광고로 `ad-showing` 감지를 검증하지 못함 (가짜 페이지로만). 바뀌면 광고 중 동기화가 틀어질 수 있음
+  - 개인정보처리방침 문서 없음 (동의 화면만). 스토어 제출 전 필요 (Phase 10)
+  - 확장 설치 전에 열려 있던 YouTube 탭은 새로고침해야 연결됨 ("영상이 열린 탭이 없습니다"로 보임)
+  - 멤버의 `video.play()`가 autoplay 정책으로 거부되면 재시도하지 않음 (사용자가 탭에서 재생해야 함)
+  - 라이브, 재생 속도 변경, 프리미어는 미검증. 재생 속도는 동기화하지 않음
+  - 호스트가 페이지 안에서 영상을 바꾸면 제목이 이전 영상일 수 있음 (탭 제목이 늦게 바뀜)
+  - 방 화면의 YouTube 위치 표시는 1초마다 갱신
+  - 채팅 신고 / 삭제 없음 (Phase 9)
+  - Extension 자동 테스트 없음 (E2E 스크립트는 저장소 밖), ui는 병합 함수 테스트만, lint 없음
+  - 호스트가 따라가던 탭을 닫으면 창의 다른 YouTube 탭 영상으로 방이 바뀜 (호스트 권한 모델 그대로)
 - **Tauri 앱에서 키체인 경로를 실제로 실행해 보지 않음** (cargo check만 함). 첫 `tauri dev` 때 macOS 키체인 접근 허용 창이 뜰 수 있음
 - CSP / `VITE_API_URL`이 localhost 고정 → 배포(Phase 10)에서 운영 주소로 바꿔야 함
 - Presence, WS ticket, rate limit 카운터가 서버 메모리에 있음 → 서버 1대 전제 (`ponytail:` 주석)
@@ -202,10 +284,9 @@ Phase 3 — Extension Base (완료, 2026-09-28, 미커밋)
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Next Task
-Phase 4 — YouTube Adapter
-1. 정책 확인: YouTube ToS / API ToS / Developer Policies — youtube.com 페이지의 `<video>`를 content script로 제어하는 것이 허용 범위인지 → `docs/platform-policy/youtube.md` (확인 날짜 기록). 불명확하면 보수적 선택
-2. 브라우징 활동 공개·동의 화면 (side panel, 처음 사용 시) — 동의 전에는 presence 미디어 정보를 보내지 않음
-3. content script (`*://www.youtube.com/*`만) + `providers/youtube` adapter (`MediaProviderAdapter`, 광고 감지 → `adPlaying`), 선택자는 adapter 안에만
-4. content script ↔ side panel 메시지로 adapter를 `SyncFollower` / `publishHost`에 연결 (결정 29)
-5. 실제 플레이어의 seek 부정확 / seeking 중 이벤트 → echo 처리 재검토 (Phase 2 known issue)
-6. presence에 시청 중 콘텐츠 전송 (공개 범위 규칙 유지)
+Phase 5 — Desktop Integration (`Mirattic_Sync_PLAN.md`)
+1. 차단 시 공통 방 정리 (Phase 2 known issue)
+2. presence에 `IN_ROOM` 표시 여부 결정, DND
+3. Desktop: 친구가 보는 콘텐츠에 "같이 보기"로 합류 (친구 presence의 영상으로 방 만들기 / 초대 수락 → 브라우저에서 열기)
+4. Room invite 알림: Desktop notification (Tauri notification plugin), tray
+5. 완료 조건: 친구가 보고 있는 콘텐츠에 Desktop에서 합류 가능

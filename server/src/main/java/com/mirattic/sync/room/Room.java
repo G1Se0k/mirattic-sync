@@ -62,6 +62,15 @@ public class Room {
 		this.playbackVersion++;
 	}
 
+	void changeContent(String userId, RoomContent content, long now) {
+		this.provider = content.provider();
+		this.contentId = content.contentId();
+		this.title = content.title();
+		this.durationMs = content.durationMs();
+		this.canonicalUrl = content.canonicalUrl();
+		applyPlayback(userId, 0, false, now);
+	}
+
 	boolean isPlaying() {
 		return playing;
 	}

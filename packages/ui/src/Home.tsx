@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ApiError, connectSocket, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
   FriendRequests,
   FriendView,
-  MediaProvider,
   Me,
   PresenceView,
   RoomContent,
@@ -11,12 +10,12 @@ import type {
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
-import { api, SOCKET_URL } from "./session";
+import { api, platform, SOCKET_URL } from "./session";
 import { Privacy } from "./Privacy";
 import { Room } from "./Room";
-import { clock } from "./format";
+import { clock, PROVIDER_NAMES } from "./format";
 
-/** Phase 2: every room plays this fake video on the mock player. */
+/** Shared when the app sees nothing being watched (desktop, or no YouTube tab): a fake video. */
 const MOCK_CONTENT: RoomContent = { provider: "mock", contentId: "mock-1", title: "Mock 영상", durationMs: 10 * 60_000 };
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
@@ -31,6 +30,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const listeners = useRef(new Set<(event: ServerEvent) => void>());
+  const watching = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatching ?? nothing);
 
   const subscribe = useCallback((listener: (event: ServerEvent) => void) => {
     listeners.current.add(listener);
@@ -60,6 +60,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       getTicket: api.wsTicket,
       onStatus: (s) => {
         setStatus(s);
+        platform.connected?.(s === "open" ? socket : null);
         if (s === "open") void reload(); // catch up on anything missed while disconnected
       },
       onEvent: (event) => {
@@ -74,7 +75,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       },
     });
     setSocket(socket);
-    return () => socket.close();
+    return () => {
+      socket.close();
+      platform.connected?.(null);
+    };
   }, [reload]);
 
   // Every action refetches; the other side learns via `friend:update`.
@@ -99,7 +103,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   async function watchTogether(friend: UserSummary) {
     setError(null);
     try {
-      setOpenRoom((await api.createRoom(MOCK_CONTENT, [friend.id])).id);
+      setOpenRoom((await api.createRoom(watching ?? MOCK_CONTENT, [friend.id])).id);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
     }
@@ -116,6 +120,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         </div>
       </header>
       {error && <p className="error" role="alert">{error}</p>}
+      <p className="muted">
+        {watching ? `지금 보는 영상: ${watching.title} · "같이 보기"로 공유` : `"같이 보기"는 Mock 영상으로 방을 만듭니다`}
+      </p>
 
       <section>
         {sorted.length === 0 && <p className="muted">아직 친구가 없습니다.</p>}
@@ -266,11 +273,13 @@ function AddFriend({ onSent }: { onSent: () => void }) {
   );
 }
 
+const noSubscribe = () => () => {};
+const nothing = () => null;
+
 function formatCode(code: string) {
   return `${code.slice(0, 4)}-${code.slice(4)}`;
 }
 
-const PROVIDER_NAMES: Record<MediaProvider, string> = { youtube: "YouTube", netflix: "Netflix", laftel: "Laftel", mock: "Mock" };
 
 function describe(p: PresenceView) {
   if (p.status === "OFFLINE") return "오프라인";

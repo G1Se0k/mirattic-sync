@@ -37,7 +37,15 @@
 | 29 | Extension의 API client와 WebSocket은 background가 아니라 side panel 페이지가 가짐 | MV3 service worker는 30초간 트래픽이 없으면 종료됨. side panel이 열려 있는 동안 = 같이 보는 동안이라 수명이 맞고, background ↔ panel 중계 코드가 필요 없음. Phase 4 content script는 side panel과 직접 메시지 |
 | 30 | Extension refresh token은 `chrome.storage.session` | 디스크에 평문으로 남지 않음, content script 접근 불가. 브라우저 재시작 시 재로그인 (`platform-policy/chrome-web-store.md`) |
 | 31 | 화면 컴포넌트는 `packages/ui`로 옮겨 Desktop과 Extension이 공유. 각 앱은 토큰 저장소만 다른 client를 `configure()`로 넘김 | 같은 화면을 두 번 작성하지 않음 (결정 9의 "필요해질 때") |
-| 32 | Extension 권한은 `sidePanel`, `storage`만. host_permissions 없이 서버 CORS로 extension origin 허용, content script는 adapter와 함께 추가 | Chrome Web Store 최소 권한 정책 |
+| 32 | Extension 권한은 `sidePanel`, `storage` + provider 사이트만 (Phase 4: `https://www.youtube.com/*` content script와 같은 host_permissions). API 서버는 host 권한 대신 CORS로 extension origin 허용 | Chrome Web Store 최소 권한 정책. content script match만으로는 side panel이 탭 URL을 볼 수 없어 같은 범위를 host_permissions로도 선언 (설치 경고 동일) |
+| 33 | YouTube는 사용자가 연 youtube.com 탭의 `<video>`를 content script로 재생·일시정지·seek만 (IFrame Player API 아님) | 사용자 자기 로그인 상태 그대로, 임베드 제한 없음. 약관 해석은 불확실 → `platform-policy/youtube.md`, 스토어 공개 전 재검토 |
+| 34 | 시청 페이지 URL은 provider + contentId로 클라이언트가 만든다 (`watchUrl`). 서버는 YouTube ID 형식(11자) 검증 | 호스트가 방에 임의 URL을 넣어 멤버를 다른 사이트로 보내지 못하게 |
+| 35 | `playback:content-change`: 호스트 탭의 영상이 바뀌면 호스트 클라이언트가 다음 명령 전에 알림. 서버는 0초·일시정지로 초기화하고 version 증가. 멤버는 "이 영상 열기"를 눌러야 이동 | 멤버 탭을 자동으로 이동시키지 않음 (보수적). 초기화 후 호스트의 다음 명령이 바로 위치를 맞춤 |
+| 36 | 광고 중에는 호스트가 명령을 보내지 않고(`publishHost`), adapter는 play/pause/seek를 무시 | 광고 시각이 멤버에게 가지 않게, 광고를 건너뛰거나 조작하지 않게 |
+| 37 | 브라우징 활동 공개·동의는 side panel 첫 화면. 동의 전에는 YouTube 탭에 연결하지 않음. 동의 버전은 `storage.local` | Chrome Web Store 사용자 데이터 정책 (제품 UI 안에서, 수집 전에) |
+| 38 | 앱별 차이는 `configure(api, socketUrl, platform)`의 `Platform`으로 주입 (adapter, 지금 보는 영상, presence 전송, 페이지 열기) | Desktop은 mock만 재생하고 실제 provider는 브라우저로 연다 |
+| 39 | Extension ↔ content script는 side panel이 여는 port (`bridge.ts`). side panel은 이 창의 YouTube 탭(활성 → 마지막 → 아무거나)을 따라감 | 결정 29 (side panel이 소켓 소유)와 일관, 중계 없음 |
+| 40 | 채팅은 DB(`chat_messages`, 방 삭제 시 함께 삭제)에 저장하고 WS로 참가자에게 전송, 입장·재연결 시 REST로 최근 100개 | 새로고침·재연결에도 대화 유지. 참가하지 않은 멤버는 입장할 때 기록으로 봄 |
 
 ## 사용자 식별 (UID + Identity)
 
@@ -71,7 +79,7 @@ adapter는 `sourceUserId`/`version`을 알 수 없으므로 로컬 `PlayerSnapsh
 ## 알려진 기술 위험
 
 1. 클라이언트 간 시계 차이 → `sync:request/response`로 서버 시계 offset 추정 (RTT/2)
-2. echo loop (프로그램 seek이 이벤트를 다시 발생) → sync-core에서 억제 창. MVP는 host만 전파
+2. echo loop (프로그램 seek이 이벤트를 다시 발생) → 억제 창 없음 (결정 27). MVP는 host만 전파, 멤버의 자기 seek 이벤트는 재확인에서 차이 0으로 끝남 (Phase 4 가짜 페이지 E2E로 확인)
 3. Autoplay 정책 → 방 참가 시 "동기화 시작" 클릭으로 사용자 동작 확보
 4. YouTube 광고 → adapter가 `adPlaying` 노출, 광고 중 sync 일시중지
 5. Netflix는 `video.currentTime` 직접 변경 시 오류가 알려져 있음 → Phase 6 정책 검토 시 결정

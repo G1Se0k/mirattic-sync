@@ -1,18 +1,23 @@
 package com.mirattic.sync.room;
 
 import com.mirattic.sync.friend.FriendshipRepository;
+import com.mirattic.sync.presence.MediaProvider;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.UserSummary;
 import com.mirattic.sync.ws.ServerEvent;
 import com.mirattic.sync.ws.SocketHub;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.Limit;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +45,9 @@ public class RoomService {
 	}
 
 	static final int MAX_INVITES = 7;
+	static final int MAX_CHAT_LENGTH = 1000;
+	static final int CHAT_HISTORY = 100;
+	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	/** Host capture times older than this (or in the future) are replaced by the receive time. */
 	static final long MAX_CAPTURE_AGE_MS = 5_000;
 
@@ -47,19 +55,22 @@ public class RoomService {
 	private final RoomMemberRepository members;
 	private final FriendshipRepository friendships;
 	private final UserRepository users;
+	private final ChatMessageRepository messages;
 	private final SocketHub hub;
 
 	RoomService(RoomRepository rooms, RoomMemberRepository members, FriendshipRepository friendships,
-			UserRepository users, SocketHub hub) {
+			UserRepository users, ChatMessageRepository messages, SocketHub hub) {
 		this.rooms = rooms;
 		this.members = members;
 		this.friendships = friendships;
 		this.users = users;
+		this.messages = messages;
 		this.hub = hub;
 	}
 
 	@Transactional
 	public RoomView create(String me, RoomContent content, Collection<String> inviteIds) {
+		requireKnownId(content);
 		Set<String> invitees = new HashSet<>(inviteIds);
 		invitees.remove(me);
 		if (invitees.size() > MAX_INVITES) {
@@ -112,10 +123,7 @@ public class RoomService {
 
 	@Transactional
 	public PlaybackState playback(String me, String roomId, Command command, long positionMs, long capturedAt) {
-		if (requireMember(me, roomId).getRole() != RoomMember.Role.HOST) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "only the host controls playback");
-		}
-		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+		Room room = lockAsHost(me, roomId);
 		long now = System.currentTimeMillis();
 		long at = capturedAt > now || capturedAt < now - MAX_CAPTURE_AGE_MS ? now : capturedAt;
 		boolean playing = switch (command) {
@@ -125,6 +133,54 @@ public class RoomService {
 		};
 		room.applyPlayback(me, positionMs, playing, at);
 		return room.playback();
+	}
+
+	/** Any member may chat; the text is stored trimmed. */
+	@Transactional
+	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs) {
+		requireMember(me, roomId);
+		String trimmed = text == null ? "" : text.strip();
+		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
+		}
+		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs)).view();
+	}
+
+	/** The latest messages, oldest first. */
+	@Transactional(readOnly = true)
+	public List<ChatMessage.View> history(String me, String roomId) {
+		requireMember(me, roomId);
+		List<ChatMessage.View> latest = new ArrayList<>(messages
+				.findByRoomIdOrderByCreatedAtDesc(roomId, Limit.of(CHAT_HISTORY)).stream().map(ChatMessage::view).toList());
+		Collections.reverse(latest);
+		return latest;
+	}
+
+	/** The host moved on to another content (e.g. the next video): the room restarts paused at 0 on it. */
+	@Transactional
+	public PlaybackState changeContent(String me, String roomId, RoomContent content) {
+		requireKnownId(content);
+		Room room = lockAsHost(me, roomId);
+		room.changeContent(me, content, System.currentTimeMillis());
+		return room.playback();
+	}
+
+	/** Membership first (404 for outsiders), then the host role (403), then the row lock. */
+	private Room lockAsHost(String me, String roomId) {
+		if (requireMember(me, roomId).getRole() != RoomMember.Role.HOST) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "only the host controls playback");
+		}
+		return rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+	}
+
+	/**
+	 * Clients build the watch URL from provider + contentId (never from another user's URL), so the id
+	 * must be one they can build it from.
+	 */
+	private static void requireKnownId(RoomContent content) {
+		if (content.provider() == MediaProvider.youtube && !YOUTUBE_VIDEO_ID.matcher(content.contentId()).matches()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid youtube video id");
+		}
 	}
 
 	@Transactional(readOnly = true)

@@ -3,7 +3,6 @@ import type { Me } from "@mirattic/types";
 import { api } from "./session";
 import { Login } from "./Login";
 import { Home } from "./Home";
-import "./App.css";
 
 function App() {
   const [me, setMe] = useState<Me | null | "loading">("loading");

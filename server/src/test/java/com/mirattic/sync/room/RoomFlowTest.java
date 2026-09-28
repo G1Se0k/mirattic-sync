@@ -98,6 +98,82 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void hostChangesContentAndMembersRestartOnIt() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"content":{"provider":"youtube","contentId":"not-a-video-id","title":"x"},"inviteIds":[]}""")
+				.andExpect(status().isBadRequest());
+		String roomId = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"content":{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"First"},"inviteIds":["%s"]}"""
+				.formatted(friend.id()))).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		Client hostWs = connect(host);
+		hostWs.send(event("playback:play", roomId, "{\"positionMs\":5000,\"capturedAt\":0}"));
+		assertThat(friendWs.nextOfType("playback:update").path("version").asLong()).isEqualTo(1);
+
+		String next = """
+				{"provider":"youtube","contentId":"9bZkp7q19f0","title":"Second"}""";
+		friendWs.send(event("playback:content-change", roomId, next));
+		assertThat(friendWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_host");
+		hostWs.send(event("playback:content-change", roomId, """
+				{"provider":"youtube","contentId":"bad","title":"x"}"""));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		hostWs.send(event("playback:content-change", roomId, "{\"provider\":\"youtube\"}"));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+
+		hostWs.send(event("playback:content-change", roomId, next));
+		JsonNode changed = friendWs.nextOfType("playback:update");
+		assertThat(changed.path("version").asLong()).isEqualTo(2);
+		assertThat(changed.path("payload").path("contentId").asString()).isEqualTo("9bZkp7q19f0");
+		assertThat(changed.path("payload").path("positionMs").asLong()).isZero();
+		assertThat(changed.path("payload").path("playing").asBoolean()).isFalse();
+		assertThat(friendWs.nextOfType("room:update")).isNotNull();
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, friend.accessToken(), null))
+				.path("content").path("title").asString()).isEqualTo("Second");
+	}
+
+	@Test
+	void membersChatWithMediaPositionsAndOutsidersCannot() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		TestUser stranger = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"  look at this  \",\"mediaPositionMs\":83000}"));
+		JsonNode message = friendWs.nextOfType("chat:message");
+		assertThat(message.path("userId").asString()).isEqualTo(host.id());
+		assertThat(message.path("payload").path("text").asString()).isEqualTo("look at this");
+		assertThat(message.path("payload").path("mediaPositionMs").asLong()).isEqualTo(83000);
+		assertThat(hostWs.nextOfType("chat:message")).isNotNull(); // the sender gets it back too
+		friendWs.send(event("chat:message", roomId, "{\"text\":\"no position\"}"));
+		assertThat(hostWs.nextOfType("chat:message").path("payload").has("mediaPositionMs")).isFalse();
+
+		for (String bad : new String[] {"{\"text\":\"   \"}", "{\"text\":\"%s\"}".formatted("x".repeat(1001)),
+				"{\"text\":\"x\",\"mediaPositionMs\":-1}", "{\"text\":1}"}) {
+			hostWs.send(event("chat:message", roomId, bad));
+			assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		}
+		Client strangerWs = connect(stranger);
+		strangerWs.send(event("chat:message", roomId, "{\"text\":\"hi\"}"));
+		assertThat(strangerWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_member");
+		call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", stranger.accessToken(), null)
+				.andExpect(status().isNotFound());
+
+		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", friend.accessToken(), null));
+		assertThat(history.findValuesAsString("text")).containsExactly("look at this", "no position");
+	}
+
+	@Test
 	void playbackFloodsAreRateLimited() throws Exception {
 		TestUser host = signup();
 		String roomId = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(),

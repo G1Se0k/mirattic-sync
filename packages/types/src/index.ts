@@ -120,6 +120,19 @@ export type RoomContent = {
   canonicalUrl?: string;
 };
 
+const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+
+/**
+ * Where to watch a content, built from its provider-scoped id — never from a URL another user sent,
+ * so a room can't point members at an arbitrary site. undefined = no page to open (mock, unknown id).
+ */
+export function watchUrl(content: { provider: MediaProvider; contentId: string }): string | undefined {
+  if (content.provider === "youtube" && YOUTUBE_VIDEO_ID.test(content.contentId)) {
+    return `https://www.youtube.com/watch?v=${content.contentId}`;
+  }
+  return undefined;
+}
+
 export type RoomRole = "HOST" | "MEMBER";
 
 /** `present` = has a live connection that joined the room (`room:join`). */

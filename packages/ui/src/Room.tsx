@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import type { Me, PlaybackState, RoomView, ServerEvent } from "@mirattic/types";
+import { watchUrl, type Me, type MediaProviderAdapter, type PlaybackState, type PlayerSnapshot, type RoomContent, type RoomView, type ServerEvent } from "@mirattic/types";
 import { MockMediaProvider, publishHost, ServerClock, SyncFollower, type FollowerStatus } from "@mirattic/sync-core";
-import { api } from "./session";
-import { clock } from "./format";
+import { api, platform } from "./session";
+import { clock, PROVIDER_NAMES } from "./format";
+import { Chat } from "./Chat";
 
 type Props = {
   roomId: string;
@@ -16,7 +17,10 @@ type Props = {
 
 const CLOCK_SAMPLES = 5;
 
-/** Phase 2 room screen: a mock player kept in sync with the host. No real media involved. */
+/**
+ * Room screen: the host's player drives everyone else's. A mock room plays a fake video right here;
+ * other providers play in the user's own provider page, driven through `platform.adapter`.
+ */
 export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) {
   const [room, setRoom] = useState<RoomView | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -32,10 +36,21 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
 
   const content = room?.content;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
-  const player = useMemo(
-    () => content && new MockMediaProvider({ contentId: content.contentId, title: content.title, durationMs: content.durationMs ?? 600_000 }),
-    [content?.contentId],
+  const mock = content?.provider === "mock";
+  const player: MediaProviderAdapter | undefined = useMemo(
+    () =>
+      !content ? undefined
+        : mock ? new MockMediaProvider({ contentId: content.contentId, title: content.title, durationMs: content.durationMs ?? 600_000 })
+        : platform.adapter?.(content.provider),
+    [content?.provider, mock && content?.contentId],
   );
+  // The content the host last announced. Set from the room only when the room's content changes, so a
+  // render between announcing and the room refetch can't make the host announce (and reset) it twice.
+  const announced = useRef<RoomContent | null>(null);
+  useEffect(() => {
+    announced.current = content ?? null;
+  }, [content?.provider, content?.contentId]);
+  const [snapshot, setSnapshot] = useState<PlayerSnapshot | null>(null);
 
   useEffect(() => {
     const load = () =>
@@ -93,7 +108,19 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
     if (isHost) {
       // Changes made offline would be lost; restarting on reconnect republishes the current state.
       if (!connected) return;
-      return publishHost(player, serverClock, (type, payload) => socket.send({ type, roomId, payload }));
+      return publishHost(player, serverClock, (type, payload, snapshot) => {
+        if (!mock) {
+          // The command is about `snapshot`'s video. Its metadata ("now watching") arrives with the change
+          // event; until then, skip — that event triggers another send.
+          const now = platform.nowWatching?.();
+          if (!now || now.contentId !== snapshot.contentId) return false;
+          if (now.contentId !== announced.current?.contentId) {
+            socket.send({ type: "playback:content-change", roomId, payload: now });
+            announced.current = now;
+          }
+        }
+        return socket.send({ type, roomId, payload });
+      });
     }
     const f = new SyncFollower({
       adapter: player,
@@ -112,11 +139,14 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
   }, [player, isHost, clockReady, room !== null, isHost && connected]);
 
   useEffect(() => {
-    const id = setInterval(() => tick((n) => n + 1), 250);
+    const id = setInterval(() => {
+      tick((n) => n + 1);
+      if (player && !mock) void player.getSnapshot().then(setSnapshot);
+    }, mock ? 250 : 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [player, mock]);
 
-  if (!room || !player) {
+  if (!room) {
     return (
       <main className="container">
         {loadFailed ? (
@@ -131,10 +161,6 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
       </main>
     );
   }
-
-  const position = player.positionMs();
-  const duration = player.content.durationMs;
-  const nudge = (ms: number) => () => void player.seek(player.positionMs() + ms);
 
   async function leave() {
     const message = isHost ? "방을 닫을까요? 모든 멤버가 나가게 됩니다." : "방에서 나갈까요?";
@@ -165,6 +191,29 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
         ))}
       </ul>
 
+      {player instanceof MockMediaProvider ? (
+        <MockPlayer player={player} isHost={isHost} clockReady={clockReady} sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} />
+      ) : (
+        <ProviderPlayer content={room.content} snapshot={snapshot} canPlay={player !== undefined} isHost={isHost}
+          sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} />
+      )}
+      <Chat roomId={roomId} meId={me.id} members={room.members} socket={socket} status={status} subscribe={subscribe}
+        position={async () => {
+          const s = await player?.getSnapshot();
+          return s && !s.adPlaying && s.contentId === room.content.contentId ? Math.round(s.positionMs) : undefined;
+        }}
+        onSeek={isHost && player ? (ms) => void player.seek(ms) : undefined} />
+    </main>
+  );
+}
+
+type PlayerProps = { isHost: boolean; sync: string; lastCorrection: number | null };
+
+function MockPlayer({ player, isHost, clockReady, sync, lastCorrection }: PlayerProps & { player: MockMediaProvider; clockReady: boolean }) {
+  const position = player.positionMs();
+  const duration = player.content.durationMs;
+  const nudge = (ms: number) => () => void player.seek(player.positionMs() + ms);
+  return (
       <section className="stack">
         <h2>Mock 플레이어</h2>
         <progress className="grow" max={duration} value={position} />
@@ -183,7 +232,7 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
         ) : (
           <>
             <p className="muted">
-              {describeSync(sync, clockReady)}
+              {sync}
               {lastCorrection !== null && ` · 마지막 보정 ${lastCorrection}ms`}
             </p>
             <div className="row">
@@ -195,7 +244,40 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
           </>
         )}
       </section>
-    </main>
+  );
+}
+
+/** A real provider plays in the user's own page (e.g. a YouTube tab); this only shows where it stands. */
+function ProviderPlayer({ content, snapshot, canPlay, isHost, sync, lastCorrection }: PlayerProps & {
+  content: RoomContent;
+  snapshot: PlayerSnapshot | null;
+  canPlay: boolean;
+}) {
+  const url = watchUrl(content);
+  const here = snapshot?.contentId === content.contentId;
+  return (
+    <section className="stack">
+      <h2>{PROVIDER_NAMES[content.provider]}</h2>
+      {!canPlay ? (
+        <p className="muted">이 방은 Chrome 확장 프로그램의 side panel에서 함께 볼 수 있습니다.</p>
+      ) : here && snapshot ? (
+        <div className="row between">
+          <span className="code">{clock(snapshot.positionMs)}{snapshot.durationMs !== undefined && ` / ${clock(snapshot.durationMs)}`}</span>
+          <span className="muted">{snapshot.adPlaying ? "광고 중" : snapshot.playing ? "재생 중" : "일시정지"}</span>
+        </div>
+      ) : (
+        <p className="muted">{snapshot ? "탭에서 다른 영상을 보고 있습니다." : "영상이 열린 탭이 없습니다."}</p>
+      )}
+      {url && (!canPlay || !here) && (
+        <button onClick={() => platform.open(url)}>{PROVIDER_NAMES[content.provider]}에서 이 영상 열기</button>
+      )}
+      {canPlay && (
+        <p className="muted">
+          {isHost ? "탭에서 직접 재생·일시정지·이동하면 멤버에게 전달됩니다. 다른 영상으로 옮기면 방도 따라갑니다." : sync}
+          {!isHost && lastCorrection !== null && ` · 마지막 보정 ${lastCorrection}ms`}
+        </p>
+      )}
+    </section>
   );
 }
 

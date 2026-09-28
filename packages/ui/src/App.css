@@ -39,3 +39,6 @@ label { padding: 0.4rem 0; }
 .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; }
 code.code { font-size: 1.1rem; }
 input.code::placeholder { font-family: system-ui, sans-serif; letter-spacing: normal; }
+.chat { max-height: 40vh; overflow-y: auto; }
+.chat li { padding: 0.3rem 0; }
+.message { white-space: pre-wrap; overflow-wrap: anywhere; }

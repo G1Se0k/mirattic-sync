@@ -17,11 +17,11 @@
 | 항목 | 정책 내용 | 우리 구현 |
 |---|---|---|
 | 단일 목적 | "single purpose that is narrow and easy to understand" | 친구와 같이 보기 (재생 상태 동기화 + 채팅) 하나 |
-| 최소 권한 | "narrowest permissions necessary" | `sidePanel`, `storage`만. host_permissions 없음 (서버가 CORS로 extension origin 허용). content script는 adapter가 생길 때(Phase 4) 해당 사이트에만 추가 |
+| 최소 권한 | "narrowest permissions necessary" | `sidePanel`, `storage` + `https://www.youtube.com/*`(content script와 같은 범위의 host_permissions, Phase 4). API 서버는 CORS로 extension origin 허용 |
 | 원격 코드 | MV3는 외부에서 실행 로직을 불러오면 안 됨. 데이터는 가능 | 모든 코드는 번들에 포함. 서버에서는 JSON만 받음 |
 | 사용자 데이터 범위 | 이름·이메일, 인증 정보, **웹 브라우징 활동**(보고 있는 사이트/콘텐츠) 모두 포함. 로컬 처리만 해도 공개 대상 | 계정(이메일·표시 이름), 친구 목록, 재생 상태. Phase 4부터 "시청 중인 콘텐츠" = 브라우징 활동 |
 | 개인정보처리방침 | 사용자 데이터를 다루면 대시보드에 게시 필수 | 스토어 제출 전 작성 (Phase 10) |
-| 눈에 띄는 공개 + 동의 | 수집 전에 **제품 UI 안에서** 공개하고 동의를 받아야 함. 스토어 설명으로는 부족 | Phase 4: presence/재생 상태 전송 전에 side panel에서 공개 + 동의. 공개 범위 기본값은 이미 보수적(presence=FRIENDS, 위치=ROOM_ONLY) |
+| 눈에 띄는 공개 + 동의 | 수집 전에 **제품 UI 안에서** 공개하고 동의를 받아야 함. 스토어 설명으로는 부족 | side panel 첫 화면에서 공개 + 동의 (Phase 4, `Consent.tsx`). 동의 전에는 YouTube 탭에 연결하지 않음. 공개 범위 기본값도 보수적(presence=FRIENDS, 위치=ROOM_ONLY) |
 | 전송 / 저장 | HTTPS·WSS로 전송, 저장 시 강력한 암호화 | 운영은 https/wss 필수 (dev만 localhost http). 아래 토큰 저장 참고 |
 | Limited Use | 기능 제공 목적 외 사용·판매·광고 금지, 사람이 열람 제한 | 광고/분석 없음. 서버 로그에 토큰·재생 데이터 남기지 않음 |
 | 저작권 / 접근 제어 | 유료벽·로그인 제한 우회, 저작물 무단 접근·다운로드·스트리밍 조장 금지 | 미디어를 전송하지 않음. 각 사용자가 자기 계정으로 직접 재생 (CLAUDE.md 규칙) |

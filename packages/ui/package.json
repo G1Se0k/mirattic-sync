@@ -5,7 +5,8 @@
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
   },
   "dependencies": {
     "@mirattic/client": "workspace:*",
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@types/react": "^19.1.8",
     "react": "^19.1.0",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.2"
   }
 }

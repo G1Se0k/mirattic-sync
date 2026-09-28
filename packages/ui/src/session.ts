@@ -1,11 +1,27 @@
-import type { ApiClient } from "@mirattic/client";
+import type { ApiClient, Socket } from "@mirattic/client";
+import type { MediaProvider, MediaProviderAdapter, RoomContent } from "@mirattic/types";
 
-// Each app (desktop, extension) builds its own client — token storage differs — and hands it over here
-// before rendering. Live ES module bindings make the assignment visible to every importer.
+/** What differs between the desktop app and the extension, besides token storage. */
+export type Platform = {
+  /** A player this app drives for the provider (mock is built in). undefined = can't play it here. */
+  adapter?(provider: MediaProvider): MediaProviderAdapter | undefined;
+  /** What the user watches now; "같이 보기" shares it. Must return the same object until it changes. */
+  nowWatching?(): RoomContent | null;
+  subscribe?(onChange: () => void): () => void;
+  /** The socket went up (or down: null). The extension publishes presence through it. */
+  connected?(socket: Socket | null): void;
+  /** Opens a watch page (built with `watchUrl`, never a URL from another user). */
+  open(url: string): void;
+};
+
+// Each app (desktop, extension) builds its own client and platform and hands them over here before
+// rendering. Live ES module bindings make the assignment visible to every importer.
 export let api: ApiClient;
 export let SOCKET_URL: string;
+export let platform: Platform;
 
-export function configure(client: ApiClient, socketUrl: string) {
+export function configure(client: ApiClient, socketUrl: string, p: Platform) {
   api = client;
   SOCKET_URL = socketUrl;
+  platform = p;
 }

@@ -47,9 +47,10 @@ ID는 UUID 문자열, 시간은 epoch ms.
 
 | Method | Path | 설명 |
 |---|---|---|
-| POST | `/api/rooms` | `{ content: RoomContent, inviteIds: string[] }` → `RoomView`. 만든 사람이 HOST. 초대는 수락된 친구만(아니면 400), 최대 7명. 초대받은 사람에게 `room:invite` |
+| POST | `/api/rooms` | `{ content: RoomContent, inviteIds: string[] }` → `RoomView`. 만든 사람이 HOST. 초대는 수락된 친구만(아니면 400), 최대 7명. `youtube` 콘텐츠는 `contentId`가 11자 영상 ID(아니면 400). 초대받은 사람에게 `room:invite` |
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
 | GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt }` |
+| GET | `/api/rooms/{id}/messages` | 최근 채팅 100개 `ChatMessage[]`, 오래된 순. 멤버가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/me` | 나가기 / 초대 거절. HOST가 나가면 방 삭제. 모든 멤버에게 `room:update` |
 
 `RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만) }`. 초대 = 멤버십 부여이며 별도 수락 단계는 없다.

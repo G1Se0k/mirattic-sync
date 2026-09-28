@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlaybackCommand, PlaybackState } from "@mirattic/types";
+import type { PlaybackCommand, PlaybackState, PlayerSnapshot } from "@mirattic/types";
 import { ServerClock } from "./clock";
 import { MockMediaProvider } from "./mock";
 import { classifyDrift, estimatePosition, publishHost, SyncFollower, type FollowerStatus } from "./sync";
@@ -193,7 +193,7 @@ describe("publishHost", () => {
     clock.addSample(Date.now(), Date.now(), Date.now());
     const host = new MockMediaProvider(CONTENT);
     const sent: [string, PlaybackCommand][] = [];
-    const stop = publishHost(host, clock, (type, cmd) => sent.push([type, cmd]));
+    const stop = publishHost(host, clock, (type, cmd) => void sent.push([type, cmd]));
     await settle();
     await host.play();
     await vi.advanceTimersByTimeAsync(200);
@@ -204,8 +204,109 @@ describe("publishHost", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(sent).toHaveLength(2);
 
-    publishHost(host, clock, (type, cmd) => sent.push([type, cmd])); // reconnected
+    publishHost(host, clock, (type, cmd) => void sent.push([type, cmd])); // reconnected
     await settle();
     expect(sent.at(-1)).toEqual(["playback:pause", { positionMs: 42_000, capturedAt: Date.now() }]);
+  });
+
+  it("never publishes an ad's position", async () => {
+    const clock = new ServerClock();
+    clock.addSample(Date.now(), Date.now(), Date.now());
+    const host = new MockMediaProvider(CONTENT);
+    const snapshot = host.snapshot.bind(host);
+    let ad = true;
+    const onChange = host.onChange.bind(host);
+    host.getSnapshot = async () => ({ ...snapshot(), adPlaying: ad });
+    host.onChange = (cb) => onChange((s) => cb({ ...s, adPlaying: ad }));
+    const sent: [string, PlaybackCommand][] = [];
+    publishHost(host, clock, (type, cmd) => void sent.push([type, cmd]));
+    await settle();
+    await host.play(); // the ad starts playing
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sent).toEqual([]);
+
+    // A change queued in the rate window is dropped if an ad starts before it goes out —
+    // announced by an event, or not yet (the adapter only notices ads by polling).
+    ad = false;
+    await host.seek(1_000);
+    await host.seek(2_000); // waits for the window
+    ad = true;
+    await host.play();
+    await vi.advanceTimersByTimeAsync(1_000);
+    ad = false;
+    await host.seek(3_000);
+    await host.seek(4_000); // waits for the window
+    ad = true; // no event
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sent.map(([, c]) => c.positionMs)).toEqual([1_000, 3_000]);
+    sent.length = 0;
+
+    ad = false;
+    await vi.advanceTimersByTimeAsync(1_000);
+    const at = Date.now();
+    await host.seek(5_000); // content resumes
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sent).toEqual([["playback:seek", { positionMs: 5_000, capturedAt: at }]]);
+  });
+
+  it("sends the state read at send time: never a queued one from the previous video or a lost player", async () => {
+    const clock = new ServerClock();
+    clock.addSample(Date.now(), Date.now(), Date.now());
+    let current: PlayerSnapshot | null = { contentId: "a", positionMs: 1_000, playing: true, capturedAt: Date.now() };
+    let reply = Promise.resolve();
+    const listeners = new Set<(s: PlayerSnapshot) => void>();
+    const adapter = {
+      ...new MockMediaProvider(CONTENT),
+      getSnapshot: async () => {
+        await reply;
+        return current && { ...current, capturedAt: Date.now() };
+      },
+      onChange: (cb: (s: PlayerSnapshot) => void) => (listeners.add(cb), () => void listeners.delete(cb)),
+    } as unknown as MockMediaProvider;
+    const change = (s: PlayerSnapshot | null) => {
+      current = s;
+      if (s) listeners.forEach((l) => l(s));
+    };
+    const sent: [string, number, string][] = [];
+    let skip = false;
+    publishHost(adapter, clock, (type, cmd, snap) => !skip && sent.push([type, cmd.positionMs, snap.contentId]) > 0);
+    await settle();
+    expect(sent).toEqual([["playback:play", 1_000, "a"]]);
+
+    change({ contentId: "a", positionMs: 5_000, playing: true, capturedAt: Date.now() }); // queued
+    current = { contentId: "b", positionMs: 0, playing: true, capturedAt: Date.now() }; // next video autoplays
+    await vi.advanceTimersByTimeAsync(200);
+    // The room restarts paused on a new video, so "still playing" must be said as a play, not a seek.
+    expect(sent.at(-1)).toEqual(["playback:play", 0, "b"]);
+
+    // A command the caller skipped (e.g. metadata not there yet) is not remembered as sent.
+    skip = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    change({ contentId: "c", positionMs: 0, playing: true, capturedAt: Date.now() });
+    await settle();
+    skip = false;
+    await vi.advanceTimersByTimeAsync(1_000);
+    change({ contentId: "c", positionMs: 500, playing: true, capturedAt: Date.now() });
+    await settle();
+    expect(sent.at(-1)).toEqual(["playback:play", 500, "c"]);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    change({ contentId: "c", positionMs: 7_000, playing: true, capturedAt: Date.now() });
+    await settle();
+    change({ contentId: "c", positionMs: 8_000, playing: true, capturedAt: Date.now() }); // queued
+    current = null; // the tab went away
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sent.at(-1)).toEqual(["playback:seek", 7_000, "c"]);
+
+    // A slow read overtaken by a newer flush is dropped: only the newer state goes out.
+    let release!: () => void;
+    reply = new Promise((r) => (release = r));
+    change({ contentId: "c", positionMs: 9_000, playing: false, capturedAt: Date.now() }); // flush 1 waits
+    await vi.advanceTimersByTimeAsync(1_000);
+    change({ contentId: "c", positionMs: 9_500, playing: false, capturedAt: Date.now() }); // flush 2 waits too
+    release();
+    await settle();
+    expect(sent.slice(-1)).toEqual([["playback:pause", 9_500, "c"]]);
+    expect(sent.filter(([, p]) => p === 9_000)).toEqual([]);
   });
 });

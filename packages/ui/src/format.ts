@@ -1,3 +1,7 @@
+import type { MediaProvider } from "@mirattic/types";
+
+export const PROVIDER_NAMES: Record<MediaProvider, string> = { youtube: "YouTube", netflix: "Netflix", laftel: "Laftel", mock: "Mock" };
+
 export function clock(ms: number) {
   const s = Math.floor(ms / 1000);
   const h = Math.floor(s / 3600);

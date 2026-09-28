@@ -6,9 +6,11 @@ export default defineConfig({
   manifest: {
     name: 'Mirattic Sync',
     description: 'Watch together with friends. Syncs playback state only — never media.',
-    // storage: the refresh token lives in storage.session. No host permissions: the API server allows this
-    // extension's origin through CORS, and there are no content scripts until a provider adapter exists.
+    // storage: the refresh token (storage.session) and the consent flag. The only site access is YouTube —
+    // the content script's match; host_permissions repeats it so the side panel can see which tab is YouTube
+    // (same install warning). The API server allows this extension's origin through CORS instead.
     permissions: ['sidePanel', 'storage'],
+    host_permissions: ['https://www.youtube.com/*'],
     action: {},
     // Dev-only public key pinning the ID to kphihploboaigagpahhdhjiaglnfmpii so the server can allow its origin.
     // ponytail: replace with the Web Store item's public key before publishing (docs/platform-policy/chrome-web-store.md).

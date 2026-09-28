@@ -150,42 +150,56 @@ export type PlaybackCommandType = "playback:play" | "playback:pause" | "playback
 
 /**
  * Host side: turns local player changes into playback commands, starting with the current state.
- * Bursts (e.g. play then an immediate seek) are coalesced to at most one command per `minIntervalMs`,
- * always ending with the latest state — the server rate-limits, and a dropped last command would
- * leave members permanently off. `capturedAt` is converted to server time so members can extrapolate.
+ * Bursts (e.g. play then an immediate seek) are coalesced to at most one command per `minIntervalMs`.
+ * A change only marks the state dirty; what goes out is a fresh snapshot read at send time, so it is
+ * always the latest state (a dropped last command would leave members permanently off) and never a
+ * stale one — from before an ad started, or from the previous video. Nothing is sent during an ad or
+ * without a player. `send` gets that snapshot too, so the caller can check which content it is about.
+ * `capturedAt` is converted to server time so members can extrapolate.
  */
 export function publishHost(
   adapter: MediaProviderAdapter,
   clock: ServerClock,
-  send: (type: PlaybackCommandType, command: PlaybackCommand) => void,
+  /** @returns false if the command was not sent (e.g. the caller skipped it). */
+  send: (type: PlaybackCommandType, command: PlaybackCommand, snapshot: PlayerSnapshot) => boolean | void,
   minIntervalMs = 200,
 ) {
   let last: PlayerSnapshot | null = null;
-  let pending: PlayerSnapshot | null = null;
+  let dirty = false;
   let lastSentAt = -Infinity;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
+  let flushes = 0;
 
-  const flush = () => {
+  const flush = async () => {
     timer = undefined;
-    const s = pending;
-    if (!s || stopped) return;
-    pending = null;
+    if (!dirty || stopped) return;
+    dirty = false;
     lastSentAt = Date.now();
-    // Compared with the last *sent* state, so a coalesced play+seek still goes out as a play.
-    const type = !last || s.playing !== last.playing ? (s.playing ? "playback:play" : "playback:pause") : "playback:seek";
-    last = s;
-    send(type, { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(s.capturedAt)) });
+    const id = ++flushes;
+    const s = await adapter.getSnapshot();
+    // A newer flush started while we waited: it reads a newer state.
+    if (stopped || id !== flushes || !s || s.adPlaying) return;
+    // Compared with the last *sent* state, so a coalesced play+seek still goes out as a play. A new video
+    // restarts the room paused, so its first command always states play or pause.
+    const fresh = !last || s.contentId !== last.contentId || s.playing !== last.playing;
+    const type = fresh ? (s.playing ? "playback:play" : "playback:pause") : "playback:seek";
+    const command = { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(s.capturedAt)) };
+    if (send(type, command, s) !== false) last = s;
   };
   const queue = (s: PlayerSnapshot) => {
-    pending = s;
+    if (s.adPlaying) {
+      dirty = false; // an ad started before the window closed: nothing to say until it ends
+      return;
+    }
+    dirty = true;
     if (timer !== undefined) return;
     const wait = lastSentAt + minIntervalMs - Date.now();
-    if (wait <= 0) flush();
-    else timer = setTimeout(flush, wait);
+    if (wait <= 0) void flush();
+    else timer = setTimeout(() => void flush(), wait);
   };
 
-  void adapter.getSnapshot().then((s) => s && !last && !pending && queue(s));
+  void adapter.getSnapshot().then((s) => s && !last && !dirty && queue(s));
   const unsubscribe = adapter.onChange(queue);
   return () => {
     stopped = true;
