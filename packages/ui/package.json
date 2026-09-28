@@ -1,0 +1,23 @@
+{
+  "name": "@mirattic/ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@mirattic/client": "workspace:*",
+    "@mirattic/sync-core": "workspace:*",
+    "@mirattic/types": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "react": "^19.1.0",
+    "typescript": "~6.0.3"
+  }
+}

@@ -1,10 +1,25 @@
 # Current Phase
-Phase 2 — Mock Media Provider + 동기화 엔진 (완료, 2026-09-28, 미커밋)
+Phase 3 — Extension Base (완료, 2026-09-28, 미커밋)
 
-이전: Phase 1 — Account / Friend / Presence (완료, 커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
+이전: Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Phase 3
+- 정책 확인: `docs/platform-policy/chrome-web-store.md` (2026-09-28)
+- **packages/ui** (신규): Desktop 화면(Login / Home / Room / Privacy, CSS)을 옮겨 Desktop과 Extension이 공유
+  - 각 앱은 토큰 저장소만 다른 API client를 `configure(api, socketUrl)`로 넘김
+  - 시계 측정 코드(Room.tsx)도 함께 공유됨
+- **Extension**
+  - side panel = 같은 앱 (로그인, 친구 presence, 친구 코드, 방 목록 / 입장, Mock 동기화)
+  - refresh token은 `chrome.storage.session` (브라우저 재시작 시 재로그인), access token은 메모리
+  - API client / WebSocket은 side panel 페이지가 가짐 (결정 29)
+  - 권한 `sidePanel`, `storage`만. 목적 없던 YouTube content script 셸 삭제 (Phase 4에서 adapter와 함께 추가)
+  - manifest `key`로 dev ID `kphihploboaigagpahhdhjiaglnfmpii` 고정
+- **Server**: `ALLOWED_ORIGINS` 기본값에 dev extension origin 추가
+- `sync-core/clock.ts`: Extension의 `noUncheckedIndexedAccess`에서 걸린 타입 오류 수정 (동작 변화 없음)
+- 결정 29–32 (`plan.md`)
+
 ### Phase 2
 - **packages/sync-core** (신규, 순수 TS)
   - `ServerClock`: `sync:request/response`로 서버 시계 offset 추정 (RTT/2, 최근 8개 중 RTT 최소 샘플)
@@ -68,6 +83,12 @@ Phase 2 — Mock Media Provider + 동기화 엔진 (완료, 2026-09-28, 미커�
 - `POST /api/me/friend-code`로 재발급. 이메일 검색 API는 삭제
 - Desktop: "내 친구 코드" (복사, 확인 창을 거친 재발급), 코드 입력으로 친구 추가
 
+## Major Files Changed (Phase 3)
+- `packages/ui/` (신규, `apps/desktop/src/*.tsx`에서 이동), `apps/desktop/src/main.tsx`
+- `apps/extension/{wxt.config.ts,package.json}`, `entrypoints/sidepanel/{main.tsx,session.ts}`, `entrypoints/youtube.content.ts` 삭제
+- `server/src/main/resources/application.properties`
+- `docs/platform-policy/chrome-web-store.md`, `docs/architecture/plan.md`, `README.md`
+
 ## Major Files Changed (Phase 2)
 - `packages/sync-core/src/{clock,mock,sync,index}.ts`, `sync.test.ts`
 - `packages/types/src/index.ts`, `packages/client/src/api.ts`
@@ -95,9 +116,22 @@ Phase 2 — Mock Media Provider + 동기화 엔진 (완료, 2026-09-28, 미커�
 - 20. 친구 추가는 친구 코드로만 (이메일 검색 제거)
 - 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 21–28 (Phase 2): mock provider, playback/version DB 저장, 초대=멤버십, `room:update` 후 재조회, 서버 시각 기준 `capturedAt`, seek 구간 재확인, echo 억제 창 없음, 호스트 명령 모으기 + 초당 제한 — `plan.md` 참고
+- 29–32 (Phase 3): Extension은 side panel이 소켓 소유, refresh token은 `storage.session`, 화면은 `packages/ui` 공유, 최소 권한 — `plan.md` 참고
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
+### Phase 3
+- `pnpm typecheck` / `pnpm build` ✅ (packages/ui 포함)
+- 수동 E2E (Playwright Chromium에 빌드된 확장 로드, side panel 페이지를 360px 탭으로 열고 Desktop dev 탭과 함께, 2026-09-28)
+  - service worker URL로 고정 ID 확인
+  - Extension에서 가입 (extension origin CORS) → 친구 코드로 Desktop 사용자와 친구 → 온라인 presence 수신 (WS origin)
+  - 새로고침 후에도 로그인 유지, refresh token이 `storage.session`에만 있고 `storage.local`은 비어 있음
+  - Desktop이 호스트인 방에 Extension이 입장 → 재생 / +10초 / 일시정지 반영, 동기화됨(차이 18ms)
+  - 360px 폭에서 화면 깨짐 없음
+- Codex Sol 검증 1차 PASS (2026-09-28): sync-core 11, client 3, typecheck, build, server verify 31 통과, 발견 사항 없음. lint 없음, desktop / extension / types / ui에 test 스크립트 없음
+- 스크립트: 저장소에 넣지 않음 (Extension 테스트 도구 도입은 Phase 4 content script와 함께 판단)
+
+### Phase 2
 - `./mvnw test` ✅ 31/31 (Testcontainers MySQL 8.4)
   - SocketHubTest 2: 멤버십 확인 중 나가기가 끼어들어도 등록이 남지 않음(수정을 되돌리면 실패 확인), 확인 실패 시 등록 안 함
   - RoomFlowTest 6: 친구만 초대 / 비멤버에게 404, 비멤버 join·조작 거부(`not_member`), 멤버 조작 거부(`not_host`), version 1→2→3 · capturedAt 보정 · duration 제한, 초당 제한, 나간 멤버에게 이벤트 안 감 · HOST 나가면 방 삭제, `sync:response`
@@ -158,14 +192,20 @@ Phase 2 — Mock Media Provider + 동기화 엔진 (완료, 2026-09-28, 미커�
 - 친구 코드 생성 시 충돌을 재시도하지 않음 (unique 제약에만 의존, 수백만 명 이하에서는 무시할 수준)
 - 친구 요청 API에 사용자별 rate limit 없음 → 코드 무차별 대입은 코드 공간(8.5×10¹¹)에만 의존. 공개 서비스 전에 요청 제한 추가 필요
 - Windows 빌드 미검증 (CI에 Tauri 빌드 매트릭스 없음). CI(web + server)는 GitHub에서 통과함
-- Extension 로그인은 아직 없음 (Phase 3). 서버 `ALLOWED_ORIGINS`에 extension origin 추가 필요
+- **Phase 3**
+  - manifest `key`는 dev용. 스토어 등록 시 대시보드 공개키로 교체하고 운영 `ALLOWED_ORIGINS` 설정
+  - 개인정보처리방침과 UI 내 공개·동의 화면 없음 → 시청 정보(브라우징 활동)를 보내기 시작하는 Phase 4 전에 필요
+  - 운영은 https/wss 필수 (정책의 보안 전송 요건). 지금은 localhost http 기본값
+  - Extension은 브라우저를 다시 열면 재로그인 (`storage.session`)
+  - side panel을 닫으면 WebSocket이 끊겨 오프라인으로 보임 (의도)
+  - side panel 실제 컨테이너에서 `confirm()`/`alert()` 미확인 (탭으로 연 페이지에서만 확인)
+  - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Next Task
-Phase 3 — Extension Base
-1. 정책 확인: Chrome Web Store 사용자 데이터 정책 → `docs/platform-policy/chrome-web-store.md` (확인 날짜 기록)
-2. Extension 로그인 (별도 로그인, refresh token은 `chrome.storage.session` 또는 `local` — 정책 확인 후 결정)
-   - 서버 `ALLOWED_ORIGINS`에 `chrome-extension://<id>` 추가, 고정 extension key로 ID 고정
-3. background service worker에서 `connectSocket` (MV3 service worker 수명 문제 확인: side panel이 열려 있을 때 연결 유지)
-4. provider registry (`providers/` 폴더, 현재 탭 URL로 adapter 선택), content script ↔ background 메시지
-5. side panel: 로그인 상태, 친구 presence, 방 목록 / 입장, MockMediaProvider로 방 동기화 (content script 없이)
-6. 시계 측정 코드를 `packages/client` 또는 `sync-core`로 이동해 Desktop과 공유
+Phase 4 — YouTube Adapter
+1. 정책 확인: YouTube ToS / API ToS / Developer Policies — youtube.com 페이지의 `<video>`를 content script로 제어하는 것이 허용 범위인지 → `docs/platform-policy/youtube.md` (확인 날짜 기록). 불명확하면 보수적 선택
+2. 브라우징 활동 공개·동의 화면 (side panel, 처음 사용 시) — 동의 전에는 presence 미디어 정보를 보내지 않음
+3. content script (`*://www.youtube.com/*`만) + `providers/youtube` adapter (`MediaProviderAdapter`, 광고 감지 → `adPlaying`), 선택자는 adapter 안에만
+4. content script ↔ side panel 메시지로 adapter를 `SyncFollower` / `publishHost`에 연결 (결정 29)
+5. 실제 플레이어의 seek 부정확 / seeking 중 이벤트 → echo 처리 재검토 (Phase 2 known issue)
+6. presence에 시청 중 콘텐츠 전송 (공개 범위 규칙 유지)

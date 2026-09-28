@@ -34,6 +34,10 @@
 | 26 | drift의 seek 구간(1.5–3초)은 한 번 더 확인한 뒤 보정, 호스트 이벤트 직후에는 즉시 | 버퍼링 같은 일시적 차이로 불필요한 seek를 하지 않기 위해 |
 | 27 | echo 억제 창 없음 | MVP는 멤버가 명령을 보내지 않으므로, 보정 후 발생한 이벤트는 재확인에서 차이 0으로 끝남 |
 | 28 | 호스트 명령은 클라이언트에서 200ms 단위로 모으고, 서버는 초당 20회 제한 | 최소 간격 제한은 지터로 붙은 마지막 명령을 버려 멤버가 계속 어긋남 (E2E에서 발견) |
+| 29 | Extension의 API client와 WebSocket은 background가 아니라 side panel 페이지가 가짐 | MV3 service worker는 30초간 트래픽이 없으면 종료됨. side panel이 열려 있는 동안 = 같이 보는 동안이라 수명이 맞고, background ↔ panel 중계 코드가 필요 없음. Phase 4 content script는 side panel과 직접 메시지 |
+| 30 | Extension refresh token은 `chrome.storage.session` | 디스크에 평문으로 남지 않음, content script 접근 불가. 브라우저 재시작 시 재로그인 (`platform-policy/chrome-web-store.md`) |
+| 31 | 화면 컴포넌트는 `packages/ui`로 옮겨 Desktop과 Extension이 공유. 각 앱은 토큰 저장소만 다른 client를 `configure()`로 넘김 | 같은 화면을 두 번 작성하지 않음 (결정 9의 "필요해질 때") |
+| 32 | Extension 권한은 `sidePanel`, `storage`만. host_permissions 없이 서버 CORS로 extension origin 허용, content script는 adapter와 함께 추가 | Chrome Web Store 최소 권한 정책 |
 
 ## 사용자 식별 (UID + Identity)
 

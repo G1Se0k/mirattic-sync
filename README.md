@@ -29,6 +29,7 @@ pnpm --filter @mirattic/desktop tauri dev
 # 브라우저에서 두 사용자로 테스트: pnpm --filter @mirattic/desktop dev → http://localhost:1420 탭 두 개
 
 # Extension: 빌드 후 chrome://extensions → "압축해제된 확장 프로그램 로드" → apps/extension/.output/chrome-mv3
+# 툴바 아이콘 → side panel에서 로그인. ID는 manifest key로 kphihploboaigagpahhdhjiaglnfmpii 고정
 pnpm --filter @mirattic/extension dev
 
 # Backend
@@ -42,9 +43,9 @@ cd server && JWT_SECRET=$(openssl rand -base64 48) ./mvnw spring-boot:run   # ht
 |---|---|---|
 | `JWT_SECRET` | ✅ | HS256 키, 32바이트 이상. 없으면 서버가 시작하지 않음 |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | | 기본값은 docker-compose 로컬 개발용 |
-| `ALLOWED_ORIGINS` | | CORS/WebSocket 허용 origin (콤마 구분). 기본값은 Tauri + Vite dev |
+| `ALLOWED_ORIGINS` | | CORS/WebSocket 허용 origin (콤마 구분). 기본값은 Tauri + Vite dev + dev extension ID |
 
-Desktop은 `VITE_API_URL`(기본 `http://localhost:8080`)로 서버 주소를 바꾼다.
+Desktop과 Extension은 `VITE_API_URL`(기본 `http://localhost:8080`)로 서버 주소를 바꾼다.
 
 ## 검증
 

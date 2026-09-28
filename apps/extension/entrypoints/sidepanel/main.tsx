@@ -1,19 +1,14 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { MEDIA_PROVIDERS } from '@mirattic/types';
+import { App, configure } from '@mirattic/ui';
+import { api, SOCKET_URL } from './session';
 
-function SidePanel() {
-  return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: 16 }}>
-      <h1 style={{ fontSize: 18 }}>Mirattic Sync</h1>
-      <p>Chat panel — coming in Phase 3/4.</p>
-      <p>Providers: {MEDIA_PROVIDERS.join(', ')}</p>
-    </main>
-  );
-}
+// The side panel page owns the socket: it lives exactly as long as the panel is open, which is when the
+// user is watching together. The background service worker would be shut down after 30s without traffic.
+configure(api, SOCKET_URL);
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <SidePanel />
+    <App />
   </React.StrictMode>,
 );

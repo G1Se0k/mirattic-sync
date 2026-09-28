@@ -24,8 +24,8 @@ export class ServerClock {
   }
 
   offset() {
-    let best = this.samples[0];
-    for (const s of this.samples) if (s.rtt < best.rtt) best = s;
+    let best: (typeof this.samples)[number] | undefined;
+    for (const s of this.samples) if (!best || s.rtt < best.rtt) best = s;
     return best?.offset ?? 0;
   }
 
