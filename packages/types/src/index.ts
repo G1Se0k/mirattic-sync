@@ -56,6 +56,8 @@ export const DEFAULT_DRIFT: DriftThresholds = {
 export interface MediaProviderAdapter {
   provider: MediaProvider;
   driftOverride?: Partial<DriftThresholds>;
+  /** false: the provider can't be seeked from outside (Netflix); the member is told where to go instead. */
+  seekable?: boolean;
 
   detect(): boolean;
   getPresence(): Promise<MediaPresence | null>;
@@ -121,6 +123,7 @@ export type RoomContent = {
 };
 
 const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+const NETFLIX_ID = /^\d{1,12}$/;
 
 /**
  * Where to watch a content, built from its provider-scoped id — never from a URL another user sent,
@@ -129,6 +132,9 @@ const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 export function watchUrl(content: { provider: MediaProvider; contentId: string }): string | undefined {
   if (content.provider === "youtube" && YOUTUBE_VIDEO_ID.test(content.contentId)) {
     return `https://www.youtube.com/watch?v=${content.contentId}`;
+  }
+  if (content.provider === "netflix" && NETFLIX_ID.test(content.contentId)) {
+    return `https://www.netflix.com/watch/${content.contentId}`;
   }
   return undefined;
 }

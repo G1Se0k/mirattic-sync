@@ -50,6 +50,11 @@
 | 42 | 차단하면 공유 방에서 호스트가 아닌 쪽이 빠짐 (차단한 사람의 방에서는 차단당한 사람, 그 외 방에서는 차단한 사람) | 호스트를 빼면 방이 닫혀 다른 멤버까지 영향 |
 | 43 | `IN_ROOM` presence 상태는 추가하지 않음. DND는 보류 | 방 참여 여부는 비공개로 둠. `WATCHING`과 영상 정보로 합류 요청에 충분 |
 | 44 | Desktop 창을 닫으면 트레이로 숨김 (접속·알림 유지, 트레이 "종료"로 끝냄). 초대·합류 요청 알림은 앱에 포커스가 없을 때만 (Tauri notification plugin). Extension은 알림 없음 | Extension에 `notifications` 권한을 더하지 않음 (side panel 배너로 충분) |
+| 45 | Netflix는 실험 기능, **기본 꺼짐**. 켤 때 약관 1.8(vi) 위험을 보여주고 `optional_host_permissions`(`https://www.netflix.com/*`)를 요청, 끄면 반납. 설정의 "실험 기능"과 Netflix 방 첫 입장 팝업(방마다 세션당 1회)에서 켬 | 약관이 코드 삽입을 명시적으로 금지하고 위반 시 사용자 계정이 제한될 수 있음 → 사용자가 알고 선택 (사용자 결정, `platform-policy/netflix.md`) |
+| 46 | Netflix content script는 manifest에 넣지 않고(`registration: 'runtime'`, 빌드 hook으로 host_permissions에서 제거) side panel이 따라가는 탭에만 `scripting.executeScript` | 꺼져 있을 때와 따라가지 않는 탭에는 코드가 전혀 들어가지 않음 |
+| 47 | Netflix는 재생 / 일시정지만 제어하고 seek하지 않음 (`MediaProviderAdapter.seekable = false`). 멤버에게 `manual` 상태로 "N초 늦음 · mm:ss로 직접 이동" 안내, 호스트의 채팅 타임스탬프 이동도 없음 | `currentTime` 쓰기는 Netflix 오류 M7375, 우회는 내부 플레이어 API뿐 (금지) |
+| 48 | side panel은 탭 하나(YouTube 또는 켜진 Netflix)를 따라가고 `RemoteAdapter`의 provider를 탭에 맞춤. 방에는 `as(provider)` view를 줘서 다른 provider 탭의 스냅샷은 null | 한 provider의 contentId를 다른 provider의 것으로 오인하지 않게 |
+| 49 | Netflix 채팅도 side panel 안 (별도 팝업 창 없음) | 사용자 결정 (Teleparty도 분리하지 않음). 토큰·소켓을 가진 페이지가 하나로 유지됨 |
 
 ## 사용자 식별 (UID + Identity)
 
@@ -86,7 +91,7 @@ adapter는 `sourceUserId`/`version`을 알 수 없으므로 로컬 `PlayerSnapsh
 2. echo loop (프로그램 seek이 이벤트를 다시 발생) → 억제 창 없음 (결정 27). MVP는 host만 전파, 멤버의 자기 seek 이벤트는 재확인에서 차이 0으로 끝남 (Phase 4 가짜 페이지 E2E로 확인)
 3. Autoplay 정책 → 방 참가 시 "동기화 시작" 클릭으로 사용자 동작 확보
 4. YouTube 광고 → adapter가 `adPlaying` 노출, 광고 중 sync 일시중지
-5. Netflix는 `video.currentTime` 직접 변경 시 오류가 알려져 있음 → Phase 6 정책 검토 시 결정
+5. Netflix는 `video.currentTime` 직접 변경 시 오류(M7375) → seek하지 않고 안내만 (결정 47)
 6. Extension 로그인 → MVP는 extension에서 별도 로그인
 7. Chrome Web Store 사용자 데이터 정책 (시청 기록 = 브라우징 활동) → 개인정보처리방침, 최소 host_permissions
 
@@ -94,5 +99,5 @@ adapter는 `sourceUserId`/`version`을 알 수 없으므로 로컬 `PlayerSnapsh
 
 - Chrome Web Store 정책 — Phase 3 시작 시
 - YouTube (youtube.com 페이지의 `<video>` 제어가 API ToS 대상인지 불확실) — Phase 4 시작 시
-- Netflix 이용약관 — Phase 6
+- Netflix 이용약관 — Phase 6 (2026-09-28, `platform-policy/netflix.md`)
 - Laftel 이용약관 / 동시 재생 제한 — Phase 7

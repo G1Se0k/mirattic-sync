@@ -10,6 +10,12 @@ export type Platform = {
   subscribe?(onChange: () => void): () => void;
   /** The socket went up (or down: null). The extension publishes presence through it. */
   connected?(socket: Socket | null): void;
+  /** Provider control the user turns on at their own risk (Netflix). Absent = not offered in this app. */
+  experimental?: {
+    enabled(provider: MediaProvider): boolean;
+    /** Call from a click: turning on may ask for a browser permission. Changes are announced via `subscribe`. */
+    setEnabled(provider: MediaProvider, on: boolean): Promise<boolean>;
+  };
   /** Opens a watch page (built with `watchUrl`, never a URL from another user). */
   open(url: string): void;
   /** A system notification, shown only while the app isn't focused. */

@@ -27,6 +27,8 @@ export function classifyDrift(driftMs: number, t: DriftThresholds = DEFAULT_DRIF
 
 export type FollowerStatus =
   | { kind: "synced" | "rechecking" | "confirming" | "corrected"; driftMs: number }
+  /** Off by `driftMs` on a player we can't seek: the user has to move to `targetMs` themselves. */
+  | { kind: "manual"; driftMs: number; targetMs: number }
   | { kind: "waiting" | "ad" | "other-content" };
 
 /**
@@ -122,6 +124,11 @@ export class SyncFollower {
     const driftMs = snap.positionMs - target;
     const action = classifyDrift(driftMs, { ...DEFAULT_DRIFT, ...adapter.driftOverride });
 
+    if (action !== "ignore" && action !== "recheck" && adapter.seekable === false) {
+      this.confirming = false;
+      if (state.playing) this.schedule(); // keep the target current until the user catches up
+      return onStatus?.({ kind: "manual", driftMs, targetMs: target });
+    }
     if (action === "immediate" || (action === "seek" && (hostEvent || this.confirming))) {
       this.confirming = false;
       // Re-estimate: play()/getSnapshot() may have taken a while on a real player.

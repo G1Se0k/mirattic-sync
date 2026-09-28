@@ -1,10 +1,27 @@
 # Current Phase
-Phase 5 — Desktop Integration (완료, 2026-09-28)
+Phase 6 — Netflix Experimental Adapter (완료, 2026-09-28)
 
-이전: Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
+이전: Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Phase 6
+- 정책 확인: `docs/platform-policy/netflix.md` (2026-09-28, 이용약관 Last Updated 2026-04-10)
+  - 약관 1.8(vi) "코드나 다른 제품을 삽입하거나 … 조작" 금지, 위반 시 **사용자 계정** 제한 가능 → 불명확 → 사용자 결정: 실험 기능, 기본 꺼짐, 사용자가 위험을 보고 켬
+  - 법률 검토 체크리스트 (약관, 제3자 계약 위반 유도, 기술적 보호조치, 정보통신망법, 개인정보, Chrome 스토어, 상표). 법률 자문 아님, 스토어 공개 전 변호사 검토 필요
+- **Extension**
+  - Netflix 제어는 `optional_host_permissions`. 켤 때 Chrome 권한 요청, 끄면 반납 (Chrome 설정에서 권한을 빼도 꺼짐)
+  - 켜는 곳: 친구 목록 아래 "실험 기능", Netflix 방에 처음 들어갈 때 뜨는 팝업(방마다 한 번). 약관 조항·계정 제한 위험·읽는 정보·광고 요금제 미지원을 보여줌
+  - `providers/netflix.ts`: `/watch/<숫자>` ID, 탭 제목, `<video>` 재생 상태만 읽음. manifest에 없는 content script를 따라가는 탭에만 주입
+  - **재생 / 일시정지만 동기화, seek하지 않음** (`currentTime` 쓰기 → Netflix 오류 M7375, 우회는 내부 API뿐). 멤버에게 "호스트보다 N초 늦음 · 직접 m:ss로 이동" 안내, 호스트의 채팅 타임스탬프 이동은 Netflix 방에서 없음
+  - side panel은 YouTube 또는 (켜졌으면) Netflix 탭 하나를 따라감. 방에는 provider별 view (`RemoteAdapter.as`)
+  - `providers/page-video.ts`: YouTube와 Netflix가 공유하는 `<video>` 페이지 adapter (YouTube 동작 변화 없음)
+  - 채팅은 side panel 안 그대로 (별도 팝업 창은 요청 후 취소됨, 결정 49)
+- **sync-core**: `seekable === false`면 seek 대신 `manual` 상태 (재생 중이면 1초마다 목표 위치 갱신)
+- **types**: `MediaProviderAdapter.seekable`, `watchUrl`의 Netflix URL
+- **Server**: Netflix contentId는 1–12자리 숫자 (방 생성 400, content-change `bad_payload`)
+- 결정 45–49 (`plan.md`)
+
 ### Phase 5
 - **합류 요청**: 친구가 YouTube를 보고 있으면 "합류 요청" → 친구에게 `watch:request` → 친구가 "같이 보기"를 누르면 내가 초대됨
   - 서버 `POST /api/rooms/requests` (친구만, 온라인일 때만, 같은 쌍 30초에 1회)
@@ -125,6 +142,13 @@ Phase 5 — Desktop Integration (완료, 2026-09-28)
 - `POST /api/me/friend-code`로 재발급. 이메일 검색 API는 삭제
 - Desktop: "내 친구 코드" (복사, 확인 창을 거친 재발급), 코드 입력으로 친구 추가
 
+## Major Files Changed (Phase 6)
+- `apps/extension/{bridge.ts,wxt.config.ts,package.json}`, `providers/{page-video,youtube,netflix}.ts`, `entrypoints/netflix.content.ts`, `entrypoints/sidepanel/{watch.ts,watch.test.ts,main.tsx}`
+- `packages/ui/src/{Experimental.tsx,Room.tsx,Home.tsx,session.ts,App.css}`
+- `packages/sync-core/src/{sync.ts,sync.test.ts}`, `packages/types/src/index.ts`
+- `server/.../room/RoomService.java`, `RoomFlowTest.java`
+- `docs/platform-policy/{netflix.md,chrome-web-store.md}`, `docs/protocol/{rest,websocket}.md`, `docs/architecture/plan.md`
+
 ## Major Files Changed (Phase 5)
 - `server/.../room/{RoomService,RoomController}.java`, `friend/FriendController.java`, `ws/SocketHandler.java`, `RoomFlowTest.java`
 - `packages/ui/src/{Home.tsx,session.ts,App.css}`, `packages/client/src/api.ts`
@@ -171,12 +195,44 @@ Phase 5 — Desktop Integration (완료, 2026-09-28)
 - 20. 친구 추가는 친구 코드로만 (이메일 검색 제거)
 - 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 21–28 (Phase 2): mock provider, playback/version DB 저장, 초대=멤버십, `room:update` 후 재조회, 서버 시각 기준 `capturedAt`, seek 구간 재확인, echo 억제 창 없음, 호스트 명령 모으기 + 초당 제한 — `plan.md` 참고
+- 45–49 (Phase 6): Netflix는 기본 꺼짐 · 선택 권한, 따라가는 탭에만 주입, 재생/일시정지만 (seek 안내), provider별 view, 채팅은 side panel — `plan.md` 참고
 - 41–44 (Phase 5): 합류는 요청 → 초대, 차단 시 호스트가 아닌 쪽이 빠짐, IN_ROOM 없음 · DND 보류, Desktop 트레이 · 알림 — `plan.md` 참고
 - 33–40 (Phase 4): YouTube는 사용자 탭의 `<video>` 제어, URL은 contentId로 생성, content-change, 광고 중 명령 없음, 동의 화면, Platform 주입, side panel ⇄ content script port, 채팅 저장 — `plan.md` 참고
 - 29–32 (Phase 3): Extension은 side panel이 소켓 소유, refresh token은 `storage.session`, 화면은 `packages/ui` 공유, 최소 권한 — `plan.md` 참고
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
+### Phase 6
+- `packages/sync-core` 14/14 (추가: seek할 수 없는 플레이어는 재생만 맞추고 이동할 위치를 알림, 1초 뒤 목표 갱신. 가드를 빼면 실패 확인)
+- `RoomFlowTest`: Netflix contentId 형식 (숫자가 아니면 400, 숫자면 생성)
+- `pnpm typecheck` / `pnpm build` ✅, 빌드된 manifest: host_permissions에 netflix 없음, optional_host_permissions에만
+- 수동 E2E (Playwright Chromium 3개, netflix.com을 가짜 페이지(`<video>` 하나, 제목 "Netflix", 프로그램 seek을 M7375로 표시)로 route, 2026-09-28)
+  - headless Chrome은 권한 창을 누를 수 없어, 2개는 빌드 출력 manifest에 netflix를 미리 넣은 복사본, 1개는 일반 빌드
+  - 일반 빌드: netflix 권한 없음, Netflix 탭을 따라가지 않음 ("지금 보는 영상" 없음)
+  - 켜진 호스트: Netflix 탭을 따라가고 친구에게 "Netflix · Netflix 콘텐츠 시청 중"
+  - 꺼진 멤버: Netflix 방 입장 시 위험 안내 팝업 → "켜지 않고 계속" → "꺼져 있어 동기화하지 않습니다", 다시 들어가도 팝업 없음
+  - 켜진 멤버: "Netflix에서 이 영상 열기" → 호스트 재생 따라감, 일시정지·재개 반영
+  - 호스트 seek(2:00) → 멤버 "호스트보다 119.6초 늦음 · 직접 2:05(으)로 이동", 멤버 페이지는 seek되지 않음(M7375 없음) → 직접 이동하면 동기화됨
+  - 채팅: 타임스탬프 표시, 호스트도 클릭 이동 없음
+  - YouTube E2E 전체 재실행 통과 (adapter 리팩터링 회귀 없음)
+- **실제 Netflix 계정으로는 확인하지 않음** (계정 없음) → Known Issues
+- Codex Sol 검증 1차 FAIL (2026-09-28, 검사 6개 모두 통과: sync-core 14, client 3, ui 3, typecheck, build(manifest 확인), server verify 39. blocking 1 · non-blocking 1) → 수정
+  - Netflix 탭에 스크립트를 넣는 동안 권한이 해제되거나 다른 탭이 선택돼도, 주입이 끝나면 Netflix 탭에 연결될 수 있음 (꺼진 상태에서 읽기) → bind마다·끌 때 증가하는 카운터로, 주입 후 카운터가 그대로이고 켜져 있을 때만 연결. Extension에 테스트 도구가 없어 자동 회귀 테스트 없음, E2E 재실행 통과
+  - (non-blocking) WS `content-change`의 잘못된 Netflix ID 테스트 없음 → "81a", 13자리 → `bad_payload` 테스트 추가
+- Codex 재검증 1회차 FAIL (1차 지적 2개 해결 확인, 검사 6개 통과, blocking 1) → 수정
+  - 처음 탭 선택(`pick`)이 탭 리스너 등록 전에 실행돼, 첫 Netflix 주입 중 탭을 바꾸면 이벤트를 놓치고 이전 Netflix 탭에 연결 → 리스너를 모두 등록한 뒤 처음 선택. E2E 재실행 통과
+- Codex 재검증 2회차 FAIL (1·2회차 지적 해결 확인, 검사 6개 통과, blocking 1) → 수정
+  - `pick`의 비동기 탭 조회가 그 사이 사용자가 고른 탭을 덮어쓸 수 있음 → 선택이 시작될 때마다(`pick`, 영상 탭 활성화) 증가하는 카운터로, 조회 후 카운터가 그대로일 때만 연결. 영상이 아닌 탭 활성화는 세지 않음 (따라가던 탭을 닫을 때 Chrome이 옆 탭을 활성화해도 넘겨받기가 취소되지 않게). E2E 재실행 통과
+- Codex 재검증 3회차(자동 재검증 마지막) FAIL (이전 지적 모두 해결 확인, 검사 6개 통과, blocking 1) → 사용자 보고 후 수정 요청
+  - 영상 탭 A → B를 빠르게 활성화했을 때 `tabs.get(A)`가 늦게 끝나면 이전 활성화 처리가 비활성 탭 A에 연결할 수 있음
+- Codex **Astra** 추가 검증 (사용자 요청) FAIL (검사 통과, 이전 지적 해결 확인, blocking 1: Codex가 메모리 실행으로 재현)
+  - 탭이 로드를 마쳐 연결(`onUpdated`)해도 대기 중인 `pick`이 무효화되지 않아 나중에 이전 탭으로 되돌림
+  - → 같은 경합이 4번 지적돼 호출 경로마다가 아니라 한 곳에서 수정: **모든 연결이 거치는 `bind`가 선택 카운터를 올림** (이미 따라가는 탭이어도). 활성화 처리는 `tabs.get` 전에 순서를 기록하고 더 새 활성화가 있으면 버림 (3회차 지적)
+  - **Extension 테스트 도입** (`apps/extension` vitest, `watch.test.ts` 5개, `wxt/browser`를 조회를 늦출 수 있는 가짜로 대체): 로드 완료가 느린 pick을 이김, 영상 탭 활성화가 느린 pick을 이김, 늦게 끝난 이전 활성화 무시, 주입 중 꺼지면 연결 안 함, 따라가던 탭을 닫으면 영상 아닌 옆 탭이 활성화돼도 넘겨받음
+  - 가드를 하나씩 되돌리면 해당 테스트 실패 확인 (주입 후 켜짐 확인은 끌 때의 카운터 증가와 이중 방어라 둘 다 되돌려야 실패)
+  - E2E 재실행 통과, 전체 JS 테스트 client 3 · sync-core 14 · ui 3 · extension 5
+- Codex **Astra** 재검증 **PASS** (검사 8개 통과: extension 5, sync-core 14, client 3, ui 3, typecheck, build(manifest), server verify 39, 이전 지적 해결 확인). non-blocking 1개: 로드 완료 테스트가 실제로는 `onActivated`로 연결돼 `onUpdated` 경로를 검증하지 않음 → 영상이 아닌 탭 활성화(연결 없음 확인) 뒤 Netflix 로드 완료로 연결하도록 수정 (PASS 이후 테스트만 수정, 가드를 빼면 실패 확인)
+
 ### Phase 5
 - `./mvnw test` RoomFlowTest 14/14, 전체 39/39 (추가 6, 동시 초대 · 동시 합류 요청 · 방 생성 중 차단 포함: 기존 방에 초대 — 호스트만·친구만·비멤버 404·이미 멤버는 재초대 안 함, 차단 시 양쪽 방 정리와 이벤트 차단, 합류 요청 — 오프라인 409·비친구 404·전달·30초 제한)
 - `packages/client` 3/3, `sync-core` 13/13, `ui` 3/3, `pnpm typecheck` / `pnpm build`, `cargo check` ✅
@@ -287,6 +343,16 @@ Phase 5 — Desktop Integration (완료, 2026-09-28)
   - 가입 → 이메일로 친구 요청 → 상대 화면에 실시간 표시 → 수락 → 온라인 표시 → 탭 닫으면 오프라인 → 새로고침해도 세션 유지 ✅
 
 ## Known Issues
+- **Phase 6**
+  - **실제 Netflix 계정으로 검증하지 않음**: `<video>` play/pause가 Netflix 플레이어 UI와 어긋나지 않는지, 탭 제목 형식, 다음 화 자동 재생 시 URL 변경, 선택자(`video` 하나) 모두 가짜 페이지로만 확인
+  - Netflix 약관상 허용 여부 불명확 → **스토어 공개 전 법률 검토** (`netflix.md` 체크리스트). 스토어 빌드에서 Netflix를 빼는 선택지도 검토
+  - seek 자동 동기화 없음 (멤버가 직접 이동). 호스트가 자주 이동하면 불편
+  - 광고 요금제 미지원 (광고 감지 없음). 광고 중에도 재생/일시정지 명령이 갈 수 있음
+  - 작품 제목·에피소드 정보 없음 (페이지 DOM을 읽지 않음). 탭 제목이 "Netflix"뿐이면 "Netflix 콘텐츠"로 표시
+  - 콘텐츠 ID가 국가별로 같은지 미확인
+  - lint 없음, desktop · types에 테스트 없음. Extension 테스트는 `watch.ts` 탭 선택만
+  - Netflix 제어 켜기는 권한 창을 사람이 눌러야 해서 E2E에서 켜기/끄기 버튼 자체는 자동 확인하지 못함 (권한을 미리 준 빌드로 켜진 상태만 확인)
+  - 처음 동의 화면 문구는 YouTube 기준. Netflix의 공개·동의는 켜기 화면이 대신함
 - **Phase 5**
   - Tauri 앱을 실제로 실행해 트레이, 창 숨기기, OS 알림을 확인하지 않음 (기존 키체인 항목과 같이 첫 `tauri dev`에서 확인 필요)
   - 알림을 눌러도 해당 방으로 이동하지 않음 (앱만 보임)
@@ -337,7 +403,7 @@ Phase 5 — Desktop Integration (완료, 2026-09-28)
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Next Task
-Phase 6 — Netflix Experimental Adapter (`Mirattic_Sync_PLAN.md`)
-1. 정책 확인: Netflix 이용약관 · 브랜드/기술 정책 — content script로 netflix.com 플레이어를 제어하는 것이 허용 범위인지, `video.currentTime` 직접 변경 시 알려진 오류(plan.md 위험 5) → `docs/platform-policy/netflix.md` (확인 날짜). 불명확하면 보수적 선택 또는 중단하고 사용자에게 보고
-2. 정책상 가능할 때만: `providers/netflix.ts` adapter (작품/에피소드 감지, play/pause/seek), host_permissions · content script를 netflix.com에만 추가, 동의 화면 문구 갱신
+Phase 7 — Laftel Experimental Adapter (`Mirattic_Sync_PLAN.md`: Netflix와 동일하게 진행)
+1. 정책 확인: Laftel 이용약관 · 동시 재생 제한 (plan.md "정책 확인") → `docs/platform-policy/laftel.md` (확인 날짜). 불명확하면 보수적 선택 또는 사용자에게 보고
+2. 정책상 가능할 때만: `providers/laftel.ts` (`PageVideoAdapter` 재사용), 권한 · 주입 방식은 Netflix와 같은 기준으로 결정
 3. 계정·회선 제한 우회 금지 확인, 실험 기능 표시

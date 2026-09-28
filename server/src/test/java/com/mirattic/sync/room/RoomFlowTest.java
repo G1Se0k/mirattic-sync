@@ -116,6 +116,12 @@ class RoomFlowTest extends IntegrationTest {
 		call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
 				{"content":{"provider":"youtube","contentId":"not-a-video-id","title":"x"},"inviteIds":[]}""")
 				.andExpect(status().isBadRequest());
+		call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"content":{"provider":"netflix","contentId":"8123abc","title":"x"},"inviteIds":[]}""")
+				.andExpect(status().isBadRequest());
+		call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"content":{"provider":"netflix","contentId":"81234567","title":"x"},"inviteIds":[]}""")
+				.andExpect(status().isOk());
 		String roomId = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
 				{"content":{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"First"},"inviteIds":["%s"]}"""
 				.formatted(friend.id()))).path("id").asString();
@@ -135,6 +141,11 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
 		hostWs.send(event("playback:content-change", roomId, "{\"provider\":\"youtube\"}"));
 		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		for (String netflixId : new String[] {"81a", "1234567890123"}) {
+			hostWs.send(event("playback:content-change", roomId, """
+					{"provider":"netflix","contentId":"%s","title":"x"}""".formatted(netflixId)));
+			assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		}
 
 		hostWs.send(event("playback:content-change", roomId, next));
 		JsonNode changed = friendWs.nextOfType("playback:update");

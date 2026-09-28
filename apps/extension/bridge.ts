@@ -1,5 +1,5 @@
 import { browser, type Browser } from 'wxt/browser';
-import type { MediaPresence, MediaProviderAdapter, PlayerSnapshot } from '@mirattic/types';
+import type { MediaPresence, MediaProvider, MediaProviderAdapter, PlayerSnapshot } from '@mirattic/types';
 
 // Side panel ⇄ provider content script over a port opened by the side panel (plan.md decision 29).
 // Content scripts only accept ports from this extension, never from the page.
@@ -45,19 +45,23 @@ export function serveAdapter(create: () => Served) {
 
 const REPLY_TIMEOUT_MS = 1000;
 
+/** Side panel view of what each provider's page adapter can do (the adapter itself runs in the tab). */
+const SEEKABLE: Partial<Record<MediaProvider, boolean>> = { netflix: false };
+
 /**
  * Side panel side: a `MediaProviderAdapter` for whatever tab is connected. With no tab (or a dead one)
  * snapshots are null, which the sync engine reports as "waiting".
  */
 export class RemoteAdapter implements MediaProviderAdapter {
+  provider: MediaProvider = 'youtube';
   private port: Browser.runtime.Port | null = null;
+  private views = new Map<MediaProvider, MediaProviderAdapter>();
   private presence: MediaPresence | null = null;
   private nextId = 0;
   private replies = new Map<number, (s: PlayerSnapshot | null) => void>();
   private listeners = new Set<(s: PlayerSnapshot) => void>();
 
   constructor(
-    readonly provider: MediaProviderAdapter['provider'],
     /** Every change of what the tab shows, including losing it (null). */
     private readonly onPresence: (presence: MediaPresence | null) => void,
   ) {}
@@ -66,8 +70,13 @@ export class RemoteAdapter implements MediaProviderAdapter {
     return this.port !== null;
   }
 
-  connect(tabId: number) {
+  get seekable() {
+    return SEEKABLE[this.provider] ?? true;
+  }
+
+  connect(tabId: number, provider: MediaProvider) {
     this.disconnect();
+    this.provider = provider;
     const port = browser.tabs.connect(tabId, { name: PORT_NAME });
     this.port = port;
     port.onMessage.addListener((m: PortMessage) => {
@@ -122,6 +131,30 @@ export class RemoteAdapter implements MediaProviderAdapter {
   destroy() {
     this.disconnect();
     this.listeners.clear();
+  }
+
+  /**
+   * This adapter as a player of `provider` only: while the tab shows another provider it has no player,
+   * so a room never takes one provider's content id for another's.
+   */
+  as(provider: MediaProvider): MediaProviderAdapter {
+    let view = this.views.get(provider);
+    if (view) return view;
+    const mine = () => this.provider === provider && this.connected;
+    view = {
+      provider,
+      seekable: SEEKABLE[provider] ?? true,
+      detect: mine,
+      getPresence: async () => (mine() ? this.presence : null),
+      getSnapshot: () => (mine() ? this.getSnapshot() : Promise.resolve(null)),
+      play: async () => void (mine() && (await this.play())),
+      pause: async () => void (mine() && (await this.pause())),
+      seek: async (ms) => void (mine() && (await this.seek(ms))),
+      onChange: (callback) => this.onChange((s) => mine() && callback(s)),
+      destroy: () => {},
+    };
+    this.views.set(provider, view);
+    return view;
   }
 
   private request(req: Omit<PortRequest, 'id'>) {

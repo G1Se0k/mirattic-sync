@@ -12,6 +12,7 @@ import type {
 } from "@mirattic/types";
 import { api, platform, SOCKET_URL } from "./session";
 import { Privacy } from "./Privacy";
+import { ExperimentalSettings } from "./Experimental";
 import { Room } from "./Room";
 import { clock, PROVIDER_NAMES } from "./format";
 
@@ -242,6 +243,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       <MyFriendCode me={me} onMeChange={onMeChange} />
       <AddFriend onSent={reload} />
       <Privacy me={me} onChange={onMeChange} />
+      <ExperimentalSettings />
 
       {blocked.length > 0 && (
         <section>

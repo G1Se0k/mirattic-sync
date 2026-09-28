@@ -138,6 +138,18 @@ describe("SyncFollower", () => {
     expect(m.statuses.at(-1)).toEqual({ kind: "ad" });
     expect(m.player.positionMs()).toBe(10_000);
   });
+
+  it("never seeks an unseekable player: plays along and says where to go", async () => {
+    const m = member();
+    Object.assign(m.player, { seekable: false });
+    m.follower.apply(state({ positionMs: 60_000, playing: true }));
+    await settle();
+    expect(m.player.isPlaying()).toBe(true);
+    expect(m.player.positionMs()).toBe(0);
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "manual", targetMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "manual", targetMs: 61_000 });
+  });
 });
 
 describe("host → server → member", () => {

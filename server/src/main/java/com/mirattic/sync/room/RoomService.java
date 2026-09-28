@@ -52,6 +52,7 @@ public class RoomService {
 	static final int MAX_CHAT_LENGTH = 1000;
 	static final int CHAT_HISTORY = 100;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
+	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
 	/** Host capture times older than this (or in the future) are replaced by the receive time. */
 	static final long MAX_CAPTURE_AGE_MS = 5_000;
 
@@ -252,6 +253,9 @@ public class RoomService {
 	private static void requireKnownId(RoomContent content) {
 		if (content.provider() == MediaProvider.youtube && !YOUTUBE_VIDEO_ID.matcher(content.contentId()).matches()) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid youtube video id");
+		}
+		if (content.provider() == MediaProvider.netflix && !NETFLIX_ID.matcher(content.contentId()).matches()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid netflix id");
 		}
 	}
 

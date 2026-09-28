@@ -43,3 +43,14 @@ input.code::placeholder { font-family: system-ui, sans-serif; letter-spacing: no
 .chat li { padding: 0.3rem 0; }
 .message { white-space: pre-wrap; overflow-wrap: anywhere; }
 .banner { padding-top: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line); }
+
+dialog {
+  box-sizing: border-box;
+  width: min(100% - 32px, 480px);
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
+}
