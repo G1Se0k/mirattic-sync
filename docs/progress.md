@@ -289,6 +289,8 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 - 전달 IP 신뢰: 로컬 · 호스트 loopback에서 서로 다른 `X-Forwarded-For`는 별도 제한
 - 실제 파이프라인: CI web · server · deploy 성공, 호스트가 해당 커밋으로 동작. Cloudflare 경유로 가입 → `wss` 연결 130초 무통신 유지 → 계정 삭제, `X-Forwarded-For`를 위조해도 20번째에 429 (키는 `CF-Connecting-IP`)
 - 백업: 배포 후 launchd로 즉시 실행 → 파일 생성(600), 임시 DB `restore_check`로 복원해 테이블 10개 · Flyway v9 확인 후 삭제
+- 백업 Codex Sol 검증 FAIL (p10run3, 검사 통과, blocking 2) → 수정: 덤프 실패 시 부분 `.tmp`가 남고 보관 정리를 건너뜀 → 정리를 덤프 전에, 실패 시 `.tmp` 삭제(로컬에서 실패 재현 확인), 방침 문구에 서버 중단 시 예외 추가. launchd agent 로드 실패가 경고뿐 → 이미지 교체 전에 배포 실패로
+- 백업 Codex 재검증 1회차 **PASS** (p10run4, `bash -n` · `sh -n` · server verify · typecheck · diff check · 실패 재현 · `plutil -lint`)
 - Release: `v0.1.0` → macOS universal · Windows 설치 파일 + 확장 zip draft release
 - Codex Sol 검증 1차 FAIL (2026-09-29, 검사 12개 모두 통과, blocking 1) → 수정
   - `docker compose up -d`가 실패하면 `set -e`로 바로 종료되어 롤백하지 않음 → compose와 헬스 체크를 `if` 안에서 실행해 모든 실패가 롤백 경로로, 롤백 후에도 헬스 체크 (로컬에서 재현 · 확인). 수정본이 CI로 배포되어 운영 UP 확인
