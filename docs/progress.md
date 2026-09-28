@@ -1,10 +1,25 @@
 # Current Phase
-Phase 9 — Privacy / Safety (완료, 2026-09-29. Codex Sol PASS)
+Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29. Codex Sol PASS. 스토어 제출 · 서명 · 백업은 Next Task)
 
-이전: Phase 8 (커밋 `9285bf1`, `06a32d8`), Phase 7 (커밋 `dc61f6a`), Phase 6 (커밋 `f03134d`), Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
+운영: https://sync.mirattic.com (`wss://sync.mirattic.com/ws`)
+
+이전: Phase 9 (커밋 `f74074e`), Phase 8 (커밋 `9285bf1`, `06a32d8`), Phase 7 (커밋 `dc61f6a`), Phase 6 (커밋 `f03134d`), Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Phase 10
+- **서버 자동 배포** (결정 62): main push → CI(web · server 통과 후) `deploy` job
+  - jar 빌드 → `RUN` 없는 `server/Dockerfile`로 linux/arm64 이미지 → `docker save`를 SSH로 호스트에 `docker load` (레지스트리 없음)
+  - 호스트(Apple Silicon macOS + OrbStack) 클론 `~/Documents/mirattic-sync`를 그 커밋으로 checkout → `deploy/deploy.sh <sha>`: `:current` 교체, `compose up`, 헬스 체크(120초). compose 실패·헬스 실패 모두 이전 이미지로 되돌림. 태그 이미지 5개 보관
+  - 비밀값(`DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `JWT_SECRET`)은 첫 배포 때 호스트에서 생성 → `deploy/.env` (600, gitignore). CI에는 배포 전용 SSH 키(`DEPLOY_SSH_KEY`, 호스트 `authorized_keys`에 등록)와 고정된 `DEPLOY_KNOWN_HOSTS`만
+  - `deploy/compose.yml`: MySQL 8.4 + 서버, `127.0.0.1:8090` (8080은 다른 프로젝트가 사용)
+- **Caddy는 compose 밖** (사용자 요청, 결정 63): 호스트의 Caddy(`/opt/homebrew/etc/Caddyfile`)에 `sync.mirattic.com` 블록과 전역 Cloudflare `trusted_proxies` · `client_ip_headers CF-Connecting-IP` 추가 (백업 `Caddyfile.bak-mirattic-sync`, validate 후 reload, 기존 사이트 200 확인). 참고용 사본 `deploy/Caddyfile`
+  - 서버 `server.forward-headers-strategy=native` → 인증 요청 제한이 실제 사용자 IP 기준
+- **WebSocket ping** 30초 (결정 64, Cloudflare 100초 유휴 종료 방지)
+- **클라이언트 운영 주소** (결정 65): `apps/{desktop,extension}/.env.production`, Desktop CSP에 `https/wss://sync.mirattic.com`
+- **릴리스 자동화**: `v*` 태그 → `release.yml`이 Desktop 설치 파일(macOS universal `.dmg`, Windows `.exe`/`.msi`, 서명 없음)과 확장 zip을 draft release로. `v0.1.0` draft 생성 확인
+  - 첫 실행에서 `@tauri-apps/plugin-opener` npm(2.5.5) · crate(2.6.0) 불일치로 Tauri CLI가 거부 → npm 2.6으로 맞춤 (기존 문제, Windows 빌드도 이번에 처음 통과)
+
 ### Phase 9
 - **현재 상태 확인** (새 코드 없음): presence 공개 범위(`PresenceService.view`, 기본 presence=FRIENDS · 위치=ROOM_ONLY, `PresenceViewTest`), 차단(친구 관계 삭제 + 공유 방 분리, `FriendFlowTest` · `RoomFlowTest`), 방 권한(비멤버 404, 재생·콘텐츠 변경·초대는 호스트만 403, `RoomFlowTest`) 모두 기존 테스트로 보장됨
 - **채팅 메시지 삭제**: 보낸 사람 또는 방 호스트(관리). `DELETE /api/rooms/{id}/messages/{messageId}` → 행 삭제, 모든 멤버의 연결에 `chat:delete { id }`
@@ -181,6 +196,12 @@ Phase 9 — Privacy / Safety (완료, 2026-09-29. Codex Sol PASS)
 - `POST /api/me/friend-code`로 재발급. 이메일 검색 API는 삭제
 - Desktop: "내 친구 코드" (복사, 확인 창을 거친 재발급), 코드 입력으로 친구 추가
 
+## Major Files Changed (Phase 10)
+- `server/{Dockerfile,.dockerignore}`, `deploy/{compose.yml,deploy.sh,Caddyfile}`, `.github/workflows/{ci.yml,release.yml}`
+- `server/.../ServerApplication.java` (`@EnableScheduling`), `ws/SocketHub.java` (ping), `application.properties` (forward headers)
+- `apps/{desktop,extension}/.env.production`, `apps/desktop/src-tauri/tauri.conf.json` (CSP), `apps/desktop/package.json` (plugin-opener 2.6)
+- `docs/architecture/plan.md` (결정 62–65), `docs/protocol/websocket.md`
+
 ## Major Files Changed (Phase 9)
 - `server/.../account/{AccountController,AccountService}.java`, `report/{Report,ReportRepository,ReportService,ReportController}.java`, `room/{RoomService,RoomController,ChatMessageRepository}.java`, `friend/FriendshipRepository.java`, `auth/TokenService.java`, `config/AuthRateLimitFilter.java`, `ws/{SocketHub,SocketHandler}.java`, `db/migration/V9__reports.sql`, `SafetyFlowTest.java`
 - `packages/ui/src/{Report.tsx,Chat.tsx,Chat.test.ts,Room.tsx,Home.tsx,Privacy.tsx,App.css}`, `packages/types/src/index.ts`, `packages/client/src/api.ts`, `apps/extension/entrypoints/sidepanel/Consent.tsx`
@@ -250,6 +271,7 @@ Phase 9 — Privacy / Safety (완료, 2026-09-29. Codex Sol PASS)
 - 20. 친구 추가는 친구 코드로만 (이메일 검색 제거)
 - 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 21–28 (Phase 2): mock provider, playback/version DB 저장, 초대=멤버십, `room:update` 후 재조회, 서버 시각 기준 `capturedAt`, seek 구간 재확인, echo 억제 창 없음, 호스트 명령 모으기 + 초당 제한 — `plan.md` 참고
+- 62–65 (Phase 10): 레지스트리 없이 arm64 이미지를 SSH로 보내 호스트 클론에서 `deploy.sh`(헬스 체크 · 롤백), Cloudflare → 호스트 Caddy → 127.0.0.1:8090과 `CF-Connecting-IP` 기반 client IP, WebSocket ping 30초, `.env.production` · 태그 릴리스 — `plan.md` 참고
 - 58–61 (Phase 9): 메시지 삭제는 보낸 사람 · 호스트, 실제 삭제 + `chat:delete`. 신고는 볼 수 있던 대상만 저장(운영 화면 없음). 계정 삭제는 비밀번호 재확인 후 즉시 완전 삭제(FK cascade), 토큰·소켓 즉시 무효. 개인정보처리방침 초안 — `plan.md` 참고
 - 53–57 (Phase 8): 리액션은 채팅 메시지의 한 종류, 채팅은 모든 멤버 연결로, 읽지 않은 수는 서버 순번 기준, 알림 끄기는 멤버별 서버 저장, 기록은 커서 페이지 — `plan.md` 참고
 - 50–52 (Phase 7): Laftel도 기본 꺼짐 · 선택 권한 · 따라가는 탭에만 주입(provider별 켜기), contentId `작품/에피소드`, Laftel은 seek함 — `plan.md` 참고
@@ -260,6 +282,16 @@ Phase 9 — Privacy / Safety (완료, 2026-09-29. Codex Sol PASS)
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
+### Phase 10
+- 로컬: server verify 48, JS 테스트 · typecheck · build, 운영 빌드에 운영 주소 포함, arm64 이미지 빌드
+- `deploy.sh` 로컬 실행: 첫 배포(`.env` 600 생성) → 성공, 헬스 실패 이미지 → 이전 이미지로 롤백 후 UP, `compose up` 자체 실패(없는 entrypoint) → 롤백 후 UP, exit 1
+- 전달 IP 신뢰: 로컬 · 호스트 loopback에서 서로 다른 `X-Forwarded-For`는 별도 제한
+- 실제 파이프라인: CI web · server · deploy 성공, 호스트가 해당 커밋으로 동작. Cloudflare 경유로 가입 → `wss` 연결 130초 무통신 유지 → 계정 삭제, `X-Forwarded-For`를 위조해도 20번째에 429 (키는 `CF-Connecting-IP`)
+- Release: `v0.1.0` → macOS universal · Windows 설치 파일 + 확장 zip draft release
+- Codex Sol 검증 1차 FAIL (2026-09-29, 검사 12개 모두 통과, blocking 1) → 수정
+  - `docker compose up -d`가 실패하면 `set -e`로 바로 종료되어 롤백하지 않음 → compose와 헬스 체크를 `if` 안에서 실행해 모든 실패가 롤백 경로로, 롤백 후에도 헬스 체크 (로컬에서 재현 · 확인). 수정본이 CI로 배포되어 운영 UP 확인
+- Codex 재검증 1회차 **PASS** (2026-09-29, 검사 모두 통과: extension 8, sync-core 14, client 3, ui 11, typecheck, build, server verify 48, `git diff --check`, `sh -n`, compose config, arm64 이미지 빌드. 지적 없음, 이전 지적 해결 확인)
+
 ### Phase 9
 - `SafetyFlowTest` 3 (신규): 메시지 삭제(남의 것 403, 비멤버·다른 방 404, 호스트 관리 삭제, `chat:delete` 전달, 기록에서 사라짐), 신고(메시지 내용 복사·삭제 후에도 유지, 중복 1건, 내 메시지 400, 비멤버 404, 친구·차단한 사람 가능, 모르는 사람 404, 둘 다/둘 다 없음/잘못된 사유 400, 하루 20건 뒤 429), 계정 삭제(틀린 비밀번호 403, `chat:delete { userId }` · `friend:update`, 소켓 닫힘, access token · ticket · refresh · 로그인 401, 삭제 전 받은 ticket 연결도 닫힘, 호스트 방 404, 남은 방·메시지·친구·요청 정리, 7개 테이블 행 0). 전체 server 47
   - 되돌리면 실패 확인: 연결 직후 계정 확인, JWT 계정 존재 검증
@@ -465,6 +497,15 @@ Phase 9 — Privacy / Safety (완료, 2026-09-29. Codex Sol PASS)
   - 가입 → 이메일로 친구 요청 → 상대 화면에 실시간 표시 → 수락 → 온라인 표시 → 탭 닫으면 오프라인 → 새로고침해도 세션 유지 ✅
 
 ## Known Issues
+- **Phase 10**
+  - **DB 백업 없음**: MySQL은 호스트의 Docker 볼륨(`mirattic-sync_mysql-data`)에만 있음. 백업 · 보관 기간(계정 삭제 후 백업에 남는 기간 포함) 정책 필요
+  - 배포 호스트 1대(가정용 Mac) → 호스트 · 회선 장애 시 서비스 중단. 배포 중 수 초 중단(무중단 배포 아님), 접속 중인 WebSocket은 재연결
+  - 배포 호스트 클론은 detached HEAD로 남음 (배포 전용, 직접 수정하지 말 것)
+  - Desktop 설치 파일 서명 · 공증 없음 → macOS Gatekeeper · Windows SmartScreen 경고. 자동 업데이트 없음
+  - Chrome Web Store 미제출: manifest `key`는 아직 dev 키, `ALLOWED_ORIGINS`의 확장 ID도 dev. 스토어 등록 후 교체 · 개인정보처리방침 게시 주소 필요
+  - Cloudflare IP 대역은 Caddy에 고정 목록 (바뀌면 수동 갱신)
+  - 로컬 E2E로 확장 · Desktop을 빌드할 때는 `VITE_API_URL=http://localhost:8080 pnpm build` (기본 빌드는 운영 주소)
+  - 원래 계획의 운영 compose 안 Caddy는 사용자 요청으로 제외 (호스트에서 관리)
 - **Phase 9**
   - **신고 운영 도구 없음**: 운영자는 DB `reports`를 직접 조회. 알림·처리 상태·제재(정지) 기능 없음
   - 신고는 신고자 또는 대상이 계정을 삭제하면 함께 지워짐 → 운영상 보관이 필요한지 법률·정책 검토 (`privacy-policy.md` `[ ]`)
@@ -520,9 +561,9 @@ Phase 9 — Privacy / Safety (완료, 2026-09-29. Codex Sol PASS)
   - Extension 자동 테스트 없음 (E2E 스크립트는 저장소 밖), ui는 병합 함수 테스트만, lint 없음
   - 호스트가 따라가던 탭을 닫으면 창의 다른 YouTube 탭 영상으로 방이 바뀜 (호스트 권한 모델 그대로)
 - **Tauri 앱에서 키체인 경로를 실제로 실행해 보지 않음** (cargo check만 함). 첫 `tauri dev` 때 macOS 키체인 접근 허용 창이 뜰 수 있음
-- CSP / `VITE_API_URL`이 localhost 고정 → 배포(Phase 10)에서 운영 주소로 바꿔야 함
+- ~~CSP / `VITE_API_URL`이 localhost 고정~~ → Phase 10에서 `.env.production` · CSP로 해결
 - Presence, WS ticket, rate limit 카운터가 서버 메모리에 있음 → 서버 1대 전제 (`ponytail:` 주석)
-- rate limit은 소켓 주소 기준 → 프록시 뒤에서는 `server.forward-headers-strategy` 설정 필요
+- ~~rate limit은 소켓 주소 기준~~ → Phase 10에서 `forward-headers-strategy=native` + Caddy `CF-Connecting-IP`로 해결
 - WebSocket presence 전송 제한(250ms)은 초과분을 버림 → adapter가 상태 변화가 있을 때만 보내야 함
 - `IN_ROOM`, `DND` 상태는 아직 없음 (Phase 5)
 - **Phase 2**
@@ -544,14 +585,14 @@ Phase 9 — Privacy / Safety (완료, 2026-09-29. Codex Sol PASS)
 - **Phase 3**
   - manifest `key`는 dev용. 스토어 등록 시 대시보드 공개키로 교체하고 운영 `ALLOWED_ORIGINS` 설정
   - 개인정보처리방침과 UI 내 공개·동의 화면 없음 → 시청 정보(브라우징 활동)를 보내기 시작하는 Phase 4 전에 필요
-  - 운영은 https/wss 필수 (정책의 보안 전송 요건). 지금은 localhost http 기본값
+  - ~~운영은 https/wss 필수~~ → Phase 10 운영 빌드는 `https/wss://sync.mirattic.com`
   - Extension은 브라우저를 다시 열면 재로그인 (`storage.session`)
   - side panel을 닫으면 WebSocket이 끊겨 오프라인으로 보임 (의도)
   - side panel 실제 컨테이너에서 `confirm()`/`alert()` 미확인 (탭으로 연 페이지에서만 확인)
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Next Task
-Phase 10 — Deployment (`Mirattic_Sync_PLAN.md`)
-1. 서버 Docker 이미지 + 운영 compose (MySQL, Caddy HTTPS/WSS), 운영 환경변수(`JWT_SECRET`, `ALLOWED_ORIGINS`, `VITE_API_URL`, CSP)
-2. Cloudflare 앞단 설정과 `server.forward-headers-strategy` (IP 제한이 프록시 뒤에서 동작하게)
-3. Desktop 설치 파일(macOS / Windows) 빌드, Chrome Web Store 제출 준비 (manifest `key` 교체, 개인정보처리방침 게시 주소, 스토어 설명)
+Phase 10 남은 일 (사용자 결정 필요)
+1. DB 백업: 호스트에서 `mysqldump` 주기 실행과 보관 위치 · 기간
+2. Chrome Web Store 제출 준비: 개발자 계정 등록 → 공개키로 manifest `key` 교체 · 운영 `ALLOWED_ORIGINS`에 스토어 확장 ID, 개인정보처리방침 `[ ]` 채우고 게시(예: `https://sync.mirattic.com/privacy`), 스토어 설명 · 스크린샷, YouTube · Netflix · Laftel 정책 재검토
+3. Desktop 서명 · 공증 (Apple Developer ID, Windows 코드 서명 인증서)
