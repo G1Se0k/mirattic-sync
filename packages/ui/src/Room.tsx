@@ -5,6 +5,7 @@ import { MockMediaProvider, publishHost, ServerClock, SyncFollower, type Followe
 import { api, platform } from "./session";
 import { clock, latest as latestOnly, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
+import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
 
 /** "room|provider" already asked about in this session: the dialog comes up once per room and provider, not on every entry. */
@@ -35,6 +36,7 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
   const [sync, setSync] = useState<FollowerStatus | null>(null);
   const [lastCorrection, setLastCorrection] = useState<number | null>(null);
   const [, tick] = useState(0);
+  const [reporting, setReporting] = useState<{ id: string; name: string } | null>(null);
   const serverClock = useMemo(() => new ServerClock(), []);
   const latest = useRef<PlaybackState | null>(null);
   const follower = useRef<SyncFollower | null>(null);
@@ -240,9 +242,13 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
             <span className={`dot ${m.present ? "on" : ""}`} />
             <span className="grow">{m.user.displayName}{m.user.id === me.id && " (나)"}</span>
             <span className="muted">{m.role === "HOST" ? "호스트" : m.present ? "참가 중" : "초대됨"}</span>
+            {m.user.id !== me.id && (
+              <button className="link small" onClick={() => setReporting({ id: m.user.id, name: m.user.displayName })}>신고</button>
+            )}
           </li>
         ))}
       </ul>
+      {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
 
       {player instanceof MockMediaProvider ? (
         <MockPlayer player={player} isHost={isHost} clockReady={clockReady} sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} />
@@ -250,7 +256,7 @@ export function Room({ roomId, me, socket, status, subscribe, onClose, onMuted }
         <ProviderPlayer content={room.content} snapshot={snapshot} canPlay={player !== undefined} isHost={isHost}
           sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} experimentOff={!!experiment && experimentOn === false} />
       )}
-      <Chat roomId={roomId} meId={me.id} members={room.members} socket={socket} status={status} subscribe={subscribe}
+      <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status} subscribe={subscribe}
         position={async () => {
           const s = await player?.getSnapshot();
           return s && !s.adPlaying && s.contentId === room.content.contentId ? Math.round(s.positionMs) : undefined;

@@ -118,6 +118,14 @@ export type ChatMessage = {
 /** The reactions offered (`reaction:add`); the server accepts only these. */
 export const REACTIONS = ["❤️", "😂", "😮", "😭", "🔥"] as const;
 
+/** `chat:delete`: one message (`id`), or every message of a deleted account (`userId`). */
+export type ChatDeleted = { id?: string; userId?: string };
+
+export const REPORT_REASONS = { SPAM: "스팸", HARASSMENT: "괴롭힘·욕설", INAPPROPRIATE: "부적절한 내용", OTHER: "기타" } as const;
+export type ReportReason = keyof typeof REPORT_REASONS;
+/** Exactly one of `userId` / `messageId`. */
+export type ReportTarget = { userId: string } | { messageId: string };
+
 /** What a room watches. `contentId` is provider-scoped, never a global id. */
 export type RoomContent = {
   provider: MediaProvider;

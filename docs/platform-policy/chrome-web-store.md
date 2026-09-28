@@ -20,7 +20,7 @@
 | 최소 권한 | "narrowest permissions necessary" | `sidePanel`, `storage` + `https://www.youtube.com/*`(content script와 같은 범위의 host_permissions, Phase 4). Phase 6: `scripting` + **선택** 권한 `https://www.netflix.com/*` (사용자가 Netflix 제어를 켤 때만 요청, `netflix.md`). Phase 7: **선택** 권한 `https://laftel.net/*` (같은 방식, `laftel.md`). API 서버는 CORS로 extension origin 허용 |
 | 원격 코드 | MV3는 외부에서 실행 로직을 불러오면 안 됨. 데이터는 가능 | 모든 코드는 번들에 포함. 서버에서는 JSON만 받음 |
 | 사용자 데이터 범위 | 이름·이메일, 인증 정보, **웹 브라우징 활동**(보고 있는 사이트/콘텐츠) 모두 포함. 로컬 처리만 해도 공개 대상 | 계정(이메일·표시 이름), 친구 목록, 재생 상태. Phase 4부터 "시청 중인 콘텐츠" = 브라우징 활동 |
-| 개인정보처리방침 | 사용자 데이터를 다루면 대시보드에 게시 필수 | 스토어 제출 전 작성 (Phase 10) |
+| 개인정보처리방침 | 사용자 데이터를 다루면 대시보드에 게시 필수 | 초안 `docs/legal/privacy-policy.md` (Phase 9). 게시 주소와 대시보드 등록은 Phase 10 |
 | 눈에 띄는 공개 + 동의 | 수집 전에 **제품 UI 안에서** 공개하고 동의를 받아야 함. 스토어 설명으로는 부족 | side panel 첫 화면에서 공개 + 동의 (Phase 4, `Consent.tsx`). 동의 전에는 YouTube 탭에 연결하지 않음. 공개 범위 기본값도 보수적(presence=FRIENDS, 위치=ROOM_ONLY) |
 | 전송 / 저장 | HTTPS·WSS로 전송, 저장 시 강력한 암호화 | 운영은 https/wss 필수 (dev만 localhost http). 아래 토큰 저장 참고 |
 | Limited Use | 기능 제공 목적 외 사용·판매·광고 금지, 사람이 열람 제한 | 광고/분석 없음. 서버 로그에 토큰·재생 데이터 남기지 않음 |

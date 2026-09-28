@@ -46,6 +46,10 @@ public class RoomService {
 	public record Left(List<String> memberIds, boolean closed) {
 	}
 
+	/** A room left by a deleted account. */
+	public record Departure(String roomId, Left left) {
+	}
+
 	public enum Command {
 		PLAY, PAUSE, SEEK
 	}
@@ -188,6 +192,13 @@ public class RoomService {
 		return new Left(everyone, false);
 	}
 
+	/** Account deletion: leaves every room (closing those hosted), in the caller's transaction. */
+	@Transactional
+	public List<Departure> leaveAll(String me) {
+		return members.findByUserId(me).stream().map(m -> new Departure(m.getRoomId(), leave(me, m.getRoomId())))
+				.toList();
+	}
+
 	/** For `room:join`: checks membership and returns the state to start from. */
 	@Transactional(readOnly = true)
 	public PlaybackState join(String me, String roomId) {
@@ -239,6 +250,34 @@ public class RoomService {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
 		}
 		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, reaction)).view();
+	}
+
+	/** The author, or the room's host (moderation), deletes a message for everyone. */
+	@Transactional
+	public void deleteMessage(String me, String roomId, String messageId) {
+		RoomMember self = requireMember(me, roomId);
+		ChatMessage message = messages.findByIdAndRoomId(messageId, roomId).orElseThrow(RoomService::notFound);
+		if (!message.view().userId().equals(me) && self.getRole() != RoomMember.Role.HOST) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "author or host only");
+		}
+		messages.delete(message);
+	}
+
+	/** A message to report: someone else's, in a room I'm in (404 otherwise, like any room lookup). */
+	@Transactional(readOnly = true)
+	public ChatMessage.View reportable(String me, String messageId) {
+		ChatMessage.View m = messages.findById(messageId).map(ChatMessage::view).orElseThrow(RoomService::notFound);
+		requireMember(me, m.roomId());
+		if (m.userId().equals(me)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot report yourself");
+		}
+		return m;
+	}
+
+	@Transactional(readOnly = true)
+	public boolean shareARoom(String a, String b) {
+		Set<String> theirs = members.findByUserId(b).stream().map(RoomMember::getRoomId).collect(Collectors.toSet());
+		return members.findByUserId(a).stream().anyMatch(m -> theirs.contains(m.getRoomId()));
 	}
 
 	/** A page of messages, oldest first: the latest, or those before message `before` (of this room). */

@@ -124,6 +124,16 @@ class RoomController {
 		return rooms.history(jwt.getSubject(), id, before);
 	}
 
+	/** Author or host: deletes the message; every member's connections get `chat:delete {id}`. */
+	@DeleteMapping("/{id}/messages/{messageId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void deleteMessage(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @PathVariable String messageId) {
+		rooms.deleteMessage(jwt.getSubject(), id, messageId);
+		ServerEvent event = new ServerEvent("chat:delete", id, jwt.getSubject(), null, System.currentTimeMillis(),
+				Map.of("id", messageId));
+		rooms.memberIds(id).forEach(member -> hub.sendEvent(member, event));
+	}
+
 	/** My chat notifications for this room. */
 	@PutMapping("/{id}/members/me/muted")
 	@ResponseStatus(HttpStatus.NO_CONTENT)

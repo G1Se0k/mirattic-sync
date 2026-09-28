@@ -1,10 +1,24 @@
 # Current Phase
-Phase 8 — Chat / Reaction Polish (완료, 2026-09-28. 1차 커밋 `9285bf1` + 검증 수정, Codex Sol PASS)
+Phase 9 — Privacy / Safety (완료, 2026-09-29. Codex Sol PASS)
 
-이전: Phase 7 (커밋 `dc61f6a`), Phase 6 (커밋 `f03134d`), Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
+이전: Phase 8 (커밋 `9285bf1`, `06a32d8`), Phase 7 (커밋 `dc61f6a`), Phase 6 (커밋 `f03134d`), Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Phase 9
+- **현재 상태 확인** (새 코드 없음): presence 공개 범위(`PresenceService.view`, 기본 presence=FRIENDS · 위치=ROOM_ONLY, `PresenceViewTest`), 차단(친구 관계 삭제 + 공유 방 분리, `FriendFlowTest` · `RoomFlowTest`), 방 권한(비멤버 404, 재생·콘텐츠 변경·초대는 호스트만 403, `RoomFlowTest`) 모두 기존 테스트로 보장됨
+- **채팅 메시지 삭제**: 보낸 사람 또는 방 호스트(관리). `DELETE /api/rooms/{id}/messages/{messageId}` → 행 삭제, 모든 멤버의 연결에 `chat:delete { id }`
+  - 채팅의 내 메시지(호스트는 모든 메시지)에 "삭제" (확인 창). 읽지 않은 메시지가 지워지면 목록 배지도 서버 수로 다시 맞춤
+  - 재연결 후 기록을 다시 받을 때 끊긴 동안 지워진 메시지도 뺌 (`reconcile`), 늦게 온 기록 응답이 지운 메시지를 되살리지 않음
+- **신고**: `POST /api/reports` (메시지 또는 사용자, 사유 4종 + 상세 500자). 채팅의 다른 사람 메시지, 방 멤버 목록, 친구 목록에 "신고" → 신고 창 → 접수 후 "차단하기" 제안
+  - 볼 수 있던 대상만(내 방의 메시지, 친구 · 같은 방 멤버 · 내가 차단한 사람), 나머지 404. 메시지 내용 복사 보관, 같은 메시지 중복 무시, 하루 20건
+  - 운영자 화면 없음 (DB `reports`), 로그에는 신고 ID만
+- **계정 삭제**: 설정 맨 아래 "계정과 데이터 삭제…" → 비밀번호 재입력 → `DELETE /api/me` → 로그아웃 화면
+  - 호스트인 방은 닫고 나머지 방에서는 나감, `users` 행 삭제로 FK cascade (identity, refresh token, 친구·요청·차단, 멤버십, 메시지, 신고). 남은 방 멤버에게 `chat:delete { userId }`, 친구·요청 상대에게 `friend:update`
+  - 기존 access token 즉시 401 (JWT 검증기가 계정 존재 확인), WebSocket 연결은 서버가 닫음 (삭제 직전 ticket으로 연결해도 연결 직후 확인에서 닫힘). 틀린 비밀번호 403, IP당 분당 제한
+- **개인정보처리방침 초안** `docs/legal/privacy-policy.md` (수집 항목·목적·보관·권리, 미정 항목 `[ ]`). Extension 동의 화면에 채팅·신고 항목 추가 (`CONSENT_VERSION` 올림 → 기존 사용자 다시 동의)
+- Flyway V9 (`reports`), 결정 58–61 (`plan.md`)
+
 ### Phase 8
 - **리액션** ❤️ 😂 😮 😭 🔥 (서버가 이 다섯 개만 허용): 채팅 입력 위 버튼, 지금 재생 위치를 붙여 WS `reaction:add`
   - `chat_messages`에 `reaction = true`로 저장, `chat:message`로 전달 (기록·페이지·방 삭제 정리 공유)
@@ -167,6 +181,11 @@ Phase 8 — Chat / Reaction Polish (완료, 2026-09-28. 1차 커밋 `9285bf1` + 
 - `POST /api/me/friend-code`로 재발급. 이메일 검색 API는 삭제
 - Desktop: "내 친구 코드" (복사, 확인 창을 거친 재발급), 코드 입력으로 친구 추가
 
+## Major Files Changed (Phase 9)
+- `server/.../account/{AccountController,AccountService}.java`, `report/{Report,ReportRepository,ReportService,ReportController}.java`, `room/{RoomService,RoomController,ChatMessageRepository}.java`, `friend/FriendshipRepository.java`, `auth/TokenService.java`, `config/AuthRateLimitFilter.java`, `ws/{SocketHub,SocketHandler}.java`, `db/migration/V9__reports.sql`, `SafetyFlowTest.java`
+- `packages/ui/src/{Report.tsx,Chat.tsx,Chat.test.ts,Room.tsx,Home.tsx,Privacy.tsx,App.css}`, `packages/types/src/index.ts`, `packages/client/src/api.ts`, `apps/extension/entrypoints/sidepanel/Consent.tsx`
+- `docs/legal/privacy-policy.md` (신규), `docs/protocol/{rest,websocket}.md`, `docs/architecture/plan.md`
+
 ## Major Files Changed (Phase 8)
 - `server/.../room/{ChatMessage,ChatMessageRepository,RoomMember,RoomService,RoomController}.java`, `ws/SocketHandler.java`, `db/migration/V7__chat_polish.sql`, `V8__chat_read_seq.sql`, `RoomFlowTest.java`
 - `packages/ui/src/{Chat.tsx,Chat.test.ts,Home.tsx,Home.test.ts,Room.tsx,App.css}`, `packages/types/src/index.ts`, `packages/client/src/api.ts`
@@ -231,6 +250,7 @@ Phase 8 — Chat / Reaction Polish (완료, 2026-09-28. 1차 커밋 `9285bf1` + 
 - 20. 친구 추가는 친구 코드로만 (이메일 검색 제거)
 - 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 21–28 (Phase 2): mock provider, playback/version DB 저장, 초대=멤버십, `room:update` 후 재조회, 서버 시각 기준 `capturedAt`, seek 구간 재확인, echo 억제 창 없음, 호스트 명령 모으기 + 초당 제한 — `plan.md` 참고
+- 58–61 (Phase 9): 메시지 삭제는 보낸 사람 · 호스트, 실제 삭제 + `chat:delete`. 신고는 볼 수 있던 대상만 저장(운영 화면 없음). 계정 삭제는 비밀번호 재확인 후 즉시 완전 삭제(FK cascade), 토큰·소켓 즉시 무효. 개인정보처리방침 초안 — `plan.md` 참고
 - 53–57 (Phase 8): 리액션은 채팅 메시지의 한 종류, 채팅은 모든 멤버 연결로, 읽지 않은 수는 서버 순번 기준, 알림 끄기는 멤버별 서버 저장, 기록은 커서 페이지 — `plan.md` 참고
 - 50–52 (Phase 7): Laftel도 기본 꺼짐 · 선택 권한 · 따라가는 탭에만 주입(provider별 켜기), contentId `작품/에피소드`, Laftel은 seek함 — `plan.md` 참고
 - 45–49 (Phase 6): Netflix는 기본 꺼짐 · 선택 권한, 따라가는 탭에만 주입, 재생/일시정지만 (seek 안내), provider별 view, 채팅은 side panel — `plan.md` 참고
@@ -240,6 +260,23 @@ Phase 8 — Chat / Reaction Polish (완료, 2026-09-28. 1차 커밋 `9285bf1` + 
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
+### Phase 9
+- `SafetyFlowTest` 3 (신규): 메시지 삭제(남의 것 403, 비멤버·다른 방 404, 호스트 관리 삭제, `chat:delete` 전달, 기록에서 사라짐), 신고(메시지 내용 복사·삭제 후에도 유지, 중복 1건, 내 메시지 400, 비멤버 404, 친구·차단한 사람 가능, 모르는 사람 404, 둘 다/둘 다 없음/잘못된 사유 400, 하루 20건 뒤 429), 계정 삭제(틀린 비밀번호 403, `chat:delete { userId }` · `friend:update`, 소켓 닫힘, access token · ticket · refresh · 로그인 401, 삭제 전 받은 ticket 연결도 닫힘, 호스트 방 404, 남은 방·메시지·친구·요청 정리, 7개 테이블 행 0). 전체 server 47
+  - 되돌리면 실패 확인: 연결 직후 계정 확인, JWT 계정 존재 검증
+- Codex Sol 검증 1차 FAIL (2026-09-28, 검사 모두 통과, server 47, blocking 2 + non-blocking 1) → 수정
+  - 하루 신고 한도를 잠금 없이 count 후 insert → 동시 요청으로 초과 가능 → 신고자 `users` 행을 먼저 잠가(`UserRepository.findForUpdate`) 한 사람의 신고를 직렬화
+  - 한도 확인이 중복 확인보다 먼저라 한도에 닿으면 이미 한 신고의 재신고가 429 → 새 신고를 저장할 때만 한도 확인
+  - (non-blocking) 모든 `DataIntegrityViolationException`을 중복으로 보고 204 → 잠금으로 중복 경쟁이 없어져 catch 제거 (대상 계정이 동시에 삭제되어 FK가 실패하면 성공으로 응답하지 않음)
+  - 계정 삭제도 먼저 `users` 행을 잠금 → 삭제 중 나를 참조하는 방·초대·친구 요청은 기다렸다가 FK로 실패 (삭제 후 남는 방 없음)
+  - `SafetyFlowTest` 4 (추가: 동시 신고 30건 → 정확히 20건, 메시지 1건. 잠금을 빼면 중복 insert로 실패 확인; 한도에서 기존 메시지 재신고 204). server 48, 안전 E2E 재실행 통과
+- Codex 재검증 1회차 FAIL (2026-09-29, 검사 모두 통과, 이전 3개 해결 확인, blocking 1) → 수정
+  - `chat:delete`가 먼저 오고 그 메시지의 `chat:message`가 늦게 오면 Chat이 다시 표시하고, Home은 배지·알림(목록에 없는 방의 대기 메시지 포함)을 냄 → Chat은 받는 메시지에도 삭제 기록 적용(`receive` 순수 함수), Home은 최근 삭제 100개를 기억해 늦은 메시지를 세지도 알리지도 않고 대기 메시지에서도 제거
+  - ui 11 (역순 도착 테스트, 수정을 빼면 실패 확인). E2E 추가 (Playwright `routeWebSocket`으로 `chat:message`를 `chat:delete` 뒤로 미룸): 목록에서 배지·알림 없음, 방에서 표시 안 됨. Home 수정을 빼면 알림이 떠서 실패 확인. 안전 E2E 재실행 통과
+- Codex 재검증 2회차 **PASS** (2026-09-29, 검사 모두 통과: extension 8, sync-core 14, client 3, ui 11, typecheck, build, server verify 48, `git diff --check`. 이전 지적 4개 해결 확인)
+  - non-blocking 1: 개인정보처리방침 초안의 IP 보관 설명("1분 단위")이 실제와 다름 (지난 항목은 1만 개를 넘을 때만 정리, refresh·logout도 대상) → 문서를 실제 동작대로 수정 (코드 변경 없음)
+- `packages/ui` 11 (추가 3: 삭제 반영 `without`, 재연결 `reconcile`, 역순 도착 `receive`). extension 8 · sync-core 14 · client 3, `pnpm typecheck` / `pnpm build` / `git diff --check` ✅
+- E2E (Desktop web dev, 로컬 DB에 V9 적용): 메시지 신고(DB에 사유·상세·내용), 멤버는 호스트 메시지 삭제 버튼 없음, 내 메시지 삭제 → 사라지고 호스트 소켓에 `chat:delete`, 호스트가 내 메시지 삭제 → 화면에서 사라짐, 읽지 않은 메시지 삭제 → 배지 사라짐, 방 멤버 신고, 계정 삭제(틀린 비밀번호 안내 → 삭제 → 로그인 화면, 새로고침해도 로그인 없음, 친구 목록·DB 행 0, 이전 토큰 401). Phase 8 알림 E2E 6개 · 확장 채팅 E2E 재실행 통과
+
 ### Phase 8
 - `RoomFlowTest` 20 (추가 4): 방 밖 멤버에게도 메시지·리액션 전달, 리액션 검증(`👍`, 숫자, `text` 키 → `bad_payload`), 읽지 않은 수(리액션·내 메시지 제외, 입장 · `room:leave` · 연결 끊김으로 읽음), 읽음 기록 직후 저장된 메시지 200회 반복 → 매번 1, 알림 끄기(비멤버 404, 내 두 연결에만 `room:update`), 150개 페이지(같은 밀리초 포함, 빠짐·겹침 없음, 다른 방 커서 404). 전체 server 43
   - 되돌리면 실패 확인: 연결 끊김 읽음 기록, 알림 끄기 `room:update`
@@ -428,13 +465,25 @@ Phase 8 — Chat / Reaction Polish (완료, 2026-09-28. 1차 커밋 `9285bf1` + 
   - 가입 → 이메일로 친구 요청 → 상대 화면에 실시간 표시 → 수락 → 온라인 표시 → 탭 닫으면 오프라인 → 새로고침해도 세션 유지 ✅
 
 ## Known Issues
+- **Phase 9**
+  - **신고 운영 도구 없음**: 운영자는 DB `reports`를 직접 조회. 알림·처리 상태·제재(정지) 기능 없음
+  - 신고는 신고자 또는 대상이 계정을 삭제하면 함께 지워짐 → 운영상 보관이 필요한지 법률·정책 검토 (`privacy-policy.md` `[ ]`)
+  - 계정 삭제는 유예 기간·복구 없음, 데이터 내보내기 없음. DB 백업에 남는 기간은 Phase 10 운영 정책에서
+  - 리액션은 UI에서 삭제·신고 버튼 없음 (서버 API로는 삭제 가능)
+  - OAuth만 있는 계정은 비밀번호 재확인을 못 해 삭제 불가 (400, OAuth 도입 시 재로그인 확인 필요)
+  - 계정 삭제와 동시에 들어온 신고·방 생성·초대·친구 요청은 FK 실패로 500 (드묾, 성공으로 응답하지는 않음). 계정 삭제 잠금의 동시성은 자동 테스트 없음
+  - JWT 검증마다 사용자 존재 조회 1회 (기본 키). 부하가 보이면 짧은 캐시
+  - 재연결 후 최근 기록이 비어 있으면(방 메시지가 모두 지워짐) 화면의 메시지를 지우지 못함 → 방을 다시 열면 정리됨
+  - 인증 요청 제한의 IP 항목은 1만 개를 넘을 때만 정리됨 (메모리에만 있음). 운영 전 주기적 정리 검토
+  - 개인정보처리방침 운영 주체·연락처·위탁·연령 미정, 법률 검토 전. 앱 안 링크 없음 (게시 주소가 생기는 Phase 10에)
+  - 제3자가 차단한 두 사람을 같은 방에 초대하는 것은 여전히 막지 않음 (Phase 5 항목 유지)
 - **Phase 8**
   - Extension은 채팅 알림 없음 (`notifications` 권한을 추가하지 않음, 배지만)
   - 같은 방을 한 기기에서 보고 있어도 다른 기기의 목록에서는 배지가 잠시 오름 (그 기기가 방을 열거나 서버 수로 재조회하면 맞춰짐). 읽음은 방에 "들어와 있던" 기준이라 여러 기기 중 하나만 열어도 모두 읽음
   - 열린 방이 아닌 다른 방의 새 메시지는 포커스가 있을 때 방 화면에서 표시되지 않음 (목록으로 돌아와야 보임)
   - Home / Room 컴포넌트 테스트 도구 없음 → 스크롤, 방→목록 알림 설정 전달은 E2E로만
   - Desktop 실제 OS 알림은 확인하지 않음 (웹 dev에서 가짜 `Notification`)
-  - 리액션 되돌리기·삭제 없음, 채팅 신고·삭제는 Phase 9
+  - 리액션 되돌리기 없음 (채팅 메시지 삭제·신고는 Phase 9에서 추가)
   - 목록에 없는 방의 메시지 알림은 다음 목록 조회가 반영될 때까지 늦어짐 (보통 0.5초). 그 조회가 더 새 변경으로 버려지면 그다음 조회 때
 - **Phase 7**
   - **라프텔 약관 조항 원문·개정일 미기록** (사용자 확인 결과만). 스토어 공개 전 원문 확인과 법률 검토 필요 (`laftel.md`)
@@ -502,7 +551,7 @@ Phase 8 — Chat / Reaction Polish (완료, 2026-09-28. 1차 커밋 `9285bf1` + 
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Next Task
-Phase 9 — Privacy / Safety (`Mirattic_Sync_PLAN.md`)
-1. 현재 상태 확인: presence 공개 범위(Phase 1), 차단(Phase 1·5), 방 권한(호스트 전용 조작)
-2. 신고 (사용자 · 채팅 메시지), 채팅 메시지 삭제
-3. 계정 삭제 / 데이터 삭제 (FK cascade 확인), 개인정보처리방침 초안(스토어 제출 전 필요)
+Phase 10 — Deployment (`Mirattic_Sync_PLAN.md`)
+1. 서버 Docker 이미지 + 운영 compose (MySQL, Caddy HTTPS/WSS), 운영 환경변수(`JWT_SECRET`, `ALLOWED_ORIGINS`, `VITE_API_URL`, CSP)
+2. Cloudflare 앞단 설정과 `server.forward-headers-strategy` (IP 제한이 프록시 뒤에서 동작하게)
+3. Desktop 설치 파일(macOS / Windows) 빌드, Chrome Web Store 제출 준비 (manifest `key` 교체, 개인정보처리방침 게시 주소, 스토어 설명)

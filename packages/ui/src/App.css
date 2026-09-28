@@ -30,11 +30,13 @@ section { border-top: 1px solid var(--line); }
 .error { color: var(--danger); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex-shrink: 0; }
 .dot.on { background: var(--on); }
-input, select, button { font: inherit; padding: 0.45rem 0.6rem; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: inherit; }
+input, select, button, textarea { font: inherit; padding: 0.45rem 0.6rem; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: inherit; }
 button { background: var(--accent); color: white; border: none; cursor: pointer; }
 button:disabled { opacity: 0.6; }
 button.link { background: none; color: var(--accent); padding: 0.25rem; }
 button.link.danger { color: var(--danger); }
+button.danger:not(.link) { background: var(--danger); }
+button.small { font-size: 0.8em; padding: 0 0.25rem; }
 label { padding: 0.4rem 0; }
 .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em; }
 code.code { font-size: 1.1rem; }

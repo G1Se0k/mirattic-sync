@@ -6,6 +6,7 @@ import com.mirattic.sync.room.ChatMessage;
 import com.mirattic.sync.room.PlaybackState;
 import com.mirattic.sync.room.RoomContent;
 import com.mirattic.sync.room.RoomService;
+import com.mirattic.sync.user.UserRepository;
 import jakarta.validation.Validator;
 import java.util.Locale;
 import java.util.Map;
@@ -49,11 +50,14 @@ class SocketHandler extends TextWebSocketHandler {
 	private final SocketHub hub;
 	private final PresenceService presence;
 	private final RoomService rooms;
+	private final UserRepository users;
 	private final JsonMapper json;
 	private final Validator validator;
 
-	SocketHandler(SocketHub hub, PresenceService presence, RoomService rooms, JsonMapper json, Validator validator) {
+	SocketHandler(SocketHub hub, PresenceService presence, RoomService rooms, UserRepository users, JsonMapper json,
+			Validator validator) {
 		this.hub = hub;
+		this.users = users;
 		this.presence = presence;
 		this.rooms = rooms;
 		this.json = json;
@@ -65,7 +69,14 @@ class SocketHandler extends TextWebSocketHandler {
 		WebSocketSession out = new ConcurrentWebSocketSessionDecorator(session, 5_000, 256 * 1024);
 		session.getAttributes().put(OUT, out);
 		session.getAttributes().put(JOINED_ROOMS, ConcurrentHashMap.newKeySet());
-		if (hub.add(userId(session), out)) {
+		boolean first = hub.add(userId(session), out);
+		// Checked after the add: an account deleted meanwhile either closed this session (hub.disconnect) or is
+		// gone from the database by now. A ticket issued just before the deletion can't leave a session behind.
+		if (!users.existsById(userId(session))) {
+			hub.disconnect(userId(session));
+			return;
+		}
+		if (first) {
 			presence.online(userId(session));
 		}
 	}

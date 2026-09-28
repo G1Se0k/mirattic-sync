@@ -17,6 +17,13 @@ public interface FriendshipRepository extends JpaRepository<Friendship, String> 
 			  and f.status = com.mirattic.sync.friend.Friendship.Status.ACCEPTED""")
 	List<String> friendIds(String userId);
 
+	/** Everyone with a friendship or a pending request with `userId`, either direction. */
+	@Query("""
+			select case when f.requesterId = :userId then f.addresseeId else f.requesterId end
+			from Friendship f
+			where f.requesterId = :userId or f.addresseeId = :userId""")
+	List<String> contactIds(String userId);
+
 	@Query("""
 			select f from Friendship f
 			where (f.requesterId = :a and f.addresseeId = :b) or (f.requesterId = :b and f.addresseeId = :a)""")

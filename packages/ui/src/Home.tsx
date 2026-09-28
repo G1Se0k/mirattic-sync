@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ApiError, connectSocket, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
+  ChatDeleted,
   ChatMessage,
   FriendRequests,
   FriendView,
@@ -12,9 +13,11 @@ import type {
   UserSummary,
 } from "@mirattic/types";
 import { api, platform, SOCKET_URL } from "./session";
-import { Privacy } from "./Privacy";
+import { DeleteAccount, Privacy } from "./Privacy";
+import { ReportDialog } from "./Report";
 import { ExperimentalSettings } from "./Experimental";
 import { Room } from "./Room";
+import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
 
 /** Shared when the app sees nothing being watched (desktop, or no YouTube tab): a fake video. */
@@ -33,6 +36,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [watchRequests, setWatchRequests] = useState<UserSummary[]>([]);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [reporting, setReporting] = useState<UserSummary | null>(null);
   const listeners = useRef(new Set<(event: ServerEvent) => void>());
   const watching = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatching ?? nothing);
   // Read by the socket handler, which outlives renders.
@@ -43,6 +47,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const refetchRooms = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** Messages of rooms not in the list yet (an invite racing its first message): notified once listed. */
   const unlisted = useRef<ChatMessage[]>([]);
+  /** Recent deletions: a message whose delivery was overtaken by its deletion is neither counted nor notified. */
+  const deletedChats = useRef<ChatDeleted[]>([]);
 
   /** A local change to the list, visible to the socket handler at once; loads started before it are dropped. */
   const updateRooms = useCallback((change: (list: RoomView[]) => RoomView[]) => {
@@ -64,6 +70,16 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     unlisted.current = waiting;
     listed.forEach(([room, m]) => notifyChat(room, m));
   }, [notifyChat]);
+
+  /** The server's counts, once a burst of chat events settles. */
+  const settleRooms = useCallback(() => {
+    clearTimeout(refetchRooms.current);
+    refetchRooms.current = setTimeout(async () => {
+      const fresh = roomsLoad.begin();
+      const rs = await api.rooms().catch(() => null);
+      if (rs && fresh()) applyRooms(rs);
+    }, ROOMS_REFETCH_MS);
+  }, [roomsLoad, applyRooms]);
 
   const subscribe = useCallback((listener: (event: ServerEvent) => void) => {
     listeners.current.add(listener);
@@ -117,7 +133,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           const host = room.members.find((m) => m.role === "HOST")?.user.displayName ?? "친구";
           notify(`${host}님의 같이 보기 초대`, room.content.title);
         }
-        if (event.type === "chat:message") {
+        if (event.type === "chat:message" && without([event.payload as ChatMessage], deletedChats.current).length) {
           const m = event.payload as ChatMessage;
           // The open room shows it; reactions and my own messages are never unread.
           if (m.roomId !== current.current.openRoom && m.userId !== me.id && !m.reaction) {
@@ -127,14 +143,15 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               updateRooms((list) => list.map((r) => (r.id === m.roomId ? { ...r, unread: r.unread + 1 } : r)));
               notifyChat(room, m);
             } else unlisted.current.push(m);
-            // Then the server's count, once the burst settles.
-            clearTimeout(refetchRooms.current);
-            refetchRooms.current = setTimeout(async () => {
-              const fresh = roomsLoad.begin();
-              const rs = await api.rooms().catch(() => null);
-              if (rs && fresh()) applyRooms(rs);
-            }, ROOMS_REFETCH_MS);
+            settleRooms();
           }
+        }
+        // A deleted message may have been unread (the server's count) or still waiting to be notified.
+        if (event.type === "chat:delete") {
+          const d = event.payload as ChatDeleted;
+          deletedChats.current = [...deletedChats.current, d].slice(-MAX_DELETED);
+          unlisted.current = without(unlisted.current, [d]);
+          settleRooms();
         }
         if (event.type === "presence:update" && event.userId) {
           const presence = event.payload as PresenceView;
@@ -148,7 +165,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       socket.close();
       platform.connected?.(null);
     };
-  }, [reload, me.id, roomsLoad, updateRooms, notifyChat, applyRooms]);
+  }, [reload, me.id, updateRooms, notifyChat, settleRooms]);
 
   // Every action refetches; the other side learns via `friend:update`.
   const act = (fn: () => Promise<unknown>) => async () => {
@@ -253,10 +270,15 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               )}
               <button onClick={() => void watchTogether(f.user)} title="내 방에 초대합니다">같이 보기</button>
               <button className="link" onClick={act(() => api.removeFriend(f.user.id))}>삭제</button>
+              <button className="link" onClick={() => setReporting(f.user)}>신고</button>
               <button className="link danger" onClick={act(() => api.block(f.user.id))}>차단</button>
             </li>
           ))}
         </ul>
+        {reporting && (
+          <ReportDialog target={{ userId: reporting.id }} user={{ id: reporting.id, name: reporting.displayName }}
+            onClose={() => { setReporting(null); void reload(); }} />
+        )}
       </section>
 
       {(requests.incoming.length > 0 || requests.outgoing.length > 0) && (
@@ -328,6 +350,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           </ul>
         </section>
       )}
+
+      <DeleteAccount onDeleted={onSignedOut} />
     </main>
   );
 }
@@ -416,6 +440,7 @@ function notify(title: string, body: string) {
 
 const ROOMS_REFETCH_MS = 500;
 const MAX_UNLISTED = 20;
+const MAX_DELETED = 100;
 
 /**
  * Messages that arrived before their room was listed, against a list from the server: those now listed are

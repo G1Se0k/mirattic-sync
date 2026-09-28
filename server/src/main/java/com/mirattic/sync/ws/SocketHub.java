@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.json.JsonMapper;
@@ -54,6 +55,17 @@ public class SocketHub {
 			return set.isEmpty() ? null : set;
 		});
 		return last[0];
+	}
+
+	/** Closes every connection of the user (account deleted). */
+	public void disconnect(String userId) {
+		for (WebSocketSession s : sessions.getOrDefault(userId, Set.of())) {
+			try {
+				s.close(CloseStatus.POLICY_VIOLATION);
+			} catch (IOException e) {
+				log.debug("close failed for session {}", s.getId());
+			}
+		}
 	}
 
 	public boolean isOnline(String userId) {

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ChatMessage } from "@mirattic/types";
-import { group, merge } from "./Chat";
+import { group, merge, receive, reconcile, without } from "./Chat";
 
 const msg = (id: string, createdAt: number): ChatMessage => ({ id, roomId: "r", userId: "u", text: id, reaction: false, createdAt });
 const react = (id: string, userId: string, emoji: string, mediaPositionMs?: number, createdAt = 0): ChatMessage =>
@@ -32,4 +32,30 @@ it("groups back-to-back reactions with the same emoji at about the same moment",
 it("does not group reactions sent far apart, even at the same (paused) position", () => {
   expect(runs([react("1", "a", "❤️", 60_000, 0), react("2", "b", "❤️", 60_000, 60_000)])).toEqual(["❤️a", "❤️b"]);
   expect(runs([react("1", "a", "❤️", 60_000, 0), react("2", "b", "❤️", 60_000, 9_000)])).toEqual(["❤️ab"]);
+});
+
+it("drops a deleted message, or every message of a deleted account", () => {
+  const list = [msg("a", 1), { ...msg("b", 2), userId: "gone" }, msg("c", 3)];
+  expect(without(list, [{ id: "a" }]).map((m) => m.id)).toEqual(["b", "c"]);
+  expect(without(list, [{ userId: "gone" }]).map((m) => m.id)).toEqual(["a", "c"]);
+});
+
+it("after a reconnect, drops shown messages deleted meanwhile but keeps older pages and newer arrivals", () => {
+  const page = Array.from({ length: 100 }, (_, i) => msg(`p${i}`, 100 + i));
+  const shown = [msg("older", 50), msg("p0", 100), msg("deleted", 150), msg("newer", 300)];
+  expect(reconcile(page, shown).map((m) => m.id)).toEqual(["older", ...page.map((m) => m.id), "newer"]);
+  // A short page is the whole history: anything older missing from it was deleted too.
+  expect(reconcile([msg("a", 10)], [msg("gone", 5), msg("a", 10), msg("new", 20)]).map((m) => m.id)).toEqual(["a", "new"]);
+});
+
+it("a message overtaken by its deletion (or its author's account deletion) stays gone when it arrives", () => {
+  const deleted: { id?: string; userId?: string }[] = [];
+  const event = (type: string, payload: unknown) => ({ type, roomId: "r", serverTime: 0, payload });
+  let list = receive([msg("a", 1)], deleted, event("chat:delete", { id: "late" }));
+  list = receive(list, deleted, event("chat:message", msg("late", 2)));
+  expect(list.map((m) => m.id)).toEqual(["a"]);
+  list = receive(list, deleted, event("chat:delete", { userId: "gone" }));
+  list = receive(list, deleted, event("chat:message", { ...msg("b", 3), userId: "gone" }));
+  list = receive(list, deleted, event("chat:message", msg("c", 4)));
+  expect(list.map((m) => m.id)).toEqual(["a", "c"]);
 });

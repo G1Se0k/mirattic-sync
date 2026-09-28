@@ -25,6 +25,9 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | GET | `/api/me` | `Me` `{ id(UID), email?, providers[], displayName, friendCode, presenceVisibility, positionVisibility }` |
 | POST | `/api/me/friend-code` | 친구 코드 재발급 (이전 코드는 즉시 무효) → `Me` |
 | PUT | `/api/me/privacy` | `{ presenceVisibility, positionVisibility }` → `Me` |
+| DELETE | `/api/me` | `{ password }` → 204. 계정과 데이터 삭제 (Phase 9). 비밀번호가 틀리면 **403** (401이면 클라이언트가 refresh 후 재시도하므로). IP당 분당 제한은 `/api/auth/**`와 같음 (429). 삭제 후: 호스트인 방은 닫히고 나머지 방에서는 빠짐 (멤버들에게 `room:update`, 남은 방에는 `chat:delete { userId }`), 친구·요청 상대에게 `friend:update`, 내 WebSocket 연결은 모두 닫힘, 기존 access token은 즉시 401 |
+
+삭제 이후 access token은 만료 전이라도 서버가 계정 존재를 확인해 401로 거절한다 (요청마다 기본 키 조회 한 번).
 
 ## Friends / Blocks
 
@@ -53,10 +56,22 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
 | GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt, unread, muted }` |
 | GET | `/api/rooms/{id}/messages?before=` | 채팅 100개 `ChatMessage[]`, 오래된 순: 최근 것, 또는 메시지 ID `before`보다 앞 (`createdAt`, `id` 순). 멤버가 아니거나 `before`가 이 방 메시지가 아니면 404 |
+| DELETE | `/api/rooms/{id}/messages/{messageId}` | 204. 보낸 사람 또는 방 호스트만 (아니면 403). 멤버가 아니거나 이 방 메시지가 아니면 404. 모든 멤버의 연결에 `chat:delete { id }` |
 | PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204. 이 방의 내 채팅 알림 끄기/켜기. 저장 후 **내 모든 연결에만** `room:update { muted }` (다른 앱이 조회를 기다리지 않고 새 설정으로 알림). 멤버가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/me` | 나가기 / 초대 거절. HOST가 나가면 방 삭제. 모든 멤버에게 `room:update` |
 
 `RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만) }`. `unread`(다른 사람의 리액션이 아닌 메시지 중 내가 마지막으로 방을 연 뒤의 수)와 `muted`는 요청한 사람 기준 (초대 이벤트·초대 응답의 `RoomView`에서는 0 / false). 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
+
+## Reports (Phase 9)
+
+| Method | Path | 설명 |
+|---|---|---|
+| POST | `/api/reports` | `{ messageId \| userId, reason, detail? }` → 204. `messageId`와 `userId` 중 **하나만** (아니면 400). `reason` = `SPAM` · `HARASSMENT` · `INAPPROPRIATE` · `OTHER`, `detail` ≤ 500자 |
+
+- 신고할 수 있는 것은 신고자가 볼 수 있던 것만: 내가 멤버인 방의 다른 사람 메시지, 또는 친구 · 같은 방 멤버 · 내가 차단한 사용자. 그 밖은 404 (사용자 ID 탐색 방지), 나 자신은 400
+- 메시지 신고는 방 ID와 내용을 복사해 저장 (원래 메시지가 지워져도 남음). 같은 메시지를 다시 신고하면 저장하지 않고 204 (한도에 닿아 있어도)
+- 신고자당 24시간에 20건 (429). 신고자의 `users` 행을 잠가 한 사람의 신고는 하나씩 처리 (동시 요청으로 한도·중복을 넘지 못함)
+- 운영자 확인용 화면은 없음 (DB `reports`). 서버 로그에는 신고 ID만
 
 ## 친구 코드
 

@@ -1,13 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import type { Socket, SocketStatus } from "@mirattic/client";
-import { REACTIONS, type ChatMessage, type RoomMemberView, type ServerEvent } from "@mirattic/types";
+import { REACTIONS, type ChatDeleted, type ChatMessage, type RoomMemberView, type ServerEvent } from "@mirattic/types";
 import { api } from "./session";
 import { clock } from "./format";
+import { ReportDialog } from "./Report";
 
 type Props = {
   roomId: string;
   meId: string;
   members: RoomMemberView[];
+  /** The host may delete anyone's message (moderation); others only their own. */
+  isHost: boolean;
   socket: Socket;
   status: SocketStatus;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
@@ -20,12 +23,16 @@ type Props = {
 const PAGE = 100; // the server's page size: a full page means there may be more
 const NEAR_BOTTOM_PX = 40;
 
-export function Chat({ roomId, meId, members, socket, status, subscribe, position, onSeek }: Props) {
+export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [unseen, setUnseen] = useState(false); // new messages below while reading older ones
+  const [reporting, setReporting] = useState<ChatMessage | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  /** Deleted while their history was loading: a history answered before the delete must not bring them back. */
+  const deleted = useRef<ChatDeleted[]>([]);
   const list = useRef<HTMLUListElement>(null);
   const atBottom = useRef(true);
   const shown = useRef<{ first?: string; last?: string; height: number }>({ height: 0 });
@@ -35,7 +42,7 @@ export function Chat({ roomId, meId, members, socket, status, subscribe, positio
     if (status !== "open") return;
     // Merged, not replaced: live messages may arrive before the history does.
     api.messages(roomId).then((history) => {
-      setMessages((live) => merge(history, live));
+      setMessages((live) => without(reconcile(history, live), deleted.current));
       setHasOlder((more) => more || history.length === PAGE);
     }, () => {});
   }, [roomId, status]);
@@ -43,9 +50,7 @@ export function Chat({ roomId, meId, members, socket, status, subscribe, positio
   useEffect(
     () =>
       subscribe((event) => {
-        if (event.type !== "chat:message" || event.roomId !== roomId) return;
-        const m = event.payload as ChatMessage;
-        setMessages((list) => merge(list, [m]));
+        if (event.roomId === roomId) setMessages((list) => receive(list, deleted.current, event));
       }),
     [roomId, subscribe],
   );
@@ -78,7 +83,7 @@ export function Chat({ roomId, meId, members, socket, status, subscribe, positio
     setLoadingOlder(true);
     try {
       const page = await api.messages(roomId, oldest.id);
-      setMessages((list) => merge(page, list));
+      setMessages((list) => without(merge(page, list), deleted.current));
       setHasOlder(page.length === PAGE);
     } catch {
       // stays offered: the next click retries
@@ -96,6 +101,13 @@ export function Chat({ roomId, meId, members, socket, status, subscribe, positio
 
   async function react(emoji: string) {
     socket.send({ type: "reaction:add", roomId, payload: { emoji, mediaPositionMs: await position() } });
+  }
+
+  async function remove(m: ChatMessage) {
+    if (!confirm(m.userId === meId ? "이 메시지를 삭제할까요? 모든 사람의 화면에서 사라집니다." : "호스트 권한으로 이 메시지를 삭제할까요?")) return;
+    setFailed(null);
+    // The server's chat:delete removes it here too (and on every other screen).
+    await api.deleteMessage(roomId, m.id).catch(() => setFailed("메시지를 삭제하지 못했습니다."));
   }
 
   function jump(ms: number) {
@@ -130,11 +142,22 @@ export function Chat({ roomId, meId, members, socket, status, subscribe, positio
           ) : (
             <li key={item.id}>
               <strong>{name(item.userId)}</strong> {timestamp(item.mediaPositionMs)}{" "}
-              <span className="message">{item.text}</span>
+              <span className="message">{item.text}</span>{" "}
+              {(item.userId === meId || isHost) && (
+                <button className="link small" title="메시지 삭제" onClick={() => void remove(item)}>삭제</button>
+              )}
+              {item.userId !== meId && (
+                <button className="link small" title="메시지 신고" onClick={() => setReporting(item)}>신고</button>
+              )}
             </li>
           ),
         )}
       </ul>
+      {failed && <p className="error" role="alert">{failed}</p>}
+      {reporting && (
+        <ReportDialog target={{ messageId: reporting.id }} user={{ id: reporting.userId, name: name(reporting.userId) }}
+          onClose={() => setReporting(null)} />
+      )}
       {unseen && (
         <button className="link" onClick={() => list.current?.scrollTo({ top: list.current.scrollHeight })}>새 메시지 ↓</button>
       )}
@@ -153,10 +176,43 @@ export function Chat({ roomId, meId, members, socket, status, subscribe, positio
   );
 }
 
-/** Union by id, oldest first (id breaks ties, as the server pages). */
+/** Oldest first; id breaks ties, as the server pages. */
+const order = (x: ChatMessage, y: ChatMessage) => x.createdAt - y.createdAt || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+
+/** Union by id, oldest first. */
 export function merge(a: ChatMessage[], b: ChatMessage[]) {
   const byId = new Map([...a, ...b].map((m) => [m.id, m]));
-  return [...byId.values()].sort((x, y) => x.createdAt - y.createdAt || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  return [...byId.values()].sort(order);
+}
+
+/**
+ * The latest page (after a reconnect) against what is shown: a shown message within the page's span but
+ * missing from it was deleted while we were away. Newer ones may have arrived live after the page was read.
+ * A short page reaches back to the room's first message, so its span has no lower end.
+ */
+export function reconcile(page: ChatMessage[], shown: ChatMessage[]) {
+  const last = page[page.length - 1];
+  if (!last) return shown; // ponytail: can't tell deleted from just-arrived; the next reconnect or reopen settles it
+  const ids = new Set(page.map((m) => m.id));
+  const first = page.length === PAGE ? page[0] : undefined;
+  return merge(page, shown.filter((m) => ids.has(m.id) || order(m, last) > 0 || (first && order(m, first) < 0)));
+}
+
+/**
+ * A live event on the shown list. Deletions are remembered (`deleted`, appended): a message whose delivery
+ * was overtaken by its deletion must not come back when it arrives.
+ */
+export function receive(list: ChatMessage[], deleted: ChatDeleted[], event: ServerEvent) {
+  if (event.type === "chat:message") return without(merge(list, [event.payload as ChatMessage]), deleted);
+  if (event.type !== "chat:delete") return list;
+  deleted.push(event.payload as ChatDeleted);
+  return without(list, [event.payload as ChatDeleted]);
+}
+
+/** Drops deleted messages: by id, or all of a deleted account's. */
+export function without(messages: ChatMessage[], deleted: ChatDeleted[]) {
+  if (deleted.length === 0) return messages;
+  return messages.filter((m) => !deleted.some((d) => d.id === m.id || d.userId === m.userId));
 }
 
 export type ReactionGroup = { id: string; emoji: string; positionMs?: number; sentAt: number; userIds: string[] };

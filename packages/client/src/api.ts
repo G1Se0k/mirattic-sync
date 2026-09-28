@@ -5,6 +5,8 @@ import type {
   FriendView,
   Me,
   RoomContent,
+  ReportReason,
+  ReportTarget,
   RoomView,
   UserSummary,
   Visibility,
@@ -106,6 +108,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     me: () => authed<Me>("GET", "/api/me"),
     updatePrivacy: (presenceVisibility: Visibility, positionVisibility: Visibility) =>
       authed<Me>("PUT", "/api/me/privacy", { presenceVisibility, positionVisibility }),
+    /** Deletes my account and all its data. 403 wrong password. Sign out locally afterwards. */
+    deleteAccount: (password: string) => authed<void>("DELETE", "/api/me", { password }),
     /** Invalidates the current friend code and returns the updated profile. */
     regenerateFriendCode: () => authed<Me>("POST", "/api/me/friend-code"),
 
@@ -137,6 +141,11 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** 100 chat messages, oldest first: the latest, or those before message `before`. New ones arrive as `chat:message`. */
     messages: (id: string, before?: string) =>
       authed<ChatMessage[]>("GET", `/api/rooms/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ""}`),
+    /** Author or host. Every member gets `chat:delete`. */
+    deleteMessage: (roomId: string, messageId: string) => authed<void>("DELETE", `/api/rooms/${roomId}/messages/${messageId}`),
+    /** A message, or a friend / room member / blocked user. 429 after 20 a day. */
+    report: (target: ReportTarget, reason: ReportReason, detail?: string) =>
+      authed<void>("POST", "/api/reports", { ...target, reason, detail }),
     /** My chat notifications for the room. */
     muteRoom: (id: string, muted: boolean) => authed<void>("PUT", `/api/rooms/${id}/members/me/muted`, { muted }),
 

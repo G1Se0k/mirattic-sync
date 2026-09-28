@@ -83,9 +83,12 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 |---|---|---|---|
 | `chat:message` | C→S | `{ text, mediaPositionMs? }` | 멤버만 (`not_member`). text는 앞뒤 공백 제거 후 1–1000자, `mediaPositionMs` ≥ 0 (아니면 `bad_payload`). 세션당 초당 5회 |
 | `reaction:add` | C→S | `{ emoji, mediaPositionMs? }` | `emoji`는 `❤️ 😂 😮 😭 🔥` 중 하나 (아니면 `bad_payload`). 멤버만, `chat:message`와 같은 초당 5회 한도 |
+| `chat:delete` | S→C | `{ id }` 또는 `{ userId }` | 메시지 삭제(`DELETE /api/rooms/{id}/messages/{messageId}`, envelope `userId` = 지운 사람) 또는 계정 삭제(`{ userId }` = 그 사람의 모든 메시지). `chat:message`와 같이 모든 멤버의 연결에게. 클라이언트는 목록에서 빼고, 이후 도착하는 기록 응답과 늦게 도착한 같은 메시지의 `chat:message`에서도 뺀다 (배지·알림 없음) (Phase 9) |
 | `chat:message` | S→C | `ChatMessage` `{ id, roomId, userId, text, mediaPositionMs?, reaction, createdAt }` | **방의 모든 멤버의 연결**에게 (참가하지 않은 멤버, 보낸 사람 포함). 리액션은 `reaction: true`, `text` = 이모지. envelope `userId` = 보낸 사람. 기록은 `GET /api/rooms/{id}/messages` |
 
 읽지 않은 수: 서버는 `room:join`, `room:leave`, 연결 끊김 때 그 멤버의 읽음 위치(`last_read_seq`)를 방의 마지막 메시지 순번으로 기록한다 (메시지 저장과 같은 방 행 잠금 아래). `room:leave`·끊김은 기록한 뒤에 `room:update`를 보낸다.
+
+재연결 후 최근 기록을 다시 받으면, 화면의 메시지 중 그 페이지 범위 안인데 페이지에 없는 것은 끊긴 동안 삭제된 것으로 보고 뺀다 (`reconcile`).
 
 타임스탬프(`mediaPositionMs`)를 누르면 호스트에게만 확인 창을 띄운 뒤 이동한다 (호스트의 이동이 방 전체에 전파됨). 멤버에게는 표시만.
 
@@ -93,4 +96,5 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 
 - 클라이언트는 자신이 가진 version보다 작거나 같은 `playback:*`를 버린다.
 - 모든 room 이벤트는 서버에서 멤버십을 검증한다.
+- 삭제된 계정의 연결은 서버가 닫는다. 삭제 직전에 받은 ticket으로 연결해도 연결 직후 계정 확인에서 닫힌다.
 - 시간 값은 UTC epoch ms.
