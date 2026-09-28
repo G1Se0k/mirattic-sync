@@ -67,6 +67,10 @@
 | 59 | 신고는 `reports` 테이블에 저장만 (운영자가 DB에서 확인). 볼 수 있던 대상만 신고 가능(나머지 404), 메시지 내용은 복사 보관, 신고자당 하루 20건 (신고자 `users` 행 잠금으로 직렬화, 중복 재신고는 한도와 무관하게 204). 신고 후 차단을 바로 제안 | 신고가 ID 탐색이나 운영자 폭주 수단이 되지 않게. 관리 화면은 운영 규모가 생기면 |
 | 60 | 계정 삭제는 즉시 완전 삭제: `users` 행 잠금 + 비밀번호 재확인 → 방에서 나가기(호스트면 닫기) → `users` 행 삭제로 FK `ON DELETE CASCADE`가 나머지(identity, refresh token, 친구·차단, 멤버십, 메시지, 신고)를 지움. 삭제 후 access token은 JWT 검증기의 계정 존재 확인으로 즉시 401, WebSocket은 서버가 닫음(연결 직후에도 계정 확인) | 유예 기간·복구 없음(가장 단순하고 보수적). 훔친 access token만으로는 삭제 불가. 신고도 함께 지워지는 점은 운영 보관 정책 검토 필요 |
 | 61 | 개인정보처리방침은 `docs/legal/privacy-policy.md` (초안). Extension 동의 화면에 채팅·신고 항목 추가 (`CONSENT_VERSION` 올림 → 다시 동의) | 스토어 제출 전 필수. 수집 항목은 코드 기준으로 적고 미정 항목은 `[ ]` |
+| 62 | 서버 배포: main push → CI(web·server 통과 후)가 jar를 빌드하고 `RUN` 없는 Dockerfile로 linux/arm64 이미지를 만들어 `docker save`를 SSH로 보냄(`docker load`). 배포 호스트(Apple Silicon Mac + OrbStack)의 클론 `~/Documents/mirattic-sync`를 해당 커밋으로 checkout하고 `deploy/deploy.sh <sha>`가 `:current` 태그를 바꿔 `compose up` → 헬스 체크 실패 시 이전 이미지로 되돌림. 비밀값은 첫 배포 때 호스트에서 생성(`deploy/.env`, 600) | 레지스트리 없음 → 호스트에 레지스트리 자격 증명이 필요 없음(macOS 키체인은 SSH 세션에서 쓸 수 없음). 비밀값이 CI·저장소를 거치지 않음. 이미지 태그 5개 보관으로 수동 롤백 |
+| 63 | 운영 경로: Cloudflare → 호스트의 Caddy(compose 밖, 사용자가 관리) → `127.0.0.1:8090`. Caddy는 Cloudflare 대역만 신뢰해 `CF-Connecting-IP`로 client IP를 정하고 `X-Forwarded-For`를 그 값으로 덮어씀. 서버는 `server.forward-headers-strategy=native`(Tomcat 기본 내부 프록시 = 사설·loopback만 신뢰) | 인증 요청 제한이 실제 사용자 IP 기준으로 동작. 앱 포트는 loopback에만 열려 외부에서 헤더를 위조할 수 없음 |
+| 64 | 서버가 30초마다 모든 WebSocket에 ping 프레임 | Cloudflare는 100초 동안 조용한 WebSocket을 끊음. 브라우저가 pong을 자동으로 보내 클라이언트 변경 없음 |
+| 65 | 클라이언트 운영 주소는 빌드 시 `.env.production`(`VITE_API_URL=https://sync.mirattic.com`). Desktop CSP는 운영·localhost 둘 다 허용. `v*` 태그 → Release 워크플로가 extension zip과 Desktop 설치 파일(macOS universal · Windows, 서명 없음)을 draft release로 | 로컬 E2E는 `VITE_API_URL=http://localhost:8080 pnpm build`로 덮어씀. 서명·공증은 인증서가 생길 때 |
 
 ## 사용자 식별 (UID + Identity)
 

@@ -8,6 +8,7 @@
 2. `ws://<host>/ws?ticket=<ticket>` — ticket이 없거나 이미 사용됐거나 만료됐으면 handshake 401
 3. Origin 헤더가 있으면 `app.allowed-origins`에 포함돼야 함
 4. 인바운드 텍스트 프레임 최대 16KB
+5. 서버가 30초마다 ping 프레임을 보냄 (Cloudflare의 100초 유휴 종료 방지, 브라우저가 자동 pong). 운영 주소 `wss://sync.mirattic.com/ws`
 
 클라이언트(`packages/client` `connectSocket`)는 재연결할 때마다 새 ticket을 받고, 지수 backoff(최대 30초)를 쓴다.
 ticket 요청이 401이면 재연결을 멈춘다(세션 종료).

@@ -33,3 +33,40 @@ jobs:
           java-version: 21
           cache: maven
       - run: ./mvnw -B test
+
+  # main only: build an arm64 image (the deploy host is an Apple Silicon Mac running OrbStack),
+  # stream it over SSH (no registry, so no credentials on the host) and switch to it there.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [web, server]
+    runs-on: ubuntu-latest
+    concurrency: deploy
+    env:
+      HOST: giseok@ssh.mirattic.com
+      DIR: Documents/mirattic-sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - run: ./mvnw -B -DskipTests package
+        working-directory: server
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: server
+          platforms: linux/arm64
+          tags: mirattic-sync-server:${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/image.tar
+      - name: SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+      - name: Deploy
+        run: |
+          ssh "$HOST" "git -C $DIR fetch -q origin && git -C $DIR checkout -q --detach ${{ github.sha }}"
+          gzip -c "${{ runner.temp }}/image.tar" | ssh "$HOST" 'PATH=/opt/homebrew/bin:/usr/local/bin:$PATH docker load'
+          ssh "$HOST" "sh $DIR/deploy/deploy.sh ${{ github.sha }}"

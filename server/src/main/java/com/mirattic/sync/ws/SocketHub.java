@@ -8,8 +8,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.PingMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.json.JsonMapper;
@@ -64,6 +66,20 @@ public class SocketHub {
 				s.close(CloseStatus.POLICY_VIOLATION);
 			} catch (IOException e) {
 				log.debug("close failed for session {}", s.getId());
+			}
+		}
+	}
+
+	/** Cloudflare closes WebSockets idle for 100 s; a ping frame (browsers answer it) keeps them open. */
+	@Scheduled(fixedRate = 30_000)
+	void ping() {
+		for (Set<WebSocketSession> set : sessions.values()) {
+			for (WebSocketSession s : set) {
+				try {
+					s.sendMessage(new PingMessage());
+				} catch (IOException | IllegalStateException e) {
+					log.debug("ping failed for session {}", s.getId());
+				}
 			}
 		}
 	}
