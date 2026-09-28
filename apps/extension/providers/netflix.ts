@@ -23,10 +23,32 @@ export class NetflixAdapter extends PageVideoAdapter {
     return title();
   }
 
-  // Writing currentTime makes Netflix stop with error M7375; the way around it is Netflix's internal
-  // player API, which we don't call. The side panel treats Netflix as unseekable (bridge.ts `SEEKABLE`)
-  // and tells members where to go instead.
+  // Writing currentTime makes Netflix stop with error M7375: the side panel seeks with `seekInPage` instead.
   override async seek() {}
+}
+
+/**
+ * Seeks with Netflix's own player API. Run by the side panel in the page's world (`scripting.executeScript`,
+ * world MAIN) of the followed tab only, so it must not reference anything outside itself.
+ * Unofficial and undocumented (plan.md decision 66): false when it isn't there, and the side panel falls
+ * back to telling members where to go.
+ */
+export function seekInPage(positionMs: number): boolean {
+  try {
+    // The tab may have navigated between the side panel's URL check and this run: act only on Netflix.
+    if (window.location.origin !== 'https://www.netflix.com') return false;
+    type Player = { seek(ms: number): void };
+    type VideoPlayer = { getAllPlayerSessionIds(): string[]; getVideoPlayerBySessionId(id: string): Player };
+    type Page = { netflix: { appContext: { state: { playerApp: { getAPI(): { videoPlayer: VideoPlayer } } } } } };
+    const api = (window as unknown as Page).netflix.appContext.state.playerApp.getAPI().videoPlayer;
+    const ids = api.getAllPlayerSessionIds();
+    const id = ids.find((s) => s.startsWith('watch')) ?? ids[0];
+    if (!id) return false;
+    api.getVideoPlayerBySessionId(id).seek(Math.max(0, Math.round(positionMs)));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The tab title if it names the title ("Title - Netflix"); the watch page is often just "Netflix". */

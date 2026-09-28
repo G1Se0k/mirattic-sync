@@ -27,13 +27,13 @@ YouTube 약관("interfere", "automated means")보다 훨씬 구체적이다.
 - netflix.com 페이지에 content script를 넣는 것 자체가 (vi) "insert any code"에 문자 그대로 해당할 수 있음
 - 제목·에피소드를 DOM에서 읽는 것은 (vii) 데이터 수집으로 볼 여지
 - `video.currentTime` 직접 변경은 Netflix 플레이어 오류(M7375)를 일으키는 것으로 알려져 있고, 이를 피하는 알려진 방법은
-  Netflix 내부 page-world 플레이어 API 호출 → (v) 리버스 엔지니어링 성격, **사용하지 않음**
+  Netflix 내부 page-world 플레이어 API 호출 → (v) 리버스 엔지니어링 성격. 처음에는 사용하지 않았으나 **2026-09-29 사용자 결정으로 seek에 한해 사용** (plan.md 결정 66, 아래 "결정 변경")
 - Teleparty 등 기존 확장이 있지만 Netflix가 허용했다는 공식 근거는 없음 → 근거로 삼지 않음
 
 → **정책이 불명확함 (CLAUDE.md 규칙: 보수적 구현)**. 구현 범위는 아래 "결정".
 
 ## 금지 동작 (어떤 선택이든 구현하지 않음)
-- Netflix 내부 JS API / page-world 스크립트 호출, 네트워크 요청 가로채기, 매니페스트·자막·스트림 접근
+- Netflix 내부 JS API / page-world 스크립트 호출 (**예외: 결정 66의 seek 호출 하나**), 네트워크 요청 가로채기, 매니페스트·자막·스트림 접근
 - DRM(Widevine) 관련 모든 것, 화면 캡처, 재전송
 - 페이지 DOM에 UI 삽입, 플레이어 가림
 - 쿠키·세션·프로필 정보 읽기
@@ -55,10 +55,16 @@ YouTube 약관("interfere", "automated means")보다 훨씬 구체적이다.
   - content script는 manifest에 등록하지 않고, side panel이 **따라가는 Netflix 탭 하나에만** `scripting.executeScript`로 넣음
 - 켜는 곳: 설정의 "실험 기능", Netflix 방에 처음 들어갈 때 뜨는 팝업. 둘 다 약관 조항과 계정 제한 위험을 보여준 뒤 사용자가 직접 켬
 - 읽는 것: URL의 콘텐츠 ID(`/watch/<숫자>`), 탭 제목, `<video>`의 재생 상태. 에피소드 제목 등 페이지 DOM은 읽지 않음 ((vii))
-- 제어: **재생 / 일시정지만** `<video>`로. **seek는 하지 않음**
+- 제어: 재생 / 일시정지는 `<video>`로. seek는 **Netflix 내부 플레이어 API로** (결정 변경, 아래)
   - `currentTime` 쓰기는 Netflix가 막고 재생 오류(M7375)를 띄움 (확장 개발자들의 공개 이슈로 확인, 아래 출처)
-  - 피하는 방법은 Netflix 내부 플레이어 API뿐 → 금지 동작이므로 사용하지 않음
-  - 대신 멤버에게 "호스트와 N초 차이 · mm:ss로 직접 이동" 안내. 채팅 타임스탬프 이동도 Netflix 방에서는 표시만
+  - 내부 API 호출이 실패하면 (Netflix 변경) 그 탭은 예전처럼 멤버에게 "호스트와 N초 차이 · mm:ss로 직접 이동" 안내
+
+## 결정 변경 (2026-09-29, 사용자 결정)
+- 처음 결정(Phase 6, 결정 47): seek하지 않음. 피하는 방법이 내부 API뿐이라 금지 동작으로 분류
+- 변경(결정 66): 사용자(프로젝트 소유자)가 "Teleparty도 그렇게 운영한다"는 이유로 내부 API seek를 기본 동작으로 결정 (Netflix 제어를 켠 사용자에게)
+- 범위: side panel이 따라가는 Netflix 탭 하나에만 `scripting.executeScript({ world: "MAIN" })`로 `netflix.appContext.state.playerApp.getAPI().videoPlayer…seek(ms)` 한 번 호출. 페이지의 다른 내부 기능 · DOM · 네트워크 · DRM에는 손대지 않음
+- 남은 위험: 약관 1.8 (v)(vi) 위반 소지가 더 직접적 → 사용자 계정 제한 가능. 제3자 계약 위반 유도 쟁점. Teleparty의 존재는 Netflix가 허용했다는 근거가 아님. 켜기 안내 문구에 내부 기능 사용과 계정 위험을 적음
+- 스토어 공개 전 법률 검토 항목에 이 변경 포함
 - 광고 요금제: 광고 감지 방법(DOM)이 확인되지 않아 미지원. 켜기 팝업에서 알림
 - 채팅은 YouTube와 같이 side panel 안 (Teleparty도 Netflix에서 별도 창을 쓰지 않음). 페이지 안에는 아무것도 넣지 않음
 

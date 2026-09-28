@@ -18,6 +18,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 - **DB 백업**: `deploy/backup.sh`를 `deploy.sh`가 launchd agent(`com.mirattic.sync.backup`, 매일 04:00)로 설치 (스크립트는 TCC 밖 `~/Library/Application Support/mirattic-sync/`로 복사). `mysqldump --single-transaction` → `~/mirattic-sync-backups/*.sql.gz` (디렉터리 700 · 파일 600), 7일 보관. 개인정보처리방침 초안에 "삭제 후 백업에 최대 8일" 명시
 - **WebSocket ping** 30초 (결정 64, Cloudflare 100초 유휴 종료 방지)
 - **클라이언트 운영 주소** (결정 65): `apps/{desktop,extension}/.env.production`, Desktop CSP에 `https/wss://sync.mirattic.com`
+- **Netflix seek** (결정 66, 결정 47 대체 · 사용자 결정): 따라가는 Netflix 탭에만 page world에서 Netflix 내부 플레이어 API로 이동, 실패하면 기존 "직접 이동" 안내. 켜기 안내 문구 갱신. `providers/netflix.test.ts` (세션 선택 · 반올림 · API 없음 → false · Netflix 밖 문서면 아무것도 안 함)
 - **릴리스 자동화**: `v*` 태그 → `release.yml`이 Desktop 설치 파일(macOS universal `.dmg`, Windows `.exe`/`.msi`, 서명 없음)과 확장 zip을 draft release로. `v0.1.0` draft 생성 확인
   - 첫 실행에서 `@tauri-apps/plugin-opener` npm(2.5.5) · crate(2.6.0) 불일치로 Tauri CLI가 거부 → npm 2.6으로 맞춤 (기존 문제, Windows 빌드도 이번에 처음 통과)
 
@@ -291,6 +292,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 - 백업: 배포 후 launchd로 즉시 실행 → 파일 생성(600), 임시 DB `restore_check`로 복원해 테이블 10개 · Flyway v9 확인 후 삭제
 - 백업 Codex Sol 검증 FAIL (p10run3, 검사 통과, blocking 2) → 수정: 덤프 실패 시 부분 `.tmp`가 남고 보관 정리를 건너뜀 → 정리를 덤프 전에, 실패 시 `.tmp` 삭제(로컬에서 실패 재현 확인), 방침 문구에 서버 중단 시 예외 추가. launchd agent 로드 실패가 경고뿐 → 이미지 교체 전에 배포 실패로
 - 백업 Codex 재검증 1회차 **PASS** (p10run4, `bash -n` · `sh -n` · server verify · typecheck · diff check · 실패 재현 · `plutil -lint`)
+- Netflix seek (결정 66) Codex Sol: 1차 FAIL (p10run5, blocking 2: 이전 탭의 늦은 실패 응답이 새 연결을 seek 불가로 만듦, 탭이 다른 사이트로 옮겨 가는 사이 Netflix 함수가 그 탭에서 실행될 수 있음) → 호출 시 연결을 기억해 같은 연결일 때만 반영, 실행 전 탭 URL 확인. 재검증 1회차 FAIL (p10run6, URL 확인과 실행 사이 이동 경쟁) → 함수 안에서 실행 문서의 origin이 Netflix인지 먼저 확인 (테스트 추가, 빼면 실패 확인). 재검증 2회차 **PASS** (p10run7, extension 11)
 - Release: `v0.1.0` → macOS universal · Windows 설치 파일 + 확장 zip draft release
 - Codex Sol 검증 1차 FAIL (2026-09-29, 검사 12개 모두 통과, blocking 1) → 수정
   - `docker compose up -d`가 실패하면 `set -e`로 바로 종료되어 롤백하지 않음 → compose와 헬스 체크를 `if` 안에서 실행해 모든 실패가 롤백 경로로, 롤백 후에도 헬스 체크 (로컬에서 재현 · 확인). 수정본이 CI로 배포되어 운영 UP 확인
@@ -540,7 +542,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 - **Phase 6**
   - **실제 Netflix 계정으로 검증하지 않음**: `<video>` play/pause가 Netflix 플레이어 UI와 어긋나지 않는지, 탭 제목 형식, 다음 화 자동 재생 시 URL 변경, 선택자(`video` 하나) 모두 가짜 페이지로만 확인
   - Netflix 약관상 허용 여부 불명확 → **스토어 공개 전 법률 검토** (`netflix.md` 체크리스트). 스토어 빌드에서 Netflix를 빼는 선택지도 검토
-  - seek 자동 동기화 없음 (멤버가 직접 이동). 호스트가 자주 이동하면 불편
+  - ~~seek 자동 동기화 없음~~ → 결정 66으로 내부 API seek (실제 Netflix에서 미검증, 비공식 API라 예고 없이 깨질 수 있음 → 그때는 직접 이동 안내)
   - 광고 요금제 미지원 (광고 감지 없음). 광고 중에도 재생/일시정지 명령이 갈 수 있음
   - 작품 제목·에피소드 정보 없음 (페이지 DOM을 읽지 않음). 탭 제목이 "Netflix"뿐이면 "Netflix 콘텐츠"로 표시
   - 콘텐츠 ID가 국가별로 같은지 미확인

@@ -15,11 +15,11 @@ const RISK: Record<Experiment, { terms: ReactNode; does: string; site: string }>
     terms: (
       <>
         Netflix 이용약관 1.8조는 "코드나 다른 제품을 삽입하거나 어떤 방식으로든 Netflix 서비스 콘텐츠 조작"을 금지합니다.
-        이 기능은 Netflix 탭에 확장 프로그램 코드를 넣어 재생을 맞추므로 이 조항에 해당할 수 있고,
+        이 기능은 Netflix 탭에 확장 프로그램 코드를 넣고 Netflix 플레이어의 비공개 내부 기능으로 위치를 맞추므로 이 조항에 해당할 수 있고,
         <strong> Netflix가 내 계정을 제한할 수 있습니다.</strong>
       </>
     ),
-    does: "재생 / 일시정지만. 위치 이동은 하지 않고 어디로 옮길지 안내만 합니다",
+    does: "재생 / 일시정지 / 위치 이동 (Netflix 내부 기능이 바뀌어 이동이 안 되면 어디로 옮길지 안내)",
     site: "netflix.com",
   },
   laftel: {

@@ -1,5 +1,6 @@
 import { browser, type Browser } from 'wxt/browser';
 import type { MediaPresence, MediaProvider, MediaProviderAdapter, PlayerSnapshot } from '@mirattic/types';
+import { seekInPage as netflixSeek } from './providers/netflix';
 
 // Side panel ⇄ provider content script over a port opened by the side panel (plan.md decision 29).
 // Content scripts only accept ports from this extension, never from the page.
@@ -45,8 +46,10 @@ export function serveAdapter(create: () => Served) {
 
 const REPLY_TIMEOUT_MS = 1000;
 
-/** Side panel view of what each provider's page adapter can do (the adapter itself runs in the tab). */
-const SEEKABLE: Partial<Record<MediaProvider, boolean>> = { netflix: false };
+/** Providers whose page blocks seeking through <video>: the side panel seeks in the page's world instead. */
+const PAGE_SEEK: Partial<Record<MediaProvider, { site: string; seek: (positionMs: number) => boolean }>> = {
+  netflix: { site: 'https://www.netflix.com/', seek: netflixSeek },
+};
 
 /**
  * Side panel side: a `MediaProviderAdapter` for whatever tab is connected. With no tab (or a dead one)
@@ -55,6 +58,9 @@ const SEEKABLE: Partial<Record<MediaProvider, boolean>> = { netflix: false };
 export class RemoteAdapter implements MediaProviderAdapter {
   provider: MediaProvider = 'youtube';
   private port: Browser.runtime.Port | null = null;
+  private tabId: number | null = null;
+  /** The page seek failed on this tab (API gone): members are told where to go instead. */
+  private pageSeekFailed = false;
   private views = new Map<MediaProvider, MediaProviderAdapter>();
   private presence: MediaPresence | null = null;
   private nextId = 0;
@@ -71,12 +77,14 @@ export class RemoteAdapter implements MediaProviderAdapter {
   }
 
   get seekable() {
-    return SEEKABLE[this.provider] ?? true;
+    return !this.pageSeekFailed;
   }
 
   connect(tabId: number, provider: MediaProvider) {
     this.disconnect();
     this.provider = provider;
+    this.tabId = tabId;
+    this.pageSeekFailed = false;
     const port = browser.tabs.connect(tabId, { name: PORT_NAME });
     this.port = port;
     port.onMessage.addListener((m: PortMessage) => {
@@ -120,7 +128,25 @@ export class RemoteAdapter implements MediaProviderAdapter {
   }
 
   async seek(positionMs: number) {
-    await this.request({ op: 'seek', positionMs });
+    const pageSeek = PAGE_SEEK[this.provider];
+    if (!pageSeek) {
+      await this.request({ op: 'seek', positionMs });
+      return;
+    }
+    const { port, tabId } = this;
+    if (!port || tabId === null) return;
+    // Only into the connection this seek was meant for: the tab may have moved to another site (the
+    // rebind is async), and a late answer must not mark a newer connection as failed.
+    const current = () => this.port === port;
+    let ok = false;
+    try {
+      if (!(await browser.tabs.get(tabId)).url?.startsWith(pageSeek.site) || !current()) return;
+      const [done] = await browser.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: pageSeek.seek, args: [positionMs] });
+      ok = done?.result === true;
+    } catch {
+      // tab closed or navigated away mid-call: treated like a failed seek below, if still current
+    }
+    if (!ok && current()) this.pageSeekFailed = true;
   }
 
   onChange(callback: (s: PlayerSnapshot) => void) {
@@ -141,9 +167,12 @@ export class RemoteAdapter implements MediaProviderAdapter {
     let view = this.views.get(provider);
     if (view) return view;
     const mine = () => this.provider === provider && this.connected;
+    const remote = this;
     view = {
       provider,
-      seekable: SEEKABLE[provider] ?? true,
+      get seekable() {
+        return !mine() || remote.seekable;
+      },
       detect: mine,
       getPresence: async () => (mine() ? this.presence : null),
       getSnapshot: () => (mine() ? this.getSnapshot() : Promise.resolve(null)),
@@ -176,6 +205,7 @@ export class RemoteAdapter implements MediaProviderAdapter {
 
   private drop() {
     this.port = null;
+    this.tabId = null;
     for (const reply of this.replies.values()) reply(null);
     this.replies.clear();
     this.setPresence(null);

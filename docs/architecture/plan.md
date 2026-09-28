@@ -52,7 +52,7 @@
 | 44 | Desktop 창을 닫으면 트레이로 숨김 (접속·알림 유지, 트레이 "종료"로 끝냄). 초대·합류 요청 알림은 앱에 포커스가 없을 때만 (Tauri notification plugin). Extension은 알림 없음 | Extension에 `notifications` 권한을 더하지 않음 (side panel 배너로 충분) |
 | 45 | Netflix는 실험 기능, **기본 꺼짐**. 켤 때 약관 1.8(vi) 위험을 보여주고 `optional_host_permissions`(`https://www.netflix.com/*`)를 요청, 끄면 반납. 설정의 "실험 기능"과 Netflix 방 첫 입장 팝업(방마다 세션당 1회)에서 켬 | 약관이 코드 삽입을 명시적으로 금지하고 위반 시 사용자 계정이 제한될 수 있음 → 사용자가 알고 선택 (사용자 결정, `platform-policy/netflix.md`) |
 | 46 | Netflix content script는 manifest에 넣지 않고(`registration: 'runtime'`, 빌드 hook으로 host_permissions에서 제거) side panel이 따라가는 탭에만 `scripting.executeScript` | 꺼져 있을 때와 따라가지 않는 탭에는 코드가 전혀 들어가지 않음 |
-| 47 | Netflix는 재생 / 일시정지만 제어하고 seek하지 않음 (`MediaProviderAdapter.seekable = false`). 멤버에게 `manual` 상태로 "N초 늦음 · mm:ss로 직접 이동" 안내, 호스트의 채팅 타임스탬프 이동도 없음 | `currentTime` 쓰기는 Netflix 오류 M7375, 우회는 내부 플레이어 API뿐 (금지) |
+| 47 | ~~(결정 66으로 대체)~~ Netflix는 재생 / 일시정지만 제어하고 seek하지 않음 (`MediaProviderAdapter.seekable = false`). 멤버에게 `manual` 상태로 "N초 늦음 · mm:ss로 직접 이동" 안내, 호스트의 채팅 타임스탬프 이동도 없음 | `currentTime` 쓰기는 Netflix 오류 M7375, 우회는 내부 플레이어 API뿐 (금지) |
 | 48 | side panel은 탭 하나(YouTube 또는 켜진 Netflix)를 따라가고 `RemoteAdapter`의 provider를 탭에 맞춤. 방에는 `as(provider)` view를 줘서 다른 provider 탭의 스냅샷은 null | 한 provider의 contentId를 다른 provider의 것으로 오인하지 않게 |
 | 49 | Netflix 채팅도 side panel 안 (별도 팝업 창 없음) | 사용자 결정 (Teleparty도 분리하지 않음). 토큰·소켓을 가진 페이지가 하나로 유지됨 |
 | 50 | Laftel도 Netflix와 같은 실험 기능: 기본 꺼짐, 선택 권한 `https://laftel.net/*`, 따라가는 탭에만 주입, 설정·방 첫 입장 팝업에서 위험을 보고 켬. 실험 provider는 각각 따로 켜고 끔 (`watch.ts` `EXPERIMENTAL`, ui `EXPERIMENTS`) | 개발자 정책 없음, 허용 여부 불명확 → 보수적 (사용자 확인·결정, `platform-policy/laftel.md`) |
@@ -71,6 +71,7 @@
 | 63 | 운영 경로: Cloudflare → 호스트의 Caddy(compose 밖, 사용자가 관리) → `127.0.0.1:8090`. Caddy는 Cloudflare 대역만 신뢰해 `CF-Connecting-IP`로 client IP를 정하고 `X-Forwarded-For`를 그 값으로 덮어씀. 서버는 `server.forward-headers-strategy=native`(Tomcat 기본 내부 프록시 = 사설·loopback만 신뢰) | 인증 요청 제한이 실제 사용자 IP 기준으로 동작. 앱 포트는 loopback에만 열려 외부에서 헤더를 위조할 수 없음 |
 | 64 | 서버가 30초마다 모든 WebSocket에 ping 프레임 | Cloudflare는 100초 동안 조용한 WebSocket을 끊음. 브라우저가 pong을 자동으로 보내 클라이언트 변경 없음 |
 | 65 | 클라이언트 운영 주소는 빌드 시 `.env.production`(`VITE_API_URL=https://sync.mirattic.com`). Desktop CSP는 운영·localhost 둘 다 허용. `v*` 태그 → Release 워크플로가 extension zip과 Desktop 설치 파일(macOS universal · Windows, 서명 없음)을 draft release로 | 로컬 E2E는 `VITE_API_URL=http://localhost:8080 pnpm build`로 덮어씀. 서명·공증은 인증서가 생길 때 |
+| 66 | Netflix도 seek함 (결정 47 대체, 2026-09-29 사용자 결정): side panel이 따라가는 Netflix 탭에만 `scripting.executeScript({ world: "MAIN" })`로 Netflix 내부 플레이어 API(`netflix.appContext…videoPlayer.seek`)를 호출 (`providers/netflix.ts` `seekInPage`). 실패하면 그 탭은 seek 불가로 보고 기존 "직접 이동" 안내로 돌아감. 켜기 안내 문구에 내부 기능 사용과 계정 위험을 명시 | 사용자 결정: Teleparty 등 기존 서비스와 같은 수준의 경험. 비공식 API라 예고 없이 깨질 수 있고, Netflix 약관 1.8 (v)(vi) 위반 소지 → 사용자 계정 위험. DRM · 스트림에는 손대지 않음. 스토어 공개 전 법률 검토 유지 (`platform-policy/netflix.md`) |
 
 ## 사용자 식별 (UID + Identity)
 
