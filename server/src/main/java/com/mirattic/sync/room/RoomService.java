@@ -53,6 +53,8 @@ public class RoomService {
 	static final int CHAT_HISTORY = 100;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
+	/** Laftel "item/episode", the two ids in its player URL. */
+	private static final Pattern LAFTEL_ID = Pattern.compile("\\d{1,10}/\\d{1,10}");
 	/** Host capture times older than this (or in the future) are replaced by the receive time. */
 	static final long MAX_CAPTURE_AGE_MS = 5_000;
 
@@ -256,6 +258,9 @@ public class RoomService {
 		}
 		if (content.provider() == MediaProvider.netflix && !NETFLIX_ID.matcher(content.contentId()).matches()) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid netflix id");
+		}
+		if (content.provider() == MediaProvider.laftel && !LAFTEL_ID.matcher(content.contentId()).matches()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid laftel id");
 		}
 	}
 

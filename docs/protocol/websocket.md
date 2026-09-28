@@ -32,7 +32,7 @@ null 필드는 JSON에서 생략된다.
 | `friend:update` | S→C | 없음 | 친구 요청 / 수락 / 거절 / 삭제 / 차단 시 양쪽에 전송. 클라이언트는 목록을 다시 조회 |
 | `error` | S→C | `{ reqId, code }` | code: `bad_json`, `bad_payload`, `unknown_type`, `rate_limited`, `not_member`, `not_host` |
 
-Extension은 사용자가 동의한 뒤에만 `presence:update`에 시청 중인 YouTube 영상(과 Netflix 제어를 켠 경우 Netflix 콘텐츠)을 보낸다. 탭이 영상을 벗어나면 null.
+Extension은 사용자가 동의한 뒤에만 `presence:update`에 시청 중인 YouTube 영상(과 Netflix / Laftel 제어를 켠 경우 그 콘텐츠)을 보낸다. 탭이 영상을 벗어나면 null.
 
 ### Presence 공개 규칙 (`PresenceService.view`)
 
@@ -59,7 +59,7 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `watch:request` | S→C | `UserSummary` | 친구가 같이 보자고 요청함 (`POST /api/rooms/requests`). `userId` = 요청한 사람. 받은 사람은 초대(`POST /api/rooms` 또는 `/api/rooms/{id}/invites`)로 응답 |
 | `room:update` | S→C | 없음 | 참가 / 나감 / 방 닫힘 시 모든 멤버에게. 클라이언트는 `GET /api/rooms/{id}`로 다시 조회 (404면 닫힘) |
 | `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt }` | HOST만 (`not_host`). `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회 |
-| `playback:content-change` | C→S | `RoomContent` | HOST만. 호스트 플레이어의 영상이 바뀌었을 때 다음 명령 전에 보냄. 방 콘텐츠를 바꾸고 0초·일시정지로 초기화, version 증가 → `playback:update` + `room:update`. YouTube는 contentId가 11자 영상 ID, Netflix는 1–12자리 숫자여야 함 (`bad_payload`). playback 명령과 같은 초당 예산 |
+| `playback:content-change` | C→S | `RoomContent` | HOST만. 호스트 플레이어의 영상이 바뀌었을 때 다음 명령 전에 보냄. 방 콘텐츠를 바꾸고 0초·일시정지로 초기화, version 증가 → `playback:update` + `room:update`. YouTube는 contentId가 11자 영상 ID, Netflix는 1–12자리 숫자, Laftel은 `작품ID/에피소드ID`(각 1–10자리 숫자)여야 함 (`bad_payload`). playback 명령과 같은 초당 예산 |
 | `playback:update` | S→C | `PlaybackState` | 방에 참가한 연결 전부에게. envelope `version` = payload `version`, 방마다 1씩 증가 (DB 행 잠금으로 순서 보장) |
 | `sync:request` | C→S | 없음 (`reqId` 필수) | |
 | `sync:response` | S→C | `{ reqId }` | `serverTime`으로 시계 offset 추정: `offset = serverTime − (보낸 시각 + RTT/2)`, RTT가 가장 작은 샘플 사용 |

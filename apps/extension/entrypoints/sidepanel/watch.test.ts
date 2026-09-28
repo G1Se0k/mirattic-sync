@@ -11,7 +11,7 @@ const hold = <T>() => {
 };
 
 let tabs: Tab[];
-let netflixGranted: boolean;
+let granted: Set<string>; // optional host permissions the user gave
 let connects: number[];
 let listeners: Record<string, Listener[]>;
 /** When set, the next matching call waits for this instead of answering at once. */
@@ -27,7 +27,7 @@ vi.mock('wxt/browser', () => ({
   browser: {
     windows: { getCurrent: async () => ({ id: 1 }) },
     permissions: {
-      contains: async () => netflixGranted,
+      contains: async (q: { origins: string[] }) => q.origins.every((o) => granted.has(o)),
       onAdded: on('permissions.onAdded'),
       onRemoved: on('permissions.onRemoved'),
     },
@@ -77,6 +77,7 @@ const { watch } = await import('./watch');
 
 const YT = (id: number, active = false): Tab => ({ id, url: `https://www.youtube.com/watch?v=${'a'.repeat(10)}${id}`, active, windowId: 1 });
 const NF = (id: number, active = false): Tab => ({ id, url: `https://www.netflix.com/watch/8123456${id}`, active, windowId: 1 });
+const LAFTEL = (id: number, active = false): Tab => ({ id, url: `https://laftel.net/player/40522/4052${id}`, active, windowId: 1 });
 const OTHER = (id: number, active = false): Tab => ({ id, url: 'https://example.com/', active, windowId: 1 });
 const activate = (id: number) => {
   for (const t of tabs) t.active = t.id === id;
@@ -85,7 +86,7 @@ const followed = () => connects.at(-1);
 
 beforeEach(() => {
   tabs = [];
-  netflixGranted = true;
+  granted = new Set(['https://www.netflix.com/*']);
   connects = [];
   listeners = {};
   heldQuery = null;
@@ -146,14 +147,18 @@ describe('watch: which tab the side panel follows', () => {
     expect(connects).toEqual([2]);
   });
 
-  it('never connects to Netflix when it is turned off while the script is being injected', async () => {
-    tabs = [NF(1, true)];
+  it.each([
+    ['Netflix', NF, 'https://www.netflix.com/*'],
+    ['Laftel', LAFTEL, 'https://laftel.net/*'],
+  ] as const)('never connects to %s when it is turned off while the script is being injected', async (_, tab, origin) => {
+    granted.add(origin);
+    tabs = [tab(1, true)];
     heldInject = hold();
     const release = heldInject;
     const started = watch();
     await settle();
 
-    netflixGranted = false;
+    granted.delete(origin);
     await fire('permissions.onRemoved');
     await settle();
     release.resolve();
@@ -172,5 +177,22 @@ describe('watch: which tab the side panel follows', () => {
     await Promise.all([fire('tabs.onRemoved', 1), fire('tabs.onActivated', { tabId: 2, windowId: 1 })]);
     await settle();
     expect(followed()).toBe(3);
+  });
+
+  it('follows a Laftel tab only while Laftel is turned on, independently of Netflix', async () => {
+    tabs = [LAFTEL(1, true), NF(2)];
+    await watch();
+    expect(followed()).toBe(2); // Netflix is on, Laftel isn't: the active Laftel tab is invisible
+
+    granted.add('https://laftel.net/*');
+    await fire('permissions.onAdded');
+    await settle();
+    expect(followed()).toBe(1);
+
+    connects = [];
+    granted.delete('https://www.netflix.com/*'); // turning Netflix off leaves the Laftel tab alone
+    await fire('permissions.onRemoved');
+    await settle();
+    expect(connects).toEqual([]);
   });
 });

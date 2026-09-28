@@ -5,15 +5,20 @@ import type { MediaPresence, MediaProvider, RoomContent } from '@mirattic/types'
 import { RemoteAdapter } from '../../bridge';
 
 const YOUTUBE = 'https://www.youtube.com/';
-const NETFLIX = 'https://www.netflix.com/';
-// Experimental Netflix control (docs/platform-policy/netflix.md): off until the user grants this optional
-// host permission; while off, Netflix tabs are invisible to us and nothing is injected into them.
-const NETFLIX_ORIGINS = { origins: [`${NETFLIX}*`] };
-const NETFLIX_SCRIPT = '/content-scripts/netflix.js' as const;
+// Experimental control (docs/platform-policy/{netflix,laftel}.md): each is off until the user grants its
+// optional host permission; while off, its tabs are invisible to us and nothing is injected into them.
+const EXPERIMENTAL = {
+  netflix: { site: 'https://www.netflix.com/', script: '/content-scripts/netflix.js' },
+  laftel: { site: 'https://laftel.net/', script: '/content-scripts/laftel.js' },
+} as const;
+type Experimental = keyof typeof EXPERIMENTAL;
+const EXPERIMENTS = Object.keys(EXPERIMENTAL) as Experimental[];
+const isExperimental = (p: MediaProvider): p is Experimental => p in EXPERIMENTAL;
+const originsOf = (p: Experimental) => ({ origins: [`${EXPERIMENTAL[p].site}*`] });
 const PRESENCE_DELAY_MS = 300; // the server drops presence updates closer than 250ms
 
 /**
- * The extension's platform: follows the video tab of this window — YouTube, or Netflix once turned on;
+ * The extension's platform: follows the video tab of this window — YouTube, or Netflix / Laftel once turned on;
  * the active one, else the last one used, else any — and exposes it as the room player, "now watching"
  * and the user's presence.
  */
@@ -26,7 +31,8 @@ export async function watch(): Promise<Platform> {
   let presenceTimer: ReturnType<typeof setTimeout> | undefined;
   const subscribers = new Set<() => void>();
   const changed = () => subscribers.forEach((s) => s());
-  let netflixOn = await browser.permissions.contains(NETFLIX_ORIGINS);
+  const granted = () => Promise.all(EXPERIMENTS.map(async (p) => [p, await browser.permissions.contains(originsOf(p))] as const));
+  const on = new Set((await granted()).filter(([, ok]) => ok).map(([p]) => p));
 
   const sendPresence = () => {
     if (presenceTimer !== undefined) return;
@@ -50,10 +56,10 @@ export async function watch(): Promise<Platform> {
   });
 
   const providerOf = (url?: string): MediaProvider | null =>
-    url?.startsWith(YOUTUBE) ? 'youtube' : netflixOn && url?.startsWith(NETFLIX) ? 'netflix' : null;
+    url?.startsWith(YOUTUBE) ? 'youtube' : ([...on].find((p) => url?.startsWith(EXPERIMENTAL[p].site)) ?? null);
   const isVideoTab = (url?: string) => providerOf(url) !== null;
 
-  let binding = 0; // bumped by every bind and by turning Netflix off: a slower bind then gives up
+  let binding = 0; // bumped by every bind and by turning an experiment off: a slower bind then gives up
   let choosing = 0; // bumped by every pick() and every bind: a pick() whose lookups finish after that is stale
   let activations = 0; // tabs.onActivated order: a late lookup of an earlier activation is stale
   const bind = async (id: number, url?: string) => {
@@ -63,11 +69,11 @@ export async function watch(): Promise<Platform> {
     if (id === tabId && adapter.connected && adapter.provider === provider) return;
     tabId = id;
     const mine = ++binding;
-    // Netflix isn't in the manifest: only the tab we follow gets the script (it ignores a second injection).
-    if (provider === 'netflix') {
-      const injected = await browser.scripting.executeScript({ target: { tabId: id }, files: [NETFLIX_SCRIPT] }).catch(() => null);
+    // Experiments aren't in the manifest: only the tab we follow gets the script (it ignores a second injection).
+    if (isExperimental(provider)) {
+      const injected = await browser.scripting.executeScript({ target: { tabId: id }, files: [EXPERIMENTAL[provider].script] }).catch(() => null);
       // Turned off (or another tab chosen) while injecting: never connect, so nothing is read.
-      if (!injected || mine !== binding || !netflixOn) return;
+      if (!injected || mine !== binding || !on.has(provider)) return;
     }
     adapter.connect(id, provider);
   };
@@ -76,19 +82,20 @@ export async function watch(): Promise<Platform> {
   const pick = async (closing?: number) => {
     const mine = ++choosing;
     const [active] = await browser.tabs.query({ active: true, windowId });
-    const urls = netflixOn ? [`${YOUTUBE}*`, `${NETFLIX}*`] : [`${YOUTUBE}*`];
+    const urls = [`${YOUTUBE}*`, ...[...on].map((p) => `${EXPERIMENTAL[p].site}*`)];
     const any = (await browser.tabs.query({ windowId, url: urls })).find((t) => t.id !== closing);
     if (mine !== choosing) return;
     const tab = isVideoTab(active?.url) && active?.id !== closing ? active : any;
     if (tab?.id !== undefined) await bind(tab.id, tab.url);
   };
 
-  const setNetflix = (on: boolean) => {
-    if (on === netflixOn) return;
-    netflixOn = on;
-    if (!on) {
+  const setOn = (provider: Experimental, enabled: boolean) => {
+    if (enabled === on.has(provider)) return;
+    if (enabled) on.add(provider);
+    else {
+      on.delete(provider);
       binding++;
-      if (adapter.provider === 'netflix') {
+      if (adapter.provider === provider) {
         tabId = null;
         adapter.disconnect();
       }
@@ -96,9 +103,10 @@ export async function watch(): Promise<Platform> {
     changed();
     void pick();
   };
-  // Also when the user revokes the permission in Chrome's settings.
-  browser.permissions.onAdded.addListener(() => void browser.permissions.contains(NETFLIX_ORIGINS).then(setNetflix));
-  browser.permissions.onRemoved.addListener(() => void browser.permissions.contains(NETFLIX_ORIGINS).then(setNetflix));
+  // Also when the user revokes a permission in Chrome's settings.
+  const recheck = async () => (await granted()).forEach(([p, ok]) => setOn(p, ok));
+  browser.permissions.onAdded.addListener(() => void recheck());
+  browser.permissions.onRemoved.addListener(() => void recheck());
 
   browser.tabs.onActivated.addListener(async (info) => {
     if (info.windowId !== windowId) return;
@@ -132,7 +140,7 @@ export async function watch(): Promise<Platform> {
   await pick();
 
   return {
-    adapter: (provider) => (provider === 'youtube' || (provider === 'netflix' && netflixOn) ? adapter.as(provider) : undefined),
+    adapter: (provider) => (provider === 'youtube' || (isExperimental(provider) && on.has(provider)) ? adapter.as(provider) : undefined),
     nowWatching: () => content,
     subscribe: (onChange) => {
       subscribers.add(onChange);
@@ -143,12 +151,13 @@ export async function watch(): Promise<Platform> {
       if (s && presence) sendPresence(); // the server forgets presence on disconnect
     },
     experimental: {
-      enabled: (provider) => provider === 'netflix' && netflixOn,
+      enabled: (provider) => isExperimental(provider) && on.has(provider),
       // permissions.request needs the click that called this; Chrome shows its own prompt.
-      setEnabled: async (provider, on) => {
-        if (provider !== 'netflix') return false;
-        const ok = on ? await browser.permissions.request(NETFLIX_ORIGINS) : await browser.permissions.remove(NETFLIX_ORIGINS);
-        setNetflix(await browser.permissions.contains(NETFLIX_ORIGINS));
+      setEnabled: async (provider, enabled) => {
+        if (!isExperimental(provider)) return false;
+        const origins = originsOf(provider);
+        const ok = enabled ? await browser.permissions.request(origins) : await browser.permissions.remove(origins);
+        setOn(provider, await browser.permissions.contains(origins));
         return ok;
       },
     },

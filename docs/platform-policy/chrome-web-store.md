@@ -17,7 +17,7 @@
 | 항목 | 정책 내용 | 우리 구현 |
 |---|---|---|
 | 단일 목적 | "single purpose that is narrow and easy to understand" | 친구와 같이 보기 (재생 상태 동기화 + 채팅) 하나 |
-| 최소 권한 | "narrowest permissions necessary" | `sidePanel`, `storage` + `https://www.youtube.com/*`(content script와 같은 범위의 host_permissions, Phase 4). Phase 6: `scripting` + **선택** 권한 `https://www.netflix.com/*` (사용자가 Netflix 제어를 켤 때만 요청, `netflix.md`). API 서버는 CORS로 extension origin 허용 |
+| 최소 권한 | "narrowest permissions necessary" | `sidePanel`, `storage` + `https://www.youtube.com/*`(content script와 같은 범위의 host_permissions, Phase 4). Phase 6: `scripting` + **선택** 권한 `https://www.netflix.com/*` (사용자가 Netflix 제어를 켤 때만 요청, `netflix.md`). Phase 7: **선택** 권한 `https://laftel.net/*` (같은 방식, `laftel.md`). API 서버는 CORS로 extension origin 허용 |
 | 원격 코드 | MV3는 외부에서 실행 로직을 불러오면 안 됨. 데이터는 가능 | 모든 코드는 번들에 포함. 서버에서는 JSON만 받음 |
 | 사용자 데이터 범위 | 이름·이메일, 인증 정보, **웹 브라우징 활동**(보고 있는 사이트/콘텐츠) 모두 포함. 로컬 처리만 해도 공개 대상 | 계정(이메일·표시 이름), 친구 목록, 재생 상태. Phase 4부터 "시청 중인 콘텐츠" = 브라우징 활동 |
 | 개인정보처리방침 | 사용자 데이터를 다루면 대시보드에 게시 필수 | 스토어 제출 전 작성 (Phase 10) |

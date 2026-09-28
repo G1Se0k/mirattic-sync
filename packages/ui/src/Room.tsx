@@ -5,10 +5,10 @@ import { MockMediaProvider, publishHost, ServerClock, SyncFollower, type Followe
 import { api, platform } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
-import { NetflixControl, useNetflixControl } from "./Experimental";
+import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
 
-/** Netflix rooms already asked about in this session: the dialog comes up once per room, not on every entry. */
-const askedNetflix = new Set<string>();
+/** "room|provider" already asked about in this session: the dialog comes up once per room and provider, not on every entry. */
+const askedExperiment = new Set<string>();
 
 type Props = {
   roomId: string;
@@ -41,20 +41,23 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
   const content = room?.content;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
   const mock = content?.provider === "mock";
-  const netflixOn = useNetflixControl();
+  const experiment = isExperiment(content?.provider) ? content.provider : undefined;
+  const experimentOn = useExperiment(experiment);
   const player: MediaProviderAdapter | undefined = useMemo(
     () =>
       !content ? undefined
         : mock ? new MockMediaProvider({ contentId: content.contentId, title: content.title, durationMs: content.durationMs ?? 600_000 })
         : platform.adapter?.(content.provider),
-    [content?.provider, mock && content?.contentId, netflixOn],
+    [content?.provider, mock && content?.contentId, experimentOn],
   );
-  const [askNetflix, setAskNetflix] = useState(false);
+  // Which provider the dialog asks about: the room may switch to another provider while it is open.
+  const [asking, setAsking] = useState<Experiment | null>(null);
   useEffect(() => {
-    if (content?.provider !== "netflix" || netflixOn !== false || askedNetflix.has(roomId)) return;
-    askedNetflix.add(roomId);
-    setAskNetflix(true);
-  }, [content?.provider, netflixOn, roomId]);
+    const key = `${roomId}|${experiment}`;
+    if (!experiment || experimentOn !== false || askedExperiment.has(key)) return;
+    askedExperiment.add(key);
+    setAsking(experiment);
+  }, [experiment, experimentOn, roomId]);
   // The content the host last announced. Set from the room only when the room's content changes, so a
   // render between announcing and the room refetch can't make the host announce (and reset) it twice.
   const announced = useRef<RoomContent | null>(null);
@@ -192,10 +195,10 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
         <button className="link danger" onClick={leave}>{isHost ? "방 닫기" : "방 나가기"}</button>
       </header>
       <h1>{room.content.title}</h1>
-      {askNetflix && (
+      {asking && asking === experiment && (
         <dialog open className="stack">
-          <h2>Netflix 제어 (실험)</h2>
-          <NetflixControl onDone={() => setAskNetflix(false)} />
+          <h2>{PROVIDER_NAMES[experiment]} 제어 (실험)</h2>
+          <ExperimentControl provider={experiment} onDone={() => setAsking(null)} />
         </dialog>
       )}
       <ul className="list">
@@ -212,7 +215,7 @@ export function Room({ roomId, me, socket, status, subscribe, onClose }: Props) 
         <MockPlayer player={player} isHost={isHost} clockReady={clockReady} sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} />
       ) : (
         <ProviderPlayer content={room.content} snapshot={snapshot} canPlay={player !== undefined} isHost={isHost}
-          sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} netflixOff={netflixOn === false} />
+          sync={describeSync(sync, clockReady)} lastCorrection={lastCorrection} experimentOff={!!experiment && experimentOn === false} />
       )}
       <Chat roomId={roomId} meId={me.id} members={room.members} socket={socket} status={status} subscribe={subscribe}
         position={async () => {
@@ -265,19 +268,19 @@ function MockPlayer({ player, isHost, clockReady, sync, lastCorrection }: Player
 }
 
 /** A real provider plays in the user's own page (e.g. a YouTube tab); this only shows where it stands. */
-function ProviderPlayer({ content, snapshot, canPlay, isHost, sync, lastCorrection, netflixOff }: PlayerProps & {
+function ProviderPlayer({ content, snapshot, canPlay, isHost, sync, lastCorrection, experimentOff }: PlayerProps & {
   content: RoomContent;
   snapshot: PlayerSnapshot | null;
   canPlay: boolean;
-  netflixOff: boolean;
+  experimentOff: boolean;
 }) {
   const url = watchUrl(content);
   const here = snapshot?.contentId === content.contentId;
   return (
     <section className="stack">
       <h2>{PROVIDER_NAMES[content.provider]}</h2>
-      {!canPlay && content.provider === "netflix" && netflixOff ? (
-        <p className="muted">Netflix 제어(실험)가 꺼져 있어 동기화하지 않습니다. 친구 목록 아래 "실험 기능"에서 켤 수 있습니다.</p>
+      {!canPlay && experimentOff ? (
+        <p className="muted">{PROVIDER_NAMES[content.provider]} 제어(실험)가 꺼져 있어 동기화하지 않습니다. 친구 목록 아래 "실험 기능"에서 켤 수 있습니다.</p>
       ) : !canPlay ? (
         <p className="muted">이 방은 Chrome 확장 프로그램의 side panel에서 함께 볼 수 있습니다.</p>
       ) : here && snapshot ? (

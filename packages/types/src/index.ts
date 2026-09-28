@@ -124,6 +124,8 @@ export type RoomContent = {
 
 const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const NETFLIX_ID = /^\d{1,12}$/;
+/** Laftel: "<item id>/<episode id>", both parts of its player URL. */
+const LAFTEL_ID = /^\d{1,10}\/\d{1,10}$/;
 
 /**
  * Where to watch a content, built from its provider-scoped id — never from a URL another user sent,
@@ -135,6 +137,9 @@ export function watchUrl(content: { provider: MediaProvider; contentId: string }
   }
   if (content.provider === "netflix" && NETFLIX_ID.test(content.contentId)) {
     return `https://www.netflix.com/watch/${content.contentId}`;
+  }
+  if (content.provider === "laftel" && LAFTEL_ID.test(content.contentId)) {
+    return `https://laftel.net/player/${content.contentId}`;
   }
   return undefined;
 }

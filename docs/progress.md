@@ -1,10 +1,21 @@
 # Current Phase
-Phase 6 — Netflix Experimental Adapter (완료, 2026-09-28)
+Phase 7 — Laftel Experimental Adapter (완료, 2026-09-28)
 
-이전: Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
+이전: Phase 6 (커밋 `f03134d`), Phase 5 (커밋 `1a14137`), Phase 4 (커밋 `1f79672`), Phase 3 (커밋 `6651a72`), Phase 2 (커밋 `104fdc4`), Phase 1 (커밋 `c4494fe`), Phase 0 (커밋 `300eb5f`)
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Phase 7
+- 정책: **사용자가 직접 확인** (2026-09-28) — 라프텔은 제3자 개발자 정책이 없고, 위험은 Netflix보다 낮다고 판단 → Netflix와 같은 방식으로 진행 (사용자 결정). Claude는 약관 원문을 열람하지 못해 조항 원문은 미기록 (`docs/platform-policy/laftel.md`)
+- **Extension**
+  - 선택 권한 `https://laftel.net/*`. 켤 때 요청, 끄면 반납. Netflix와 **따로** 켜고 끔
+  - `providers/laftel.ts`: `/player/<작품>/<에피소드>` ID, 탭 제목("… - 라프텔"에서 사이트 이름 제거), `<video>` 재생 상태. `entrypoints/laftel.content.ts`는 따라가는 탭에만 주입
+  - **재생 / 일시정지 / seek** 모두 동기화 (Netflix와 달리 알려진 차단 없음). 채팅 타임스탬프 이동도 됨
+  - `watch.ts`: Netflix 전용 상태를 실험 provider 집합(`EXPERIMENTAL`: 사이트 + 스크립트)으로 일반화. 경합 방지 카운터는 그대로
+- **packages/ui**: `Experimental.tsx`를 provider별로 (`ExperimentControl`, `useExperiment`, 설정에 provider마다 섹션). 방 첫 입장 팝업도 provider별
+- **types / Server**: Laftel contentId `"작품ID/에피소드ID"`(각 1–10자리 숫자) 검증 (전에는 검증 없음), `watchUrl` → `https://laftel.net/player/<id>`
+- 결정 50–52 (`plan.md`)
+
 ### Phase 6
 - 정책 확인: `docs/platform-policy/netflix.md` (2026-09-28, 이용약관 Last Updated 2026-04-10)
   - 약관 1.8(vi) "코드나 다른 제품을 삽입하거나 … 조작" 금지, 위반 시 **사용자 계정** 제한 가능 → 불명확 → 사용자 결정: 실험 기능, 기본 꺼짐, 사용자가 위험을 보고 켬
@@ -142,6 +153,12 @@ Phase 6 — Netflix Experimental Adapter (완료, 2026-09-28)
 - `POST /api/me/friend-code`로 재발급. 이메일 검색 API는 삭제
 - Desktop: "내 친구 코드" (복사, 확인 창을 거친 재발급), 코드 입력으로 친구 추가
 
+## Major Files Changed (Phase 7)
+- `apps/extension/{wxt.config.ts}`, `providers/{laftel,laftel.test,page-video}.ts`, `entrypoints/laftel.content.ts`, `entrypoints/sidepanel/{watch.ts,watch.test.ts}`
+- `packages/ui/src/{Experimental.tsx,Room.tsx,session.ts}`, `packages/types/src/index.ts`
+- `server/.../room/RoomService.java`, `RoomFlowTest.java`
+- `docs/platform-policy/{laftel.md,chrome-web-store.md}`, `docs/protocol/{rest,websocket}.md`, `docs/architecture/plan.md`
+
 ## Major Files Changed (Phase 6)
 - `apps/extension/{bridge.ts,wxt.config.ts,package.json}`, `providers/{page-video,youtube,netflix}.ts`, `entrypoints/netflix.content.ts`, `entrypoints/sidepanel/{watch.ts,watch.test.ts,main.tsx}`
 - `packages/ui/src/{Experimental.tsx,Room.tsx,Home.tsx,session.ts,App.css}`
@@ -195,6 +212,7 @@ Phase 6 — Netflix Experimental Adapter (완료, 2026-09-28)
 - 20. 친구 추가는 친구 코드로만 (이메일 검색 제거)
 - 19. 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 (OAuth 대비)
 - 21–28 (Phase 2): mock provider, playback/version DB 저장, 초대=멤버십, `room:update` 후 재조회, 서버 시각 기준 `capturedAt`, seek 구간 재확인, echo 억제 창 없음, 호스트 명령 모으기 + 초당 제한 — `plan.md` 참고
+- 50–52 (Phase 7): Laftel도 기본 꺼짐 · 선택 권한 · 따라가는 탭에만 주입(provider별 켜기), contentId `작품/에피소드`, Laftel은 seek함 — `plan.md` 참고
 - 45–49 (Phase 6): Netflix는 기본 꺼짐 · 선택 권한, 따라가는 탭에만 주입, 재생/일시정지만 (seek 안내), provider별 view, 채팅은 side panel — `plan.md` 참고
 - 41–44 (Phase 5): 합류는 요청 → 초대, 차단 시 호스트가 아닌 쪽이 빠짐, IN_ROOM 없음 · DND 보류, Desktop 트레이 · 알림 — `plan.md` 참고
 - 33–40 (Phase 4): YouTube는 사용자 탭의 `<video>` 제어, URL은 contentId로 생성, content-change, 광고 중 명령 없음, 동의 화면, Platform 주입, side panel ⇄ content script port, 채팅 저장 — `plan.md` 참고
@@ -202,6 +220,23 @@ Phase 6 — Netflix Experimental Adapter (완료, 2026-09-28)
 - 18. MySQL은 FK `ON DELETE CASCADE` 컬럼에 CHECK를 허용하지 않아, 자기 자신 대상 요청/차단 금지는 서비스 계층에서 검증
 
 ## Tests
+### Phase 7
+- `apps/extension` 8/8: `watch.test.ts` 추가 (Laftel은 켜졌을 때만 따라감, Netflix를 꺼도 Laftel 탭은 그대로 — 켜짐 확인·끌 때 provider 비교를 각각 되돌리면 실패 확인. "주입 중 끄면 연결 안 함"을 Netflix · Laftel 둘 다), `laftel.test.ts` 탭 제목 1
+- `RoomFlowTest`: Laftel contentId 형식 (REST `40522` → 400, `40522/40523` → 생성, WS `40522/../x`·`40522/` → `bad_payload`). 전체 server 39/39
+- client 3 · sync-core 14 · ui 3, `pnpm typecheck` / `pnpm build` ✅. 빌드된 manifest: host_permissions는 YouTube만, optional_host_permissions에 netflix · laftel, content_scripts는 YouTube만
+- 수동 E2E (Playwright Chromium 3개, laftel.net을 가짜 페이지(`<video>` 하나, 제목 "장송의 프리렌 1화 - 라프텔")로 route, 2026-09-28. 2개는 laftel 권한을 미리 넣은 빌드 복사본)
+  - 일반 빌드: laftel 권한 없음, 라프텔 탭을 따라가지 않음
+  - 켜진 호스트: 탭을 따라가고 친구에게 "Laftel · 장송의 프리렌 1화 시청 중"
+  - 꺼진 멤버: 라프텔 방 첫 입장 팝업 (라프텔 위험 문구) → "켜지 않고 계속" → 동기화 안 함 안내, 다시 들어가도 팝업 없음
+  - 켜진 멤버: "Laftel에서 이 영상 열기" → 재생·일시정지 반영, 호스트 seek 2:00 → 멤버 120.2s / 120.2s
+  - 호스트가 채팅 타임스탬프 클릭 → 확인 → 둘 다 이동
+  - Netflix E2E, YouTube E2E 재실행 통과 (일반화 회귀 없음)
+- **실제 라프텔 사이트·계정으로는 확인하지 않음** → Known Issues
+- Codex Sol 검증 1차 FAIL (2026-09-28, 검사 8개 모두 통과, blocking 1 · non-blocking 1) → 수정
+  - 방 첫 입장 안내를 방 ID로만 기억해, 같은 방이 다른 실험 provider로 바뀌면 그 provider 안내가 생략됨 → `방ID|provider`로 기억하고, 팝업은 묻는 provider가 방의 현재 provider일 때만 표시. UI에서는 방 player가 provider별 view라 방의 provider가 바뀌지 않아(결정 48) raw WS `content-change`로만 가능 → Room 컴포넌트 테스트 도구가 없어 자동 테스트 없음
+  - (non-blocking) Laftel 테스트 부족 → 주입 중 끄기 테스트를 Laftel에도 적용 (가드 둘 다 되돌리면 두 경우 모두 실패 확인). Laftel·Netflix E2E 재실행 통과
+- Codex Sol 재검증 1회차 **PASS** (검사 8개 통과 + `git diff --check`, 이전 지적 해결 확인). non-blocking 1: Laftel adapter의 URL ID 추출과 `<video>` 제어는 자동 테스트 없음 (Extension 테스트에 DOM 환경 없음, 서버·types 형식 검증과 E2E로만) → Known Issues
+
 ### Phase 6
 - `packages/sync-core` 14/14 (추가: seek할 수 없는 플레이어는 재생만 맞추고 이동할 위치를 알림, 1초 뒤 목표 갱신. 가드를 빼면 실패 확인)
 - `RoomFlowTest`: Netflix contentId 형식 (숫자가 아니면 400, 숫자면 생성)
@@ -343,6 +378,12 @@ Phase 6 — Netflix Experimental Adapter (완료, 2026-09-28)
   - 가입 → 이메일로 친구 요청 → 상대 화면에 실시간 표시 → 수락 → 온라인 표시 → 탭 닫으면 오프라인 → 새로고침해도 세션 유지 ✅
 
 ## Known Issues
+- **Phase 7**
+  - **라프텔 약관 조항 원문·개정일 미기록** (사용자 확인 결과만). 스토어 공개 전 원문 확인과 법률 검토 필요 (`laftel.md`)
+  - **실제 라프텔 사이트로 검증하지 않음**: 플레이어 URL 형식(`/player/<작품>/<에피소드>`), 탭 제목 형식, `<video>` 하나인지, `currentTime` seek가 라프텔 플레이어와 어긋나지 않는지 모두 가짜 페이지로만 확인. URL 형식이 다르면 extension · types · server 세 곳의 형식을 함께 수정
+  - 광고 감지 없음 (광고 회차가 있는지 미확인)
+  - Extension 단위 테스트에 DOM 환경이 없어 page adapter(URL ID 추출, `<video>` 제어)는 E2E로만 검증
+  - 다음 화 자동 재생 시 URL 변경은 YouTube처럼 content-change로 처리될 것으로 예상하지만 미검증
 - **Phase 6**
   - **실제 Netflix 계정으로 검증하지 않음**: `<video>` play/pause가 Netflix 플레이어 UI와 어긋나지 않는지, 탭 제목 형식, 다음 화 자동 재생 시 URL 변경, 선택자(`video` 하나) 모두 가짜 페이지로만 확인
   - Netflix 약관상 허용 여부 불명확 → **스토어 공개 전 법률 검토** (`netflix.md` 체크리스트). 스토어 빌드에서 Netflix를 빼는 선택지도 검토
@@ -403,7 +444,7 @@ Phase 6 — Netflix Experimental Adapter (완료, 2026-09-28)
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Next Task
-Phase 7 — Laftel Experimental Adapter (`Mirattic_Sync_PLAN.md`: Netflix와 동일하게 진행)
-1. 정책 확인: Laftel 이용약관 · 동시 재생 제한 (plan.md "정책 확인") → `docs/platform-policy/laftel.md` (확인 날짜). 불명확하면 보수적 선택 또는 사용자에게 보고
-2. 정책상 가능할 때만: `providers/laftel.ts` (`PageVideoAdapter` 재사용), 권한 · 주입 방식은 Netflix와 같은 기준으로 결정
-3. 계정·회선 제한 우회 금지 확인, 실험 기능 표시
+Phase 8 — Chat / Reaction Polish (`Mirattic_Sync_PLAN.md`)
+1. 현재 채팅(`Chat.tsx`, WS `chat:message`, `chat_messages`)에서 빠진 것 확인: 타임스탬프 메시지는 있음(Phase 4), 기록은 최근 100개
+2. 리액션 (WS 이벤트 + 저장 여부 결정), 읽지 않은 메시지 수, 방 알림 끄기(mute)
+3. 기록 더 불러오기 (페이지네이션) 필요 여부 판단

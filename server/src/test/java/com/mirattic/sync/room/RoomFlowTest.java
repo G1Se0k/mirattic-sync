@@ -122,6 +122,12 @@ class RoomFlowTest extends IntegrationTest {
 		call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
 				{"content":{"provider":"netflix","contentId":"81234567","title":"x"},"inviteIds":[]}""")
 				.andExpect(status().isOk());
+		call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"content":{"provider":"laftel","contentId":"40522","title":"x"},"inviteIds":[]}""")
+				.andExpect(status().isBadRequest());
+		call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"content":{"provider":"laftel","contentId":"40522/40523","title":"x"},"inviteIds":[]}""")
+				.andExpect(status().isOk());
 		String roomId = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
 				{"content":{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"First"},"inviteIds":["%s"]}"""
 				.formatted(friend.id()))).path("id").asString();
@@ -141,9 +147,10 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
 		hostWs.send(event("playback:content-change", roomId, "{\"provider\":\"youtube\"}"));
 		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
-		for (String netflixId : new String[] {"81a", "1234567890123"}) {
+		for (String[] bad : new String[][] {{"netflix", "81a"}, {"netflix", "1234567890123"},
+				{"laftel", "40522/../x"}, {"laftel", "40522/"}}) {
 			hostWs.send(event("playback:content-change", roomId, """
-					{"provider":"netflix","contentId":"%s","title":"x"}""".formatted(netflixId)));
+					{"provider":"%s","contentId":"%s","title":"x"}""".formatted(bad[0], bad[1])));
 			assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
 		}
 

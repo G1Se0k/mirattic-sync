@@ -55,6 +55,9 @@
 | 47 | Netflix는 재생 / 일시정지만 제어하고 seek하지 않음 (`MediaProviderAdapter.seekable = false`). 멤버에게 `manual` 상태로 "N초 늦음 · mm:ss로 직접 이동" 안내, 호스트의 채팅 타임스탬프 이동도 없음 | `currentTime` 쓰기는 Netflix 오류 M7375, 우회는 내부 플레이어 API뿐 (금지) |
 | 48 | side panel은 탭 하나(YouTube 또는 켜진 Netflix)를 따라가고 `RemoteAdapter`의 provider를 탭에 맞춤. 방에는 `as(provider)` view를 줘서 다른 provider 탭의 스냅샷은 null | 한 provider의 contentId를 다른 provider의 것으로 오인하지 않게 |
 | 49 | Netflix 채팅도 side panel 안 (별도 팝업 창 없음) | 사용자 결정 (Teleparty도 분리하지 않음). 토큰·소켓을 가진 페이지가 하나로 유지됨 |
+| 50 | Laftel도 Netflix와 같은 실험 기능: 기본 꺼짐, 선택 권한 `https://laftel.net/*`, 따라가는 탭에만 주입, 설정·방 첫 입장 팝업에서 위험을 보고 켬. 실험 provider는 각각 따로 켜고 끔 (`watch.ts` `EXPERIMENTAL`, ui `EXPERIMENTS`) | 개발자 정책 없음, 허용 여부 불명확 → 보수적 (사용자 확인·결정, `platform-policy/laftel.md`) |
+| 51 | Laftel contentId는 `"<작품 ID>/<에피소드 ID>"` (각 1–10자리 숫자), URL은 `https://laftel.net/player/<contentId>` | 플레이어 URL에 둘 다 필요. 서버·types가 같은 형식을 검증 |
+| 52 | Laftel은 seek함 (`seekable` 기본값) | Netflix M7375 같은 알려진 차단 없음. 실제 플레이어에서 문제가 보이면 `SEEKABLE`에서 끔 |
 
 ## 사용자 식별 (UID + Identity)
 
@@ -100,4 +103,4 @@ adapter는 `sourceUserId`/`version`을 알 수 없으므로 로컬 `PlayerSnapsh
 - Chrome Web Store 정책 — Phase 3 시작 시
 - YouTube (youtube.com 페이지의 `<video>` 제어가 API ToS 대상인지 불확실) — Phase 4 시작 시
 - Netflix 이용약관 — Phase 6 (2026-09-28, `platform-policy/netflix.md`)
-- Laftel 이용약관 / 동시 재생 제한 — Phase 7
+- Laftel 이용약관 / 동시 재생 제한 — Phase 7 (2026-09-28 사용자 확인, `platform-policy/laftel.md`. 조항 원문 미기록)

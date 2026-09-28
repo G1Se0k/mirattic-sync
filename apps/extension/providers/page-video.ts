@@ -7,7 +7,7 @@ const EVENTS = ['play', 'pause', 'seeked', 'playing', 'loadedmetadata'];
  * Subclasses hold the provider's page structure (selectors, URL format, ads) — only there.
  */
 export abstract class PageVideoAdapter implements MediaProviderAdapter {
-  abstract readonly provider: 'youtube' | 'netflix';
+  abstract readonly provider: 'youtube' | 'netflix' | 'laftel';
   private listeners = new Set<(s: PlayerSnapshot) => void>();
   private goneListeners = new Set<() => void>();
   private readonly stop: () => void;
