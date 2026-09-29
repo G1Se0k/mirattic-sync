@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser';
 import type { Socket } from '@mirattic/client';
 import type { Platform } from '@mirattic/ui';
-import type { MediaPresence, MediaProvider, RoomContent } from '@mirattic/types';
+import { contentTitle, type MediaPresence, type MediaProvider, type RoomContent } from '@mirattic/types';
 import { RemoteAdapter } from './bridge';
 import { describeMetadata, metadataInPage, type NetflixMetadata } from './providers/netflix';
 
@@ -90,7 +90,10 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     const m = netflixMeta.get(p.contentId);
     if (m) {
       if (p.series) runShow.set(p.series, m.showId);
-      return { ...p, title: describeMetadata(m), series: m.showId };
+      // Apart, so the friend list shows the title and the episode on their own lines; the room gets them joined.
+      // Page data without this episode yet (partial): the episode read from the player's title line stays.
+      const episode = m.episode !== undefined ? { season: m.season, episode: m.episode, episodeTitle: m.episodeTitle } : {};
+      return { ...p, title: m.title, ...episode, series: m.showId };
     }
     // The next episode of a run whose show is known: keep that show as the series until its own data is read,
     // so members follow it instead of being asked (and the title updates when the data arrives).
@@ -101,7 +104,7 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
   const show = (p: MediaPresence | null) => {
     presence = p;
     const next: RoomContent | null = p?.contentId
-      ? { provider: p.provider, contentId: p.contentId, title: p.title, durationMs: p.durationMs, canonicalUrl: p.canonicalUrl, series: p.series }
+      ? { provider: p.provider, contentId: p.contentId, title: contentTitle(p), durationMs: p.durationMs, canonicalUrl: p.canonicalUrl, series: p.series }
       : null;
     // Same object while the video is the same, as useSyncExternalStore requires.
     if (next?.contentId !== content?.contentId || next?.title !== content?.title || (next?.durationMs ?? 0) !== (content?.durationMs ?? 0)

@@ -45,7 +45,7 @@ Extension은 사용자가 동의한 뒤에만 `presence:update`에 시청 중인
 
 ### MediaPresence 검증 (서버)
 
-provider는 `youtube|netflix|laftel`, title 1–300자, `thumbnailUrl` / `canonicalUrl`은 `https://`만 허용(최대 2048자),
+provider는 `youtube|netflix|laftel`, title 1–300자, `channel`(YouTube 채널명, 결정 80) 200자 이하, `thumbnailUrl` / `canonicalUrl`은 `https://`만 허용(최대 2048자),
 숫자 필드는 0 이상.
 
 ## 확정된 이벤트 (Phase 2 — room / playback)
@@ -90,7 +90,7 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `room:read` | C→S | `{}` | 멤버만 (`not_member`). 지금까지 온 메시지를 읽음으로 표시하고 내 연결들에 `room:update` (목록 재조회). Extension은 패널을 닫아도 방에 들어가 있으므로(결정 69), 패널이 그 방을 보여 줄 때만 보냄 — 열 때, 보는 중 메시지가 올 때(0.5초 모아서), 화면을 닫을 때 |
 | `pause:request` | C→S, S→C | `{ reason? }` (200자 이하) | 결정 70. 멤버만 (호스트 `bad_payload`, 비멤버 `not_member`). 멤버·방마다 30초에 1번 (`rate_limited`). 서버는 호스트의 모든 연결로 같은 이름으로 보냄: envelope `userId` = 요청한 멤버, `roomId`, payload `{ reason }`(앞뒤 공백 제거) |
 | `chat:message` | S→C | `ChatMessage` `{ id, roomId, userId, text, mediaPositionMs?, kind?, createdAt, deleted }` | **방의 모든 멤버의 연결**에게 (참가하지 않은 멤버, 보낸 사람 포함). envelope `userId` = 보낸 사람. 기록은 `GET /api/rooms/{id}/messages`. 리액션(`reaction:add`)은 결정 78로 없어짐 → `unknown_type` |
-| `chat:log` | S→C | `ChatMessage` (`kind` 있음) | 결정 78. 방에 참가 중인 연결에게만 (나머지는 기록에서 봄). `kind`: `join` / `leave`(`text` = 그때 이름; 첫 연결이 방에 들어올 때, 마지막 연결이 나간 뒤 10초 유예가 지나면), `play` / `pause`(호스트 명령으로 재생 상태가 바뀔 때만, 위치 포함. 일시정지는 3초 붙잡아 두고 그 안에 재생이 오면 움직였을 때만 `seek` 한 줄 — 시크바 끌기, 결정 79), `seek`(3초 안에 같은 호스트의 seek가 이어지면 같은 `id`의 줄을 새 위치로 다시 보냄 → 클라이언트는 교체), `content`(`text` = 새 영상 제목), `kick` / `host`(`text` = 내보낸 멤버 / 새 호스트 이름, 결정 79). 읽지 않은 수·알림·삭제·신고 대상 아님 |
+| `chat:log` | S→C | `ChatMessage` (`kind` 있음) | 결정 78. 방에 참가 중인 연결에게만 (나머지는 기록에서 봄). `kind`: `join` / `leave`(`text` = 그때 이름; 첫 연결이 방에 들어올 때, 마지막 연결이 나간 뒤 10초 유예가 지나면), `play` / `pause`(호스트 명령으로 재생 상태가 바뀔 때만, 위치 포함. 일시정지는 3초 붙잡아 두고 그 안에 재생이 오면 움직였을 때만 `seek` 한 줄 — 시크바 끌기, 결정 79), `seek`(위치가 2초 이상 바뀐 이동마다 새 줄, 결정 80), `content`(`text` = 새 영상 제목), `kick` / `host`(`text` = 내보낸 멤버 / 새 호스트 이름, 결정 79). 읽지 않은 수·알림·삭제·신고 대상 아님 |
 
 읽지 않은 수: 서버는 `room:join`, `room:leave`, 연결 끊김 때 그 멤버의 읽음 위치(`last_read_seq`)를 방의 마지막 메시지 순번으로 기록한다 (메시지 저장과 같은 방 행 잠금 아래). `room:leave`·끊김은 기록한 뒤에 `room:update`를 보낸다.
 

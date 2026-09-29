@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ChatMessage, RoomContent, RoomView } from "@mirattic/types";
-import { roomToInvite, settleUnlisted } from "./Home";
+import { describe as lines, roomToInvite, settleUnlisted } from "./Home";
 import { latest } from "./format";
 
 const content = (provider: RoomContent["provider"], contentId: string): RoomContent => ({ provider, contentId, title: contentId });
@@ -57,4 +57,15 @@ it("keeps a message whose room a list doesn't show yet, and notifies it once a l
   expect(after.listed).toEqual([[invited, first]]);
   expect(after.waiting).toEqual([]);
   expect(settleUnlisted([first], [invited], "new").listed).toEqual([]); // open: the room shows it
+});
+
+it("shows a YouTube friend's channel above the title, and a Netflix friend's episode below it", () => {
+  const media = { title: "킹덤", playing: true, capturedAt: 0 };
+  expect(lines({ status: "WATCHING", media: { ...media, provider: "youtube", channel: "채널" } }))
+    .toEqual(["채널", "YouTube · 킹덤 시청 중"]);
+  expect(lines({ status: "WATCHING", media: { ...media, provider: "netflix", season: 1, episode: 3 } }))
+    .toEqual(["Netflix · 킹덤 시청 중", "3화"]);
+  expect(lines({ status: "WATCHING", media: { ...media, provider: "netflix", season: 2, episode: 3 } })[1]).toBe("시즌 2 3화");
+  expect(lines({ status: "WATCHING", media: { ...media, provider: "netflix" } })[1]).toBe(""); // a film: an empty line
+  expect(lines({ status: "WATCHING", media: { ...media, provider: "laftel", episode: 12 } })).toEqual(["Laftel · 킹덤 시청 중", "12화"]);
 });

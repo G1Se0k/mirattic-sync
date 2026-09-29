@@ -461,11 +461,10 @@ class RoomFlowTest extends IntegrationTest {
 		hostWs.send(event("playback:seek", roomId, command.formatted(60_000, now)));
 		JsonNode seek = friendWs.nextOfType("chat:log").path("payload");
 		assertThat(seek.path("kind").asString()).isEqualTo("seek");
-		hostWs.send(event("playback:seek", roomId, command.formatted(90_000, now))); // dragging: the same line moves
-		JsonNode moved = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(moved.path("id").asString()).isEqualTo(seek.path("id").asString());
-		assertThat(moved.path("mediaPositionMs").asLong()).isEqualTo(90_000);
-		assertThat(moved.path("editedAt").asLong()).isPositive();
+		hostWs.send(event("playback:seek", roomId, command.formatted(90_000, now))); // each move its own line
+		JsonNode next = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(next.path("id").asString()).isNotEqualTo(seek.path("id").asString());
+		assertThat(next.path("mediaPositionMs").asLong()).isEqualTo(90_000);
 		hostWs.send(event("playback:pause", roomId, command.formatted(91_000, now)));
 		// A pause is held a moment (it may be a seek-bar drag); past the hold it is written.
 		for (int i = 0; i < 100 && !loggedKinds(host, roomId).contains("pause"); i++) {
@@ -512,7 +511,7 @@ class RoomFlowTest extends IntegrationTest {
 		hostWs.send(event("playback:seek", roomId, command.formatted(35_100, t)));
 		hostWs.send(event("playback:play", roomId, command.formatted(35_100, t)));
 		JsonNode small = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(small.path("kind").asString()).isEqualTo("seek"); // the same line moves (within its merge window)
+		assertThat(small.path("kind").asString()).isEqualTo("seek");
 		assertThat(small.path("mediaPositionMs").asLong()).isEqualTo(35_100);
 
 		// Leaving: only once the last connection is gone for the grace period (0 here, two sweeps).
@@ -539,7 +538,8 @@ class RoomFlowTest extends IntegrationTest {
 		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
 		List<String> kinds = new ArrayList<>();
 		history.forEach(m -> kinds.add(m.path("kind").asString()));
-		assertThat(kinds).containsExactly("join", "join", "play", "seek", "pause", "seek", "content", "play", "seek", "leave");
+		assertThat(kinds).containsExactly("join", "join", "play", "seek", "seek", "pause", "seek", "content", "play", "seek", "seek",
+				"seek", "leave");
 		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/messages/" + play.path("id").asString(), host.accessToken(), null)
 				.andExpect(status().isNotFound());
 		assertThat(myRoom(friend).path("unread").asLong()).isZero();

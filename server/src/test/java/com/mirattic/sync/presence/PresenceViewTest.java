@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 
 class PresenceViewTest {
 
-	private final MediaPresence watching = new MediaPresence(MediaProvider.youtube, "abc", "Title", null, null,
+	private final MediaPresence watching = new MediaPresence(MediaProvider.youtube, "abc", "Title", "Channel", null, null,
 			null, null, "https://www.youtube.com/watch?v=abc", 1_432_000L, 3_000_000L, true, 1L);
 
 	@Test

@@ -8,7 +8,10 @@ export type MediaProvider = (typeof MEDIA_PROVIDERS)[number];
 export type MediaPresence = {
   provider: MediaProvider;
   contentId?: string;
+  /** Netflix: the show or film's own title, with `season` / `episode` / `episodeTitle` apart (see `contentTitle`). */
   title: string;
+  /** YouTube: the channel, as its watch page shows it. */
+  channel?: string;
   episodeTitle?: string;
   season?: number;
   episode?: number;
@@ -128,8 +131,6 @@ export type ChatMessage = {
   text: string;
   mediaPositionMs?: number;
   kind?: ChatLogKind | null;
-  /** A seek line moved to a later seek: of two copies of one id, the larger `editedAt` is the current one. */
-  editedAt?: number | null;
   createdAt: number;
   /** Deleted for everyone: `text` is empty, shown as a placeholder. */
   deleted?: boolean;
@@ -233,3 +234,14 @@ export type ServerEvent<T = unknown> = {
   serverTime: number;
   payload: T;
 };
+
+/** "Title 시즌 2 3화 · Name": a presence's full title, as a room's content title. */
+export function contentTitle(p: Pick<MediaPresence, "title" | "season" | "episode" | "episodeTitle">) {
+  return `${p.title}${episodeLabel(p) ? ` ${episodeLabel(p)}` : ""}${p.episodeTitle ? ` · ${p.episodeTitle}` : ""}`.slice(0, 300);
+}
+
+/** "3화", or "시즌 2 3화" past the first season; "" without an episode number. */
+export function episodeLabel(p: Pick<MediaPresence, "season" | "episode">) {
+  if (p.episode === undefined) return "";
+  return p.season !== undefined && p.season > 1 ? `시즌 ${p.season} ${p.episode}화` : `${p.episode}화`;
+}

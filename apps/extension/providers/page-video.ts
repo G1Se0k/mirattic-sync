@@ -16,6 +16,14 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
   /** The content id in the URL, or null off a watch page. */
   protected abstract contentId(): string | null;
   protected abstract title(): string;
+  /** The episode number, where the page names one apart from the title (Laftel's "Title 3화"). */
+  protected episode(): number | undefined {
+    return undefined;
+  }
+  /** The channel the video belongs to, where the provider has one (YouTube). */
+  protected channel(): string | undefined {
+    return undefined;
+  }
   /** What the content belongs to (playlist, show): members follow the host within it without being asked. */
   protected series(): string | undefined {
     return undefined;
@@ -41,7 +49,7 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
       this.tick();
       // series: a playlist joined mid-video; the video's state: a next episode whose events we missed; the title
       const video = this.video();
-      const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}|${video ? video.paused : 'none'}|${this.title()}`;
+      const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}|${video ? video.paused : 'none'}|${this.title()}|${this.channel()}|${this.episode()}`;
       if (key !== last) {
         last = key;
         this.emit();
@@ -91,6 +99,8 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
       provider: this.provider,
       contentId: s.contentId,
       title: this.title(),
+      channel: this.channel(),
+      episode: this.episode(),
       canonicalUrl: watchUrl({ provider: this.provider, contentId: s.contentId }),
       series: this.series(),
       // During an ad the <video> reports the ad's time and length.

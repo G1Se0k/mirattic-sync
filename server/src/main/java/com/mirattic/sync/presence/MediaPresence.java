@@ -11,6 +11,8 @@ public record MediaPresence(
 		@NotNull MediaProvider provider,
 		@Size(max = 512) String contentId,
 		@NotBlank @Size(max = 300) String title,
+		/** The YouTube channel, as the watch page shows it. */
+		@Size(max = 200) String channel,
 		@Size(max = 300) String episodeTitle,
 		@PositiveOrZero Integer season,
 		@PositiveOrZero Integer episode,
@@ -22,7 +24,7 @@ public record MediaPresence(
 		long capturedAt) {
 
 	MediaPresence withoutPosition() {
-		return new MediaPresence(provider, contentId, title, episodeTitle, season, episode, thumbnailUrl,
+		return new MediaPresence(provider, contentId, title, channel, episodeTitle, season, episode, thumbnailUrl,
 				canonicalUrl, null, durationMs, playing, capturedAt);
 	}
 }

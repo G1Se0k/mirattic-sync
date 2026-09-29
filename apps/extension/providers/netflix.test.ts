@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { creditsButton, describeMetadata, episodeRun, metadataInPage, playerTitle, seekInPage, TitleLines } from './netflix';
+import { creditsButton, describeMetadata, episodeRun, metadataInPage, playerTitle, seekInPage, splitPlayerTitle, TitleLines } from './netflix';
 
 const g = globalThis as { window?: unknown };
 afterEach(() => delete g.window);
@@ -105,4 +105,11 @@ it("finds Netflix's watch-credits button", () => {
   const root = { querySelector: (q: string) => ((asked = q), button) } as unknown as ParentNode;
   expect(creditsButton(root)).toBe(button);
   expect(asked).toContain('watch-credits-seamless-button');
+});
+
+it("splits the player's title line into the title and the episode", () => {
+  expect(splitPlayerTitle('킹덤 · S2:E3 · 제3화')).toEqual({ title: '킹덤', season: 2, episode: 3, episodeTitle: '제3화' });
+  expect(splitPlayerTitle('어떤 쇼 · E7')).toEqual({ title: '어떤 쇼', episode: 7 });
+  expect(splitPlayerTitle('기생충')).toEqual({ title: '기생충' });
+  expect(splitPlayerTitle('E3')).toEqual({ title: 'E3' }); // never an empty title
 });

@@ -15,7 +15,7 @@ public class ChatMessage {
 	 * "join" / "leave" (text = the name then), "play" / "pause" / "seek" by the host, "content" (text = the title).
 	 */
 	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, String kind,
-			long createdAt, Long editedAt, boolean deleted) {
+			long createdAt, boolean deleted) {
 	}
 
 	@Id
@@ -30,7 +30,6 @@ public class ChatMessage {
 	@Column(insertable = false, updatable = false)
 	private long seq;
 	private long createdAt;
-	private Long editedAt;
 
 	protected ChatMessage() {
 	}
@@ -46,7 +45,7 @@ public class ChatMessage {
 	}
 
 	View view() {
-		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, editedAt, deleted);
+		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted);
 	}
 
 	/** Deleted for everyone: the text is gone, a placeholder keeps its place in the chat. */
@@ -54,13 +53,6 @@ public class ChatMessage {
 		this.deleted = true;
 		this.text = "";
 		this.mediaPositionMs = null;
-	}
-
-	/** A seek right after another seek by the same host moves that line instead of adding one. */
-	void moveTo(Long mediaPositionMs) {
-		this.mediaPositionMs = mediaPositionMs;
-		// Strictly increasing, so two moves in one millisecond still order.
-		this.editedAt = Math.max(System.currentTimeMillis(), editedAt == null ? 0 : editedAt + 1);
 	}
 
 	boolean isLog() {

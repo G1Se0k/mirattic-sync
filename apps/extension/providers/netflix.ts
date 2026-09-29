@@ -1,4 +1,4 @@
-import { watchUrl } from '@mirattic/types';
+import { contentTitle, watchUrl } from '@mirattic/types';
 import { PageVideoAdapter } from './page-video';
 import { TitleLines } from './title-lines';
 
@@ -78,6 +78,13 @@ export class NetflixAdapter extends PageVideoAdapter {
     return this.lines.see(this.contentId(), playerTitle()) ?? title();
   }
 
+  // Until (or without) Netflix's page data, the player's title line "킹덤 · S2:E3 · 제3화" gives the title and
+  // the episode apart, for the friend list's two lines; the background replaces them once the data is read.
+  override async getPresence() {
+    const p = await super.getPresence();
+    return p && { ...p, ...splitPlayerTitle(p.title) };
+  }
+
   // Writing currentTime makes Netflix stop with error M7375: the side panel seeks with `seekInPage` instead.
   override async seek() {}
 }
@@ -129,6 +136,21 @@ export function playerTitle(root: ParentNode = document) {
   return text || null;
 }
 
+/** "킹덤 · S2:E3 · 제3화" → title, season, episode, episode title; a line without "S<n>:E<n>" / "E<n>" stays whole. */
+export function splitPlayerTitle(line: string): { title: string; season?: number; episode?: number; episodeTitle?: string } {
+  const parts = line.split(' · ');
+  const at = parts.findIndex((p, i) => i > 0 && /^(?:S\d{1,3}\s*:\s*)?E\d{1,4}$/i.test(p));
+  if (at < 0) return { title: line };
+  const m = /^(?:S(\d+)\s*:\s*)?E(\d+)$/i.exec(parts[at]!)!;
+  const episodeTitle = parts.slice(at + 1).join(' · ');
+  return {
+    title: parts.slice(0, at).join(' · '),
+    ...(m[1] ? { season: Number(m[1]) } : {}),
+    episode: Number(m[2]),
+    ...(episodeTitle ? { episodeTitle } : {}),
+  };
+}
+
 /** The tab title if it names the title ("Title - Netflix"); the watch page is often just "Netflix". */
 export function title(raw = document.title) {
   return raw.replace(/\s*[-|]\s*Netflix$/, '').trim().slice(0, 300).replace(/^Netflix$/, '') || 'Netflix 콘텐츠';
@@ -176,8 +198,7 @@ export function metadataInPage(id: string): NetflixMetadata | null {
   }
 }
 
-/** "Title S2:E3 Name" for the room and the friend list. */
+/** "Title 시즌 2 3화 · Name", as the room shows it. */
 export function describeMetadata(m: NetflixMetadata) {
-  const where = m.season !== undefined && m.episode !== undefined ? ` 시즌 ${m.season} ${m.episode}화` : '';
-  return `${m.title}${where}${m.episodeTitle ? ` · ${m.episodeTitle}` : ''}`.slice(0, 300);
+  return contentTitle(m);
 }

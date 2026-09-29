@@ -13,6 +13,7 @@ import type {
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
+import { episodeLabel } from "@mirattic/types";
 import { api, platform, SOCKET_URL } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
@@ -396,7 +397,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 <Avatar name={f.user.displayName} on={f.presence.status !== "OFFLINE"} />
                 <div className="grow">
                   <div className="name ellipsis">{f.user.displayName}</div>
-                  <div className="muted ellipsis">{describe(f.presence)}</div>
+                  {describe(f.presence).map((line, i) => <div key={i} className="muted ellipsis">{line || "\u00a0"}</div>)}
                 </div>
                 <span className="actions">
                   {f.presence.status === "WATCHING" && (
@@ -624,13 +625,19 @@ const nothing = () => null;
 
 
 
-function describe(p: PresenceView) {
-  if (p.status === "OFFLINE") return "오프라인";
-  if (!p.media) return "온라인";
+/**
+ * A friend's status lines: YouTube adds the channel above the title; Netflix and Laftel put the episode ("3화") below it,
+ * an empty line when it has none.
+ */
+export function describe(p: PresenceView): string[] {
+  if (p.status === "OFFLINE") return ["오프라인"];
+  if (!p.media) return ["온라인"];
   const m = p.media;
-  const title = m.episodeTitle ? `${m.title} · ${m.episodeTitle}` : m.title;
   const position = m.positionMs !== undefined ? ` · ${clock(m.positionMs)}` : "";
-  return `${PROVIDER_NAMES[m.provider]} · ${title} ${m.playing ? "시청 중" : "일시정지"}${position}`;
+  const line = (title: string) => `${PROVIDER_NAMES[m.provider]} · ${title} ${m.playing ? "시청 중" : "일시정지"}${position}`;
+  if (m.provider === "youtube") return [m.channel ?? "", line(m.title)];
+  if (m.provider === "netflix" || m.provider === "laftel") return [line(m.title), episodeLabel(m)];
+  return [line(m.episodeTitle ? `${m.title} · ${m.episodeTitle}` : m.title)];
 }
 
 function rank(p: PresenceView) {

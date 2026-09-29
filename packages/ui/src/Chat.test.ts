@@ -14,16 +14,10 @@ it("orders messages of the same millisecond by id, as the server pages them", ()
   expect(merge([msg("b", 10)], [msg("a", 10)]).map((m) => m.id)).toEqual(["a", "b"]);
 });
 
-it("shows room logs, and a moved seek line replaces the earlier one in place", () => {
+it("shows room logs", () => {
   const seek = { ...msg("s", 2), text: "", kind: "seek" as const, mediaPositionMs: 60_000 };
-  const event = (payload: ChatMessage) => ({ type: "chat:log", roomId: "r", serverTime: 0, payload });
-  let list = receive([msg("a", 1)], [], event(seek));
-  list = receive(list, [], event({ ...seek, mediaPositionMs: 90_000 }));
-  expect(list.map((m) => [m.id, m.mediaPositionMs])).toEqual([["a", undefined], ["s", 90_000]]);
-  // A history read before the move, answering after it, doesn't move the line back.
-  const moved = { ...seek, mediaPositionMs: 90_000, editedAt: 5 };
-  expect(merge([moved], [seek])[0].mediaPositionMs).toBe(90_000);
-  expect(merge([seek], [moved])[0].mediaPositionMs).toBe(90_000);
+  const list = receive([msg("a", 1)], [], { type: "chat:log", roomId: "r", serverTime: 0, payload: seek });
+  expect(list.map((m) => [m.id, m.kind ?? null])).toEqual([["a", null], ["s", "seek"]]);
   expect(logText({ ...msg("j", 1), text: "민수", kind: "join" })).toBe("민수님이 들어왔습니다");
   expect(logText({ ...msg("c", 1), text: "2화", kind: "content" })).toBe("호스트가 영상을 바꿨습니다: 2화");
   expect(logText({ ...msg("s", 1), text: "", kind: "seek", mediaPositionMs: 754_000 })).toBe("호스트가 12:34로 이동했습니다");

@@ -187,13 +187,9 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
 /** Oldest first; id breaks ties, as the server pages. */
 const order = (x: ChatMessage, y: ChatMessage) => x.createdAt - y.createdAt || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
 
-/** Union by id, oldest first; `b` wins for an id in both, unless `a`'s copy was edited later (a moved seek line). */
+/** Union by id, oldest first; `b` wins for an id in both. */
 export function merge(a: ChatMessage[], b: ChatMessage[]) {
-  const byId = new Map(a.map((m) => [m.id, m]));
-  for (const m of b) {
-    const had = byId.get(m.id);
-    if (!had || (m.editedAt ?? 0) >= (had.editedAt ?? 0)) byId.set(m.id, m);
-  }
+  const byId = new Map([...a, ...b].map((m) => [m.id, m]));
   return [...byId.values()].sort(order);
 }
 
@@ -217,7 +213,6 @@ export function reconcile(page: ChatMessage[], shown: ChatMessage[]) {
  * was overtaken by its deletion must not come back when it arrives.
  */
 export function receive(list: ChatMessage[], deleted: ChatDeleted[], event: ServerEvent) {
-  // A log line may come again with the same id (a seek moved on): the newer one replaces it.
   if (event.type === "chat:message" || event.type === "chat:log") return tombstone(merge(list, [event.payload as ChatMessage]), deleted);
   if (event.type !== "chat:delete") return list;
   deleted.push(event.payload as ChatDeleted);

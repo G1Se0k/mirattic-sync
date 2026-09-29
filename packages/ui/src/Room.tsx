@@ -9,9 +9,6 @@ import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
 import { Avatar, IconButton } from "./Icons";
 
-/** "room|provider" already asked about in this session: the dialog comes up once per room and provider, not on every entry. */
-const askedExperiment = new Set<string>();
-
 /** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
 const invitedAt = new Map<string, number>();
 const INVITE_COOLDOWN_MS = 30_000;
@@ -51,14 +48,12 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     onClose();
   }, [s.closed, handle, onClose]);
 
-  // Which provider the dialog asks about: the room may switch to another provider while it is open.
+  // Asked on every entry while the control is off (and when the room moves to such a site). Which provider it
+  // asks about: the room may switch to another provider while it is open.
   const [asking, setAsking] = useState<Experiment | null>(null);
   useEffect(() => {
-    const key = `${roomId}|${experiment}`;
-    if (!experiment || experimentOn !== false || askedExperiment.has(key)) return;
-    askedExperiment.add(key);
-    setAsking(experiment);
-  }, [experiment, experimentOn, roomId]);
+    if (experiment && experimentOn === false) setAsking(experiment);
+  }, [experiment, experimentOn]);
 
   if (!room || !content) {
     return (

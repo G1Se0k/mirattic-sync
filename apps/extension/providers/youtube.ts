@@ -8,6 +8,8 @@ const VIDEO = '#movie_player video';
 const PLAYER = '#movie_player';
 const AD_CLASS = 'ad-showing';
 const TITLE_LINK = '#movie_player a.ytp-title-link';
+/** The owner line under the video; the watch page element names the video it shows (`video-id`). */
+const CHANNEL = (id: string) => `ytd-watch-flexy[video-id="${id}"] ytd-video-owner-renderer ytd-channel-name a`;
 
 /** The video id in a player link (`…/watch?v=<id>`), if any. */
 export function playerVideoId(href: string) {
@@ -48,6 +50,13 @@ export class YouTubeAdapter extends PageVideoAdapter {
 
   protected override series() {
     return playlist();
+  }
+
+  // Only when the page says it is this video's: a channel shown during a switch may be the previous video's.
+  protected override channel() {
+    const id = this.contentId();
+    const name = id ? document.querySelector(CHANNEL(id))?.textContent?.trim() : undefined;
+    return name ? name.slice(0, 200) : undefined;
   }
 }
 

@@ -20,14 +20,26 @@ export class LaftelAdapter extends PageVideoAdapter {
     return id && watchUrl({ provider: 'laftel', contentId: id }) ? id : null;
   }
 
+  // "장송의 프리렌 3화" → title "장송의 프리렌" and episode 3, so the friend list shows them on two lines (as for
+  // Netflix); the room's title joins them again (contentTitle).
   protected title() {
-    return title();
+    return splitEpisode(title()).title;
+  }
+
+  protected override episode() {
+    return splitEpisode(title()).episode;
   }
 
   // The item id: every episode of a show shares it.
   protected override series() {
     return PLAYER_PATH.exec(location.pathname)?.[1];
   }
+}
+
+/** A trailing whole "N화" as the episode; anything else (no number, "1.5화") stays in the title. */
+export function splitEpisode(full: string): { title: string; episode?: number } {
+  const m = /^(.+?)\s+(\d{1,4})화$/.exec(full);
+  return m ? { title: m[1]!, episode: Number(m[2]) } : { title: full };
 }
 
 /** The tab title without the site name ("Title - 라프텔") or "다시보기"; just the site name → a generic label. */

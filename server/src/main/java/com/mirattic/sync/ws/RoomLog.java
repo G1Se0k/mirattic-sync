@@ -142,7 +142,7 @@ public class RoomLog {
 			if (a.state().playing()) { // played again soon: one "seek" line if it moved, else nothing
 				held.remove(roomId);
 				if (h.moved) {
-					post(roomId, rooms.logSeek(roomId, me, a.landed()));
+					post(roomId, rooms.log(roomId, me, "seek", "", a.landed()));
 				}
 			}
 			return;
@@ -153,7 +153,7 @@ public class RoomLog {
 		} else if (!a.wasPlaying() && a.state().playing()) {
 			post(roomId, rooms.log(roomId, me, "play", "", a.landed()));
 		} else if (jumped) {
-			post(roomId, rooms.logSeek(roomId, me, a.landed()));
+			post(roomId, rooms.log(roomId, me, "seek", "", a.landed()));
 		}
 	}
 
@@ -195,7 +195,7 @@ public class RoomLog {
 	private void writeHeld(String roomId, Held h) {
 		post(roomId, rooms.log(roomId, h.userId, "pause", "", h.pausedPosition));
 		if (h.moved) {
-			post(roomId, rooms.logSeek(roomId, h.userId, h.position));
+			post(roomId, rooms.log(roomId, h.userId, "seek", "", h.position));
 		}
 	}
 

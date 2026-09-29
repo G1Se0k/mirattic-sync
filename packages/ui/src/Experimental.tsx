@@ -10,7 +10,7 @@ export const EXPERIMENTS = ["netflix", "laftel"] as const satisfies MediaProvide
 export type Experiment = (typeof EXPERIMENTS)[number];
 export const isExperiment = (p?: MediaProvider): p is Experiment => EXPERIMENTS.includes(p as Experiment);
 
-const RISK: Record<Experiment, { terms: ReactNode; does: string; site: string }> = {
+const RISK: Record<Experiment, { terms: ReactNode; reads: string; does: string; site: string }> = {
   netflix: {
     terms: (
       <>
@@ -19,6 +19,7 @@ const RISK: Record<Experiment, { terms: ReactNode; does: string; site: string }>
         <strong> Netflix가 내 계정을 제한할 수 있습니다.</strong>
       </>
     ),
+    reads: "주소의 콘텐츠 ID, 탭 제목과 플레이어 제목 줄, Netflix 페이지 안의 재생 정보(작품 ID·작품명·시즌·화·화 제목), 재생 위치·상태",
     does: "재생 / 일시정지 / 위치 이동 (Netflix 내부 기능이 바뀌어 이동이 안 되면 어디로 옮길지 안내)",
     site: "netflix.com",
   },
@@ -30,6 +31,7 @@ const RISK: Record<Experiment, { terms: ReactNode; does: string; site: string }>
         <strong> 라프텔이 약관 위반으로 보고 내 계정을 제한할 수 있습니다.</strong>
       </>
     ),
+    reads: "주소의 작품·에피소드 ID, 탭 제목(작품명·화수), 재생 위치·상태",
     does: "재생 / 일시정지 / 위치 이동",
     site: "laftel.net",
   },
@@ -63,7 +65,7 @@ export function ExperimentControl({ provider, onDone }: { provider: Experiment; 
     <div className="stack">
       <p>{risk.terms} 실험 기능이며 위험은 사용자에게 있습니다.</p>
       <ul className="muted">
-        <li>읽는 것: 주소의 콘텐츠 ID, 탭 제목, 재생 위치·상태 (공개 범위 설정대로 친구·방에 공유)</li>
+        <li>읽는 것: {risk.reads} (공개 범위 설정대로 친구·방에 공유)</li>
         <li>하는 것: {risk.does}</li>
         <li>광고가 나오는 재생은 지원하지 않습니다</li>
         <li>켜면 Chrome이 {risk.site} 접근 권한을 묻고, 끄면 권한을 돌려줍니다</li>

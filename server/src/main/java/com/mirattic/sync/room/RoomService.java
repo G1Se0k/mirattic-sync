@@ -60,8 +60,6 @@ public class RoomService {
 	static final int MAX_INVITES = 7;
 	static final int MAX_CHAT_LENGTH = 1000;
 	static final int CHAT_HISTORY = 100;
-	/** A seek this soon after the host's last seek line moves that line (dragging the seek bar is many seeks). */
-	static final long SEEK_LOG_MERGE_MS = 3_000;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
 	/** Laftel "item/episode", the two ids in its player URL. */
@@ -281,28 +279,6 @@ public class RoomService {
 		};
 		room.applyPlayback(me, positionMs, playing, at);
 		return new Applied(room.playback(), command, wasPlaying, expected, room.positionAt(at));
-	}
-
-	/**
-	 * A "seek" line at `positionMs`: or, right after this host's last seek line (still the room's latest), that line
-	 * moved there, so dragging the seek bar stays one line. null if the room is gone.
-	 */
-	@Transactional
-	public ChatMessage.View logSeek(String roomId, String me, long positionMs) {
-		if (rooms.findForUpdate(roomId).isEmpty()) {
-			return null;
-		}
-		ChatMessage last = messages.findTopByRoomIdOrderBySeqDesc(roomId)
-				.filter(m -> "seek".equals(m.view().kind()) && m.view().userId().equals(me)
-						// From its last move: a long drag stays one line.
-						&& System.currentTimeMillis() - (m.view().editedAt() != null ? m.view().editedAt() : m.view().createdAt())
-								< SEEK_LOG_MERGE_MS)
-				.orElse(null);
-		if (last == null) {
-			return messages.save(new ChatMessage(roomId, me, "", positionMs, "seek")).view();
-		}
-		last.moveTo(positionMs);
-		return last.view();
 	}
 
 	/** A room log line (decision 78); null if the room is gone. */
