@@ -228,9 +228,10 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
         return ok;
       },
     },
-    open: (url) => {
-      // Reuse the synced tab so the room keeps following it; the user asked for this navigation.
-      const opened = tabId !== null ? browser.tabs.update(tabId, { url, active: true }) : Promise.reject();
+    open: (url, newTab) => {
+      // Reuse the synced tab so the room keeps following it; the user asked for this navigation. A new tab
+      // (the room's "open" button) is followed once it loads, being the window's active video tab.
+      const opened = tabId !== null && !newTab ? browser.tabs.update(tabId, { url, active: true }) : Promise.reject();
       opened.catch(() => browser.tabs.create({ url, windowId }));
     },
   };

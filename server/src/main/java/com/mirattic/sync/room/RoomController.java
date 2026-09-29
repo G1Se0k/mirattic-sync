@@ -1,5 +1,6 @@
 package com.mirattic.sync.room;
 
+import com.mirattic.sync.ws.RoomLog;
 import com.mirattic.sync.ws.ServerEvent;
 import com.mirattic.sync.ws.SocketHub;
 import jakarta.validation.Valid;
@@ -43,6 +44,9 @@ class RoomController {
 	record Mute(@NotNull Boolean muted) {
 	}
 
+	record HandOver(@NotBlank String userId) {
+	}
+
 	record JoinByCode(@NotBlank @Size(max = 16) String code) {
 	}
 
@@ -58,10 +62,12 @@ class RoomController {
 
 	private final RoomService rooms;
 	private final SocketHub hub;
+	private final RoomLog roomLog;
 
-	RoomController(RoomService rooms, SocketHub hub) {
+	RoomController(RoomService rooms, SocketHub hub, RoomLog roomLog) {
 		this.rooms = rooms;
 		this.hub = hub;
+		this.roomLog = roomLog;
 	}
 
 	/** Creates a room hosted by the caller; invitees get `room:invite` with the room. */
@@ -184,6 +190,29 @@ class RoomController {
 		// it before their refetch returns and no message notifies by the old setting meanwhile.
 		hub.sendEvent(jwt.getSubject(), new ServerEvent("room:update", id, null, null, System.currentTimeMillis(),
 				Map.of("muted", body.muted())));
+	}
+
+	/**
+	 * The host removes a member (decision 79): their connections leave the room at once, everyone (them included)
+	 * refetches; the removed member then gets 404 and is back on their list. 403 not host, 400 self, 404 not a member.
+	 */
+	@DeleteMapping("/{id}/members/{userId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void kick(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @PathVariable String userId) {
+		RoomService.Logged kicked = rooms.kick(jwt.getSubject(), id, userId);
+		hub.removeFromRoom(id, userId);
+		roomLog.forget(id, userId);
+		roomLog.post(id, kicked.log());
+		rooms.announce(id, kicked.memberIds());
+	}
+
+	/** The host makes another member the host (decision 79); they become a member. */
+	@PostMapping("/{id}/host")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void handOver(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody HandOver body) {
+		RoomService.Logged handed = rooms.handOver(jwt.getSubject(), id, body.userId());
+		roomLog.post(id, handed.log());
+		rooms.announce(id, handed.memberIds());
 	}
 
 	/** Leave (or decline an invite). The host leaving closes the room; members then get 404 on refetch. */

@@ -20,7 +20,7 @@ import { MyFriendCode, Settings } from "./Settings";
 import { localRoom } from "./localRoom";
 import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
-import { Avatar, IconButton } from "./Icons";
+import { Avatar, IconButton, ProviderIcon } from "./Icons";
 import { ExperimentControl, isExperiment, useExperiment } from "./Experimental";
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
@@ -34,6 +34,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [openRoom, setOpenRoom] = useState<string | null>(() => platform.activeRoom?.() ?? null);
   const [screen, setScreen] = useState<"home" | "settings">("home");
   const [adding, setAdding] = useState(false);
+  const [showCode, setShowCode] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [joining, setJoining] = useState(false);
   /** A site opened by "방 생성" with nothing watched: the room is made once a video of it plays. */
@@ -307,7 +308,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   }
 
   return (
-    <>
+    <div className="home">
       <header className="topbar">
         <span className="wordmark grow">Mirattic <span>Sync</span></span>
         <span className={`dot ${status === "open" ? "on" : ""}`} title={status === "open" ? "연결됨" : "연결 중"} />
@@ -319,10 +320,13 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         {notice && <p className="muted">{notice}</p>}
         <div className="card">
           {watching ? (
-            <>
-              <div className="muted">지금 보는 영상 · {PROVIDER_NAMES[watching.provider]}</div>
-              <div className="ellipsis"><strong>{watching.title}</strong></div>
-            </>
+            <div className="row">
+              <ProviderIcon provider={watching.provider} />
+              <div className="grow">
+                <div className="muted">지금 보는 영상 · {PROVIDER_NAMES[watching.provider]}</div>
+                <div className="ellipsis"><strong>{watching.title}</strong></div>
+              </div>
+            </div>
           ) : (
             <div className="muted">YouTube · Netflix · Laftel 영상을 열면 친구와 같이 볼 수 있습니다.</div>
           )}
@@ -349,6 +353,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 const mine = host?.user.id === me.id;
                 return (
                   <li key={r.id} className={`friend${r.id === activeRoom ? " card active" : ""}`}>
+                    <ProviderIcon provider={r.content.provider} />
                     <div className="grow">
                       <div className="ellipsis">
                         <span className="name">{r.content.title}</span>
@@ -381,7 +386,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           </div>
           {adding && (
             <div className="stack">
-              <MyFriendCode me={me} />
               <AddFriend onSent={() => { setAdding(false); void reload(); }} />
             </div>
           )}
@@ -436,7 +440,21 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           </section>
         )}
       </main>
-    </>
+      <footer className="me-bar">
+        {showCode && <MyFriendCode me={me} />}
+        <div className="friend">
+          <Avatar name={me.displayName} on={status === "open"} />
+          <div className="grow">
+            <div className="name ellipsis">{me.displayName} <span className="muted">(나)</span></div>
+            <div className="muted ellipsis">
+              {watching ? `${PROVIDER_NAMES[watching.provider]} · ${watching.title}` : status === "open" ? "온라인" : "연결 중"}
+              {me.presenceVisibility === "OFF" && " · 친구에게 숨김"}
+            </div>
+          </div>
+          <IconButton icon="hash" label={showCode ? "친구 코드 닫기" : "내 친구 코드"} onClick={() => setShowCode((v) => !v)} />
+        </div>
+      </footer>
+    </div>
   );
 }
 

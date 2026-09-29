@@ -2,11 +2,17 @@ package com.mirattic.sync.room;
 
 import com.mirattic.sync.presence.MediaProvider;
 import com.mirattic.sync.user.FriendCode;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Entity
@@ -30,6 +36,11 @@ public class Room {
 	private long createdAt;
 	/** Joining by code (decision 77). */
 	private String code;
+	/** Kicked by the host (decision 79): not back by the code; the host's invite lifts it. */
+	@ElementCollection
+	@CollectionTable(name = "room_bans", joinColumns = @JoinColumn(name = "room_id"))
+	@Column(name = "user_id")
+	private Set<String> banned = new HashSet<>();
 
 	protected Room() {
 	}
@@ -52,6 +63,10 @@ public class Room {
 	public String getCode() { return code; }
 
 	void newCode() { this.code = FriendCode.generate(); }
+
+	boolean isBanned(String userId) { return banned.contains(userId); }
+	void ban(String userId) { banned.add(userId); }
+	void unban(String userId) { banned.remove(userId); }
 
 	RoomContent content() {
 		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl, series);

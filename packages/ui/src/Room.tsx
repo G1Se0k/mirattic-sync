@@ -83,6 +83,19 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     }
   }
 
+  /** Host only (decision 79). The room's refetch (room:update) shows the result. */
+  async function manage(name: string, action: "host" | "kick", userId: string) {
+    const question = action === "host"
+      ? `${name}님에게 호스트를 넘길까요? 이후 재생은 ${name}님의 플레이어를 따라갑니다.`
+      : `${name}님을 방에서 내보낼까요? 다시 초대하기 전에는 방 코드로도 들어올 수 없습니다.`;
+    if (!confirm(question)) return;
+    try {
+      await (action === "host" ? api.makeHost(roomId, userId) : api.kickMember(roomId, userId));
+    } catch {
+      alert(action === "host" ? "호스트를 넘기지 못했습니다." : "내보내지 못했습니다.");
+    }
+  }
+
   async function leave() {
     if (!confirm(isHost ? "방을 닫을까요? 모든 멤버가 나가게 됩니다." : "방에서 나갈까요?")) return;
     try {
@@ -122,6 +135,12 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
               {m.role === "HOST" && <span className="muted">· 호스트</span>}
               {m.user.id !== me.id && (
                 <IconButton icon="flag" label="신고" onClick={() => setReporting({ id: m.user.id, name: m.user.displayName })} />
+              )}
+              {isHost && m.user.id !== me.id && (
+                <>
+                  <IconButton icon="crown" label="호스트 넘기기" onClick={() => void manage(m.user.displayName, "host", m.user.id)} />
+                  <IconButton icon="userMinus" tone="danger" label="내보내기" onClick={() => void manage(m.user.displayName, "kick", m.user.id)} />
+                </>
               )}
             </span>
           ))}
@@ -305,7 +324,7 @@ function PlayerStatus({ content, s, isHost, experimentOff, onRequestPause }: {
         ) : (
           <span className="muted grow">{snapshot ? "탭에서 다른 영상을 보고 있습니다." : "영상이 열린 탭이 없습니다."}</span>
         )}
-        {offerOpen && <IconButton icon="external" label={`${name}에서 이 영상 열기`} onClick={() => platform.open(url!)} />}
+        {offerOpen && <IconButton icon="external" label={`${name}에서 이 영상 열기`} onClick={() => platform.open(url!, true)} />}
         {!isHost && <IconButton icon="pause" label="일시정지 요청" disabled={cooldown > 0} onClick={onRequestPause} />}
       </div>
       {s.canPlay && (

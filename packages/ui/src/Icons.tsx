@@ -1,4 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { MediaProvider } from "@mirattic/types";
+import { PROVIDER_NAMES } from "./format";
 
 // A small stroke icon set (24px grid, drawn at 16px), inline so no icon font or package is needed.
 const PATHS = {
@@ -42,6 +44,7 @@ const PATHS = {
       <circle cx="19" cy="12" r="1" />
     </>
   ),
+  crown: <path d="M3 18h18M4 8l4 4 4-7 4 7 4-4-2 10H6z" />,
   close: <path d="M18 6L6 18M6 6l12 12" />,
   copy: (
     <>
@@ -89,6 +92,23 @@ export function IconButton({ icon, label, tone, ...rest }: ButtonHTMLAttributes<
     <button type="button" className={`icon-button${tone ? ` ${tone}` : ""}`} aria-label={label} title={label} {...rest}>
       <Icon name={icon} />
     </button>
+  );
+}
+
+/** A streaming site's mark: its initial on its color (not the site's logo). */
+const PROVIDER_MARKS: Record<MediaProvider, { letter: string; color: string }> = {
+  youtube: { letter: "Y", color: "#e62117" },
+  netflix: { letter: "N", color: "#b20710" },
+  laftel: { letter: "L", color: "#816bff" },
+  mock: { letter: "M", color: "#8a8a86" },
+};
+
+export function ProviderIcon({ provider }: { provider: MediaProvider }) {
+  const mark = PROVIDER_MARKS[provider];
+  return (
+    <span className="provider" style={{ background: mark.color }} title={PROVIDER_NAMES[provider]} aria-label={PROVIDER_NAMES[provider]}>
+      {mark.letter}
+    </span>
   );
 }
 

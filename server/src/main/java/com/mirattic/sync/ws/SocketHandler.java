@@ -225,10 +225,12 @@ class SocketHandler extends TextWebSocketHandler {
 				if (content == null) {
 					return;
 				}
-				RoomService.Applied changed = rooms.changeContent(me, roomId, content);
-				if (changed != null) {
-					hub.sendToRoom(roomId, playbackEvent(roomId, changed.state()));
-					roomLog.post(roomId, changed.log());
+				synchronized (roomLog.order(roomId)) { // logged in the order applied
+					RoomService.Changed changed = rooms.changeContent(me, roomId, content);
+					if (changed != null) {
+						hub.sendToRoom(roomId, playbackEvent(roomId, changed.state()));
+						roomLog.contentChanged(roomId, changed.state().version(), changed.log());
+					}
 				}
 				rooms.announce(roomId, rooms.memberIds(roomId)); // members refetch the room's new content
 			}
@@ -245,10 +247,14 @@ class SocketHandler extends TextWebSocketHandler {
 				}
 				RoomService.Command command = RoomService.Command.valueOf(
 						type.substring("playback:".length()).toUpperCase(Locale.ROOT));
-				RoomService.Applied applied = rooms.playback(me, roomId, command, position.asLong(), capturedAt.asLong());
-				// Delivery order across threads isn't guaranteed; clients drop versions they've passed.
-				hub.sendToRoom(roomId, playbackEvent(roomId, applied.state()));
-				roomLog.post(roomId, applied.log());
+				// Applied and logged in one order per room (two host connections at once): the log sees every
+				// transition in version order. Delivery order across threads isn't guaranteed; clients drop
+				// versions they've passed.
+				synchronized (roomLog.order(roomId)) {
+					RoomService.Applied applied = rooms.playback(me, roomId, command, position.asLong(), capturedAt.asLong());
+					hub.sendToRoom(roomId, playbackEvent(roomId, applied.state()));
+					roomLog.playback(roomId, me, applied);
+				}
 			}
 		}
 	}

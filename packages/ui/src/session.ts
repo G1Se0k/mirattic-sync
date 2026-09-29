@@ -44,8 +44,11 @@ export type Platform = {
     /** Call from a click: turning on may ask for a browser permission. Changes are announced via `subscribe`. */
     setEnabled(provider: MediaProvider, on: boolean): Promise<boolean>;
   };
-  /** Opens a watch page (built with `watchUrl`, never a URL from another user). */
-  open(url: string): void;
+  /**
+   * Opens a watch page (built with `watchUrl`, never a URL from another user). `newTab`: always in a new tab
+   * (the user's own click); otherwise the extension reuses the tab it follows (the room following the host).
+   */
+  open(url: string, newTab?: boolean): void;
   /** A system notification, shown only while the app isn't focused. */
   notify?(title: string, body: string): void;
 };

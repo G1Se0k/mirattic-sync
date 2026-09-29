@@ -174,7 +174,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
         return ok && (await browser.permissions.contains(origins)) === on;
       },
     },
-    open: (url) => send({ op: 'open', url }),
+    open: (url, newTab) => send({ op: 'open', url, newTab }),
   };
   return { api, platform };
 }

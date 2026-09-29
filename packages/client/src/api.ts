@@ -178,6 +178,10 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
       authed<RoomView>("POST", "/api/rooms", { content, inviteIds }),
     /** Host only: adds friends to an existing room; they get `room:invite`. */
     inviteToRoom: (id: string, userIds: string[]) => authed<RoomView>("POST", `/api/rooms/${id}/invites`, { userIds }),
+    /** Host only (decision 79): removes a member, who can't come back by the room's code until invited. */
+    kickMember: (id: string, userId: string) => authed<void>("DELETE", `/api/rooms/${id}/members/${encodeURIComponent(userId)}`),
+    /** Host only (decision 79): makes another member the host. */
+    makeHost: (id: string, userId: string) => authed<void>("POST", `/api/rooms/${id}/host`, { userId }),
     /** Asks an online friend to watch together; they get `watch:request`. 409 offline, 429 asked recently. */
     requestWatch: (friendId: string) => authed<void>("POST", "/api/rooms/requests", { friendId }),
     rooms: () => authed<RoomView[]>("GET", "/api/rooms"),

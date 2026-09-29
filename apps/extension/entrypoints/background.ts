@@ -225,7 +225,7 @@ export default defineBackground(() => {
           break;
         case 'open':
           console.info('[mirattic] opening from the panel', m.url);
-          platform?.open(m.url);
+          platform?.open(m.url, m.newTab);
           break;
       }
     });

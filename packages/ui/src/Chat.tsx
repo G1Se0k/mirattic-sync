@@ -142,7 +142,11 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
         {messages.map((item) =>
           item.kind ? (
             <li key={item.id} className={`log${fresh.has(item.id) ? " fresh" : ""}`}>
-              {logText(item)} {item.kind !== "join" && item.kind !== "leave" && timestamp(item.mediaPositionMs)}
+              {item.kind === "seek" && onSeek && item.mediaPositionMs !== undefined ? (
+                <>호스트가 {timestamp(item.mediaPositionMs)}로 이동했습니다</>
+              ) : (
+                <>{logText(item)} {(item.kind === "play" || item.kind === "pause") && timestamp(item.mediaPositionMs)}</>
+              )}
             </li>
           ) : (
             <li key={item.id} className={`row${fresh.has(item.id) ? " fresh" : ""}`}>
@@ -244,8 +248,10 @@ export function logText(m: ChatMessage) {
     case "leave": return `${m.text}님이 나갔습니다`;
     case "play": return "호스트가 재생했습니다";
     case "pause": return "호스트가 일시정지했습니다";
-    case "seek": return "호스트가 위치를 옮겼습니다";
+    case "seek": return `호스트가 ${clock(m.mediaPositionMs ?? 0)}로 이동했습니다`;
     case "content": return `호스트가 영상을 바꿨습니다: ${m.text}`;
+    case "kick": return `${m.text}님이 내보내졌습니다`;
+    case "host": return `${m.text}님이 호스트가 되었습니다`;
     default: return "";
   }
 }

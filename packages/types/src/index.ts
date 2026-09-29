@@ -115,9 +115,10 @@ export type FriendRequests = { incoming: FriendRequestView[]; outgoing: FriendRe
 
 /**
  * A room log line (decision 78), shown centered: someone came in / went out (`text` = their name then), or the
- * host played / paused / moved / changed the video (`text` = its title). Sent as `chat:log`.
+ * host played / paused / moved / changed the video (`text` = its title), removed a member or handed the room over
+ * (`kick` / `host`, `text` = that member's name, decision 79). Sent as `chat:log`.
  */
-export type ChatLogKind = "join" | "leave" | "play" | "pause" | "seek" | "content";
+export type ChatLogKind = "join" | "leave" | "play" | "pause" | "seek" | "content" | "kick" | "host";
 
 /** A chat line someone wrote (`chat:message`), or a room log (`kind`, `chat:log`). */
 export type ChatMessage = {

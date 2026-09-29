@@ -26,6 +26,8 @@ it("shows room logs, and a moved seek line replaces the earlier one in place", (
   expect(merge([seek], [moved])[0].mediaPositionMs).toBe(90_000);
   expect(logText({ ...msg("j", 1), text: "민수", kind: "join" })).toBe("민수님이 들어왔습니다");
   expect(logText({ ...msg("c", 1), text: "2화", kind: "content" })).toBe("호스트가 영상을 바꿨습니다: 2화");
+  expect(logText({ ...msg("s", 1), text: "", kind: "seek", mediaPositionMs: 754_000 })).toBe("호스트가 12:34로 이동했습니다");
+  expect(logText({ ...msg("k", 1), text: "민수", kind: "kick" })).toBe("민수님이 내보내졌습니다");
 });
 
 it("drops a deleted message, or every message of a deleted account", () => {

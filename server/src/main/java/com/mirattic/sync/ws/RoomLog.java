@@ -2,6 +2,7 @@ package com.mirattic.sync.ws;
 
 import com.mirattic.sync.room.ChatMessage;
 import com.mirattic.sync.room.RoomService;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,32 +10,91 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * "X님이 들어왔습니다 / 나갔습니다" in the room's chat (plan.md decision 78). A user joins with their first
- * connection in the room; they leave once none of their connections has been in it for the grace period, so a
- * reconnect or the extension's worker restarting writes nothing.
+ * The room's log lines in its chat (plan.md decision 78).
+ * Joins and leaves: a user joins with their first connection in the room; they leave once none of their
+ * connections has been in it for the grace period, so a reconnect or the extension's worker restarting writes nothing.
+ * The host's playback: play / pause when the state flips, a seek when the position jumps. Dragging the seek bar
+ * pauses, moves and plays again, so a pause is held for a moment: a play soon after it makes one "seek" line (if
+ * it moved) instead of "pause" + "play".
  * ponytail: in memory, single instance; after a server restart everyone reconnecting is logged as joining again.
- * Joins and leaves are written under one lock (few per minute), so a leave can't land after a newer join.
+ * Lines are written under one lock (a few per minute), so a leave can't land after a newer join.
  */
 @Component
 public class RoomLog {
 
+	/** A "seek" landing this close to where playback would be anyway (e.g. a title update) is no move: no line. */
+	static final long MIN_JUMP_MS = 2_000;
+
 	private final RoomService rooms;
 	private final SocketHub hub;
 	private final long graceMs;
+	private final long pauseHoldMs;
 	/** "room|user" logged as in the room → since when none of their connections is in it (0 = present). */
 	private final Map<String, Long> inRoom = new ConcurrentHashMap<>();
+	/** Room → the lock its playback commands are applied and logged under (SocketHandler). */
+	private final Map<String, Object> order = new ConcurrentHashMap<>();
+	/** Room → the newest playback version logged: a command applied earlier but arriving here later is dropped. */
+	private final Map<String, Long> versions = new ConcurrentHashMap<>();
+	/** Room → a pause not written yet (guarded by this). */
+	private final Map<String, Held> held = new ConcurrentHashMap<>();
 
-	RoomLog(RoomService rooms, SocketHub hub, @Value("${app.room-log-grace-ms:10000}") long graceMs) {
+	private static final class Held {
+		final String userId;
+		final long pausedPosition;
+		/** Where playback was before the pause: every later position is judged against it, so small steps add up. */
+		final long baseline;
+		long position;
+		long lastAt;
+		boolean moved;
+
+		Held(String userId, long pausedPosition, long baseline, long position, long lastAt, boolean moved) {
+			this.userId = userId;
+			this.pausedPosition = pausedPosition;
+			this.baseline = baseline;
+			this.position = position;
+			this.lastAt = lastAt;
+			this.moved = moved;
+		}
+	}
+
+	RoomLog(RoomService rooms, SocketHub hub, @Value("${app.room-log-grace-ms:10000}") long graceMs,
+			@Value("${app.room-log-pause-hold-ms:3000}") long pauseHoldMs) {
 		this.rooms = rooms;
 		this.hub = hub;
 		this.graceMs = graceMs;
+		this.pauseHoldMs = pauseHoldMs;
+	}
+
+	/**
+	 * Held while a room's playback command is applied and then logged, so lines follow the versions' order.
+	 * Taken before the room row and this log's lock, never while holding them.
+	 * ponytail: one object per room ever played in, until restart.
+	 */
+	Object order(String roomId) {
+		return order.computeIfAbsent(roomId, k -> new Object());
 	}
 
 	/** A connection of `userId` joined the room. */
 	synchronized void joined(String roomId, String userId) {
-		if (inRoom.put(roomId + "|" + userId, 0L) == null) {
-			post(roomId, rooms.logPresence(roomId, userId, "join"));
+		String key = roomId + "|" + userId;
+		if (inRoom.containsKey(key)) {
+			inRoom.put(key, 0L);
+			return;
 		}
+		if (!hub.presentIn(roomId).contains(userId)) {
+			return;
+		}
+		// Written only while still a member, checked under the room lock a kick also holds: no join after a kick.
+		ChatMessage.View line = rooms.logPresence(roomId, userId, "join");
+		if (line != null) {
+			inRoom.put(key, 0L);
+			post(roomId, line);
+		}
+	}
+
+	/** Kicked: their "kick" line says it, no "leave" line after it. */
+	public synchronized void forget(String roomId, String userId) {
+		inRoom.remove(roomId + "|" + userId);
 	}
 
 	@Scheduled(fixedDelayString = "${app.room-log-sweep-ms:5000}")
@@ -62,8 +122,85 @@ public class RoomLog {
 		}
 	}
 
+	/** After a host's playback command was applied. */
+	synchronized void playback(String roomId, String me, RoomService.Applied a) {
+		if (!newer(roomId, a.state().version())) {
+			return;
+		}
+		long now = System.currentTimeMillis();
+		boolean jumped = Math.abs(a.landed() - a.expected()) >= MIN_JUMP_MS;
+		Held h = held.get(roomId);
+		// Held past its time (the sweep hasn't run yet), or another host now: written as it was.
+		if (h != null && (now - h.lastAt >= pauseHoldMs || !h.userId.equals(me))) {
+			writeHeld(roomId, held.remove(roomId));
+			h = null;
+		}
+		if (h != null) {
+			h.moved |= jumped || Math.abs(a.landed() - h.baseline) >= MIN_JUMP_MS;
+			h.position = a.landed();
+			h.lastAt = now; // still dragging: keep holding
+			if (a.state().playing()) { // played again soon: one "seek" line if it moved, else nothing
+				held.remove(roomId);
+				if (h.moved) {
+					post(roomId, rooms.logSeek(roomId, me, a.landed()));
+				}
+			}
+			return;
+		}
+		if (a.wasPlaying() && !a.state().playing()) {
+			// Paused somewhere else (the drag's first report): the pause is where it was, the move comes after.
+			held.put(roomId, new Held(me, jumped ? a.expected() : a.landed(), a.expected(), a.landed(), now, jumped));
+		} else if (!a.wasPlaying() && a.state().playing()) {
+			post(roomId, rooms.log(roomId, me, "play", "", a.landed()));
+		} else if (jumped) {
+			post(roomId, rooms.logSeek(roomId, me, a.landed()));
+		}
+	}
+
+	/** A new video: a pause still held is about the old one, and the "content" line says what happened. */
+	synchronized void contentChanged(String roomId, long version, ChatMessage.View log) {
+		if (!newer(roomId, version)) {
+			return;
+		}
+		held.remove(roomId);
+		post(roomId, log);
+	}
+
+	private boolean newer(String roomId, long version) {
+		Long seen = versions.get(roomId);
+		if (seen != null && seen >= version) {
+			return false;
+		}
+		// ponytail: one entry per room ever played in, until restart; prune with closed rooms if it grows.
+		versions.put(roomId, version);
+		return true;
+	}
+
+	@Scheduled(fixedDelayString = "${app.room-log-hold-sweep-ms:500}")
+	public void flushHeld() {
+		flushHeld(System.currentTimeMillis());
+	}
+
+	/** Writes the pauses held past the hold time (a test passes a far `now`). */
+	public synchronized void flushHeld(long now) {
+		for (Iterator<Map.Entry<String, Held>> it = held.entrySet().iterator(); it.hasNext();) {
+			Map.Entry<String, Held> e = it.next();
+			if (now - e.getValue().lastAt >= pauseHoldMs) {
+				it.remove();
+				writeHeld(e.getKey(), e.getValue());
+			}
+		}
+	}
+
+	private void writeHeld(String roomId, Held h) {
+		post(roomId, rooms.log(roomId, h.userId, "pause", "", h.pausedPosition));
+		if (h.moved) {
+			post(roomId, rooms.logSeek(roomId, h.userId, h.position));
+		}
+	}
+
 	/** To the connections in the room; the others see it in the history. */
-	void post(String roomId, ChatMessage.View log) {
+	public void post(String roomId, ChatMessage.View log) {
 		if (log != null) {
 			hub.sendToRoom(roomId, new ServerEvent("chat:log", roomId, log.userId(), null, log.createdAt(), log));
 		}

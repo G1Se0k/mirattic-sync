@@ -57,6 +57,8 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
 | GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt, unread, muted, code }` (`code` = 방 코드 8자, 결정 77) |
 | GET | `/api/rooms/{id}/messages?before=` | 채팅 100개 `ChatMessage[]`(방 기록 `kind` 줄 포함, 결정 78), 오래된 순: 최근 것, 또는 메시지 ID `before`보다 앞 (`createdAt`, `id` 순). 멤버가 아니거나 `before`가 이 방 메시지가 아니면 404 |
+| DELETE | `/api/rooms/{id}/members/{userId}` | 204. 호스트만(403), 자기 자신 400, 멤버 아님 404. 내보내기(결정 79): 멤버십 삭제, 그 사람의 연결을 방에서 뺌, 방 코드 재입장 금지(호스트 초대로 풀림). `chat:log` `kick`, 기존 멤버 전원(내보낸 사람 포함)에게 `room:update` |
+| POST | `/api/rooms/{id}/host` | `{ userId }` → 204. 호스트만(403), 자기 자신 400, 멤버 아님 404. 호스트 넘기기(결정 79): 역할 교환, `chat:log` `host`, 모든 멤버에게 `room:update` |
 | DELETE | `/api/rooms/{id}/messages/{messageId}` | 204. 보낸 사람 또는 방 호스트만 (아니면 403). 멤버가 아니거나 이 방 메시지가 아니거나 이미 삭제됐거나 방 기록(`kind`)이면 404. 소프트 삭제(결정 71): `text` ""·`mediaPositionMs` 없음·`deleted: true`로 기록에 남음, 읽지 않은 수에서 제외. 모든 멤버의 연결에 `chat:delete { id }` |
 | PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204. 이 방의 내 채팅 알림 끄기/켜기. 저장 후 **내 모든 연결에만** `room:update { muted }` (다른 앱이 조회를 기다리지 않고 새 설정으로 알림). 멤버가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/me` | 나가기 / 초대 거절. HOST가 나가면 방 삭제. 모든 멤버에게 `room:update` |

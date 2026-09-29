@@ -467,6 +467,11 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(moved.path("mediaPositionMs").asLong()).isEqualTo(90_000);
 		assertThat(moved.path("editedAt").asLong()).isPositive();
 		hostWs.send(event("playback:pause", roomId, command.formatted(91_000, now)));
+		// A pause is held a moment (it may be a seek-bar drag); past the hold it is written.
+		for (int i = 0; i < 100 && !loggedKinds(host, roomId).contains("pause"); i++) {
+			roomLog.flushHeld(Long.MAX_VALUE);
+			Thread.sleep(20);
+		}
 		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
 		// A "seek" to where it already is (e.g. the tab's title changed) is no move: no line.
 		hostWs.send(event("playback:seek", roomId, command.formatted(91_500, System.currentTimeMillis())));
@@ -481,6 +486,34 @@ class RoomFlowTest extends IntegrationTest {
 		JsonNode content = friendWs.nextOfType("chat:log").path("payload");
 		assertThat(content.path("kind").asString()).isEqualTo("content");
 		assertThat(content.path("text").asString()).isEqualTo("Next one");
+		// Dragging the seek bar: pause, move, play within the hold is one "seek" line, no "pause" / "play".
+		hostWs.send(event("playback:play", roomId, command.formatted(0, System.currentTimeMillis())));
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("play");
+		hostWs.send(event("playback:pause", roomId, command.formatted(500, System.currentTimeMillis())));
+		hostWs.send(event("playback:seek", roomId, command.formatted(20_000, System.currentTimeMillis())));
+		hostWs.send(event("playback:play", roomId, command.formatted(30_000, System.currentTimeMillis())));
+		JsonNode dragged = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(dragged.path("kind").asString()).isEqualTo("seek");
+		assertThat(dragged.path("mediaPositionMs").asLong()).isEqualTo(30_000);
+		// Small steps while held add up to a move.
+		hostWs.send(event("playback:pause", roomId, command.formatted(30_000, System.currentTimeMillis())));
+		for (int step = 31_000; step <= 33_000; step += 1_000) {
+			hostWs.send(event("playback:seek", roomId, command.formatted(step, System.currentTimeMillis())));
+		}
+		long tp = System.currentTimeMillis();
+		hostWs.send(event("playback:play", roomId, command.formatted(33_000, tp)));
+		JsonNode stepped = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(stepped.path("kind").asString()).isEqualTo("seek");
+		assertThat(stepped.path("mediaPositionMs").asLong()).isEqualTo(33_000);
+		// The pause itself moving a little (1 s from where playback was) and one more small step add up.
+		Thread.sleep(1_000); // a new second of the playback command budget
+		long t = tp + 100; // playing from 33 000 at tp: expected 33 100 here
+		hostWs.send(event("playback:pause", roomId, command.formatted(34_100, t)));
+		hostWs.send(event("playback:seek", roomId, command.formatted(35_100, t)));
+		hostWs.send(event("playback:play", roomId, command.formatted(35_100, t)));
+		JsonNode small = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(small.path("kind").asString()).isEqualTo("seek"); // the same line moves (within its merge window)
+		assertThat(small.path("mediaPositionMs").asLong()).isEqualTo(35_100);
 
 		// Leaving: only once the last connection is gone for the grace period (0 here, two sweeps).
 		friendWs.session().close();
@@ -506,10 +539,65 @@ class RoomFlowTest extends IntegrationTest {
 		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
 		List<String> kinds = new ArrayList<>();
 		history.forEach(m -> kinds.add(m.path("kind").asString()));
-		assertThat(kinds).containsExactly("join", "join", "play", "seek", "pause", "seek", "content", "leave");
+		assertThat(kinds).containsExactly("join", "join", "play", "seek", "pause", "seek", "content", "play", "seek", "leave");
 		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/messages/" + play.path("id").asString(), host.accessToken(), null)
 				.andExpect(status().isNotFound());
 		assertThat(myRoom(friend).path("unread").asLong()).isZero();
+	}
+
+	@Test
+	void theHostKicksAMemberAndHandsTheRoomOver() throws Exception {
+		TestUser host = signup();
+		TestUser a = signup();
+		TestUser b = signup();
+		befriend(host, a);
+		befriend(host, b);
+		JsonNode room = body(createRoom(host, a, b));
+		String roomId = room.path("id").asString();
+		String code = room.path("code").asString();
+		String members = "/api/rooms/" + roomId + "/members/";
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+
+		call(HttpMethod.DELETE, members + b.id(), a.accessToken(), null).andExpect(status().isForbidden()); // host only
+		call(HttpMethod.DELETE, members + host.id(), host.accessToken(), null).andExpect(status().isBadRequest());
+		call(HttpMethod.DELETE, members + b.id(), host.accessToken(), null).andExpect(status().isNoContent());
+		JsonNode kick = hostWs.nextOfType("chat:log").path("payload");
+		assertThat(kick.path("kind").asString()).isEqualTo("kick");
+		assertThat(kick.path("userId").asString()).isEqualTo(b.id());
+		call(HttpMethod.GET, "/api/rooms/" + roomId, b.accessToken(), null).andExpect(status().isNotFound());
+		// A leave line due for them (a sweep racing the kick) isn't written after the kick's line.
+		assertThat(roomService.logPresence(roomId, b.id(), "leave")).isNull();
+		call(HttpMethod.DELETE, members + b.id(), host.accessToken(), null).andExpect(status().isNotFound());
+		// Not back by the code; the host's invite lets them in again.
+		call(HttpMethod.POST, "/api/rooms/join", b.accessToken(), "{\"code\":\"" + code + "\"}").andExpect(status().isNotFound());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + b.id() + "\"]}")
+				.andExpect(status().isOk());
+		call(HttpMethod.DELETE, members + b.id(), host.accessToken(), null).andExpect(status().isNoContent());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + b.id() + "\"]}")
+				.andExpect(status().isOk());
+		call(HttpMethod.DELETE, members + "me", b.accessToken(), null).andExpect(status().isNoContent());
+		call(HttpMethod.POST, "/api/rooms/join", b.accessToken(), "{\"code\":\"" + code + "\"}").andExpect(status().isOk());
+
+		String hostUrl = "/api/rooms/" + roomId + "/host";
+		call(HttpMethod.POST, hostUrl, a.accessToken(), "{\"userId\":\"" + a.id() + "\"}").andExpect(status().isForbidden());
+		call(HttpMethod.POST, hostUrl, host.accessToken(), "{\"userId\":\"" + host.id() + "\"}").andExpect(status().isBadRequest());
+		call(HttpMethod.POST, hostUrl, host.accessToken(), "{\"userId\":\"" + a.id() + "\"}").andExpect(status().isNoContent());
+		JsonNode handed;
+		do { // after the second kick's line
+			handed = hostWs.nextOfType("chat:log").path("payload");
+		} while (handed.path("kind").asString().equals("kick"));
+		assertThat(handed.path("kind").asString()).isEqualTo("host");
+		assertThat(handed.path("userId").asString()).isEqualTo(a.id());
+		JsonNode after = body(call(HttpMethod.GET, "/api/rooms/" + roomId, host.accessToken(), null));
+		after.path("members").forEach(m -> assertThat(m.path("role").asString())
+				.isEqualTo(m.path("user").path("id").asString().equals(a.id()) ? "HOST" : "MEMBER"));
+		// The old host is a member now: playback is the new host's, and leaving doesn't close the room.
+		hostWs.send(event("playback:play", roomId, "{\"positionMs\":0,\"capturedAt\":0}"));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_host");
+		call(HttpMethod.DELETE, members + "me", host.accessToken(), null).andExpect(status().isNoContent());
+		call(HttpMethod.GET, "/api/rooms/" + roomId, a.accessToken(), null).andExpect(status().isOk());
 	}
 
 	private List<String> loggedKinds(TestUser user, String roomId) throws Exception {
@@ -846,10 +934,10 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(response.path("serverTime").asLong()).isGreaterThanOrEqualTo(before);
 	}
 
-	private ResultActions createRoom(TestUser host, TestUser invitee)
-			throws Exception {
+	private ResultActions createRoom(TestUser host, TestUser... invitees) throws Exception {
+		String ids = java.util.Arrays.stream(invitees).map(u -> "\"" + u.id() + "\"").collect(Collectors.joining(","));
 		return call(HttpMethod.POST, "/api/rooms", host.accessToken(),
-				"{\"content\":%s,\"inviteIds\":[\"%s\"]}".formatted(CONTENT, invitee.id()));
+				"{\"content\":%s,\"inviteIds\":[%s]}".formatted(CONTENT, ids));
 	}
 
 	private static String event(String type, String roomId, String payload) {

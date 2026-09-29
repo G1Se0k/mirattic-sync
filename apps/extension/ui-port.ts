@@ -23,7 +23,7 @@ export type FromPanel =
   | { op: 'room:close'; roomId: string }
   | { op: 'room:exit'; roomId: string }
   | { op: 'room:act'; roomId: string; name: RoomAction; args: unknown[] }
-  | { op: 'open'; url: string };
+  | { op: 'open'; url: string; newTab?: boolean };
 
 export type Shared = {
   watching: RoomContent | null;

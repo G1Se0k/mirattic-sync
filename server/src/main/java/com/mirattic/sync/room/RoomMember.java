@@ -49,4 +49,5 @@ public class RoomMember {
 
 	void read(long seq) { lastReadSeq = Math.max(lastReadSeq, seq); }
 	void mute(boolean muted) { this.muted = muted; }
+	void role(Role role) { this.role = role; }
 }

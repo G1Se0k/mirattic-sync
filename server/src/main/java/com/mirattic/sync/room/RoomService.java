@@ -62,8 +62,6 @@ public class RoomService {
 	static final int CHAT_HISTORY = 100;
 	/** A seek this soon after the host's last seek line moves that line (dragging the seek bar is many seeks). */
 	static final long SEEK_LOG_MERGE_MS = 3_000;
-	/** A "seek" landing this close to where playback would be anyway (e.g. a title update) is no move: no line. */
-	static final long SEEK_LOG_MIN_JUMP_MS = 2_000;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
 	/** Laftel "item/episode", the two ids in its player URL. */
@@ -122,7 +120,7 @@ public class RoomService {
 	@Transactional
 	public Invited invite(String me, String roomId, Collection<String> inviteIds) {
 		// The row lock serializes concurrent invites, so together they can't pass the member limit.
-		lockAsHost(me, roomId);
+		Room room = lockAsHost(me, roomId);
 		List<String> before = memberIds(roomId);
 		Set<String> current = new HashSet<>(before);
 		Set<String> invitees = new HashSet<>(inviteIds);
@@ -134,6 +132,7 @@ public class RoomService {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "can only invite friends");
 		}
 		for (String id : invitees) {
+			room.unban(id); // the host asked them back
 			members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER));
 		}
 		return new Invited(view(rooms.findById(roomId).orElseThrow(RoomService::notFound), members.findByRoomId(roomId),
@@ -194,6 +193,8 @@ public class RoomService {
 	/** Leaving as host closes the room for everyone. */
 	@Transactional
 	public Left leave(String me, String roomId) {
+		// Roles read under the room lock: a hand-over in progress decides first whether this closes the room.
+		rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		RoomMember self = requireMember(me, roomId);
 		List<String> everyone = memberIds(roomId);
 		if (self.getRole() == RoomMember.Role.HOST) {
@@ -255,8 +256,15 @@ public class RoomService {
 		return room.playback();
 	}
 
-	/** A playback command's new state, and the chat log line it made (null if none: e.g. play while playing). */
-	public record Applied(PlaybackState state, ChatMessage.View log) {
+	/**
+	 * A playback command's new state, with what the chat log (RoomLog) needs: whether it was playing before, where
+	 * it would have been without the command (`expected`) and where it is now (`landed`, clamped to the duration).
+	 */
+	public record Applied(PlaybackState state, Command command, boolean wasPlaying, long expected, long landed) {
+	}
+
+	/** A content change's new state and its "content" line. */
+	public record Changed(PlaybackState state, ChatMessage.View log) {
 	}
 
 	@Transactional
@@ -272,25 +280,39 @@ public class RoomService {
 			case SEEK -> room.isPlaying();
 		};
 		room.applyPlayback(me, positionMs, playing, at);
-		long landed = room.positionAt(at); // as applied: clamped to the duration
-		ChatMessage.View log = null;
-		if (command == Command.SEEK && Math.abs(landed - expected) >= SEEK_LOG_MIN_JUMP_MS) {
-			ChatMessage last = messages.findTopByRoomIdOrderBySeqDesc(roomId)
-					.filter(m -> "seek".equals(m.view().kind()) && m.view().userId().equals(me)
-							// From its last move: a long drag stays one line.
-							&& System.currentTimeMillis() - (m.view().editedAt() != null ? m.view().editedAt() : m.view().createdAt())
-									< SEEK_LOG_MERGE_MS)
-					.orElse(null);
-			if (last != null) {
-				last.moveTo(landed);
-				log = last.view();
-			} else {
-				log = messages.save(new ChatMessage(roomId, me, "", landed, "seek")).view();
-			}
-		} else if (playing != wasPlaying) {
-			log = messages.save(new ChatMessage(roomId, me, "", landed, playing ? "play" : "pause")).view();
+		return new Applied(room.playback(), command, wasPlaying, expected, room.positionAt(at));
+	}
+
+	/**
+	 * A "seek" line at `positionMs`: or, right after this host's last seek line (still the room's latest), that line
+	 * moved there, so dragging the seek bar stays one line. null if the room is gone.
+	 */
+	@Transactional
+	public ChatMessage.View logSeek(String roomId, String me, long positionMs) {
+		if (rooms.findForUpdate(roomId).isEmpty()) {
+			return null;
 		}
-		return new Applied(room.playback(), log);
+		ChatMessage last = messages.findTopByRoomIdOrderBySeqDesc(roomId)
+				.filter(m -> "seek".equals(m.view().kind()) && m.view().userId().equals(me)
+						// From its last move: a long drag stays one line.
+						&& System.currentTimeMillis() - (m.view().editedAt() != null ? m.view().editedAt() : m.view().createdAt())
+								< SEEK_LOG_MERGE_MS)
+				.orElse(null);
+		if (last == null) {
+			return messages.save(new ChatMessage(roomId, me, "", positionMs, "seek")).view();
+		}
+		last.moveTo(positionMs);
+		return last.view();
+	}
+
+	/** A room log line (decision 78); null if the room is gone. */
+	@Transactional
+	public ChatMessage.View log(String roomId, String userId, String kind, String text, Long positionMs) {
+		// Under the room lock, like chat: read marks see every line inserted before them.
+		if (rooms.findForUpdate(roomId).isEmpty()) {
+			return null;
+		}
+		return messages.save(new ChatMessage(roomId, userId, text, positionMs, kind)).view();
 	}
 
 	/**
@@ -299,11 +321,55 @@ public class RoomService {
 	 */
 	@Transactional
 	public ChatMessage.View logPresence(String roomId, String userId, String kind) {
-		if (rooms.findForUpdate(roomId).isEmpty()) {
+		Room room = rooms.findForUpdate(roomId).orElse(null);
+		// Under the room lock a kick also holds: no join once kicked, and no leave after the kick's own line.
+		if (room == null || "join".equals(kind) && !isMemberOf(userId, roomId) || "leave".equals(kind) && room.isBanned(userId)) {
 			return null;
 		}
-		String name = users.findById(userId).map(User::getDisplayName).orElse(null);
+		String name = nameOf(userId);
 		return name == null ? null : messages.save(new ChatMessage(roomId, userId, name, null, kind)).view();
+	}
+
+	/** Members to tell, and the log line it made ("kick" / "host", text = that member's name). */
+	public record Logged(List<String> memberIds, ChatMessage.View log) {
+	}
+
+	/**
+	 * The host removes a member (decision 79). They can't come back by the room's code until the host invites them.
+	 * 400 for the host itself, 404 if not a member.
+	 */
+	@Transactional
+	public Logged kick(String me, String roomId, String userId) {
+		Room room = lockAsHost(me, roomId);
+		if (me.equals(userId)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot kick yourself");
+		}
+		RoomMember target = requireMember(userId, roomId);
+		List<String> everyone = memberIds(roomId);
+		members.delete(target);
+		room.ban(userId);
+		return new Logged(everyone, messages.save(new ChatMessage(roomId, userId, nameOf(userId), null, "kick")).view());
+	}
+
+	/** The host hands the room to another member (decision 79); the "host" line names the new host. */
+	@Transactional
+	public Logged handOver(String me, String roomId, String userId) {
+		lockAsHost(me, roomId);
+		if (me.equals(userId)) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "already the host");
+		}
+		RoomMember next = requireMember(userId, roomId);
+		requireMember(me, roomId).role(RoomMember.Role.MEMBER);
+		next.role(RoomMember.Role.HOST);
+		return new Logged(memberIds(roomId), messages.save(new ChatMessage(roomId, userId, nameOf(userId), null, "host")).view());
+	}
+
+	private boolean isMemberOf(String userId, String roomId) {
+		return members.findByRoomIdAndUserId(roomId, userId).isPresent();
+	}
+
+	private String nameOf(String userId) {
+		return users.findById(userId).map(User::getDisplayName).orElse(null);
 	}
 
 	/** Any member may chat; the text is stored trimmed. */
@@ -369,7 +435,7 @@ public class RoomService {
 		if (!before.contains(me)) {
 			// A share-locking read: a block committed first is seen, and a block made meanwhile waits for this join
 			// to commit, so the separation after it sees the new member.
-			if (!before.isEmpty() && !blocks.lockBetween(me, before).isEmpty()) {
+			if (found.isBanned(me) || !before.isEmpty() && !blocks.lockBetween(me, before).isEmpty()) {
 				throw notFound();
 			}
 			if (before.size() > MAX_INVITES) {
@@ -430,13 +496,13 @@ public class RoomService {
 	 * @return the new playback state and its "content" log line, or null if it is the same video with new metadata
 	 */
 	@Transactional
-	public Applied changeContent(String me, String roomId, RoomContent content) {
+	public Changed changeContent(String me, String roomId, RoomContent content) {
 		requireKnownId(content);
 		Room room = lockAsHost(me, roomId);
 		if (!room.changeContent(me, content, System.currentTimeMillis())) {
 			return null;
 		}
-		return new Applied(room.playback(), messages.save(new ChatMessage(roomId, me, content.title(), null, "content")).view());
+		return new Changed(room.playback(), messages.save(new ChatMessage(roomId, me, content.title(), null, "content")).view());
 	}
 
 	/**
