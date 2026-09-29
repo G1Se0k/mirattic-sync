@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { ApiError } from "@mirattic/client";
 import { REPORT_REASONS, type ReportReason, type ReportTarget } from "@mirattic/types";
 import { api } from "./session";
+import { Actions, Dialog } from "./Dialog";
 
 type Props = {
   target: ReportTarget;
@@ -40,18 +41,17 @@ export function ReportDialog({ target, user, onClose }: Props) {
   }
 
   return (
-    <dialog open className="stack">
-      <h2>{"messageId" in target ? `${user.name}님의 메시지 신고` : `${user.name}님 신고`}</h2>
+    <Dialog title={"messageId" in target ? `${user.name}님의 메시지 신고` : `${user.name}님 신고`} onClose={onClose}>
       {state === "sent" || state === "blocked" ? (
         <>
           <p>신고가 접수되었습니다. 운영팀이 확인합니다.</p>
           {state === "blocked" ? <p className="muted">{user.name}님을 차단했습니다.</p> : (
             <p className="muted">차단하면 서로 친구·방에서 빠지고 다시 요청할 수 없습니다.</p>
           )}
-          <div className="row">
-            {state === "sent" && <button className="danger" onClick={() => void block()}>차단하기</button>}
+          <Actions>
             <button className="link" onClick={onClose}>닫기</button>
-          </div>
+            {state === "sent" && <button className="danger" onClick={() => void block()}>차단하기</button>}
+          </Actions>
         </>
       ) : (
         <form className="stack" onSubmit={submit}>
@@ -60,13 +60,13 @@ export function ReportDialog({ target, user, onClose }: Props) {
           </select>
           <textarea placeholder="자세한 내용 (선택)" maxLength={500} rows={3} value={detail} onChange={(e) => setDetail(e.target.value)} />
           <p className="muted">{"messageId" in target ? "신고한 메시지 내용은 삭제되어도 운영팀 확인을 위해 보관됩니다." : "신고 사유와 내용이 운영팀에 전달됩니다."}</p>
-          <div className="row">
-            <button type="submit" disabled={state === "sending"}>신고</button>
+          <Actions>
             <button type="button" className="link" onClick={onClose}>취소</button>
-          </div>
+            <button type="submit" disabled={state === "sending"}>신고</button>
+          </Actions>
         </form>
       )}
       {error && <p className="error" role="alert">{error}</p>}
-    </dialog>
+    </Dialog>
   );
 }

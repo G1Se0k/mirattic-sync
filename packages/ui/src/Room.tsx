@@ -8,6 +8,7 @@ import { Chat } from "./Chat";
 import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
 import { Avatar, IconButton } from "./Icons";
+import { Actions, Dialog, useAsk } from "./Dialog";
 
 /** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
 const invitedAt = new Map<string, number>();
@@ -35,6 +36,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   const [reporting, setReporting] = useState<{ id: string; name: string } | null>(null);
   const [askingPause, setAskingPause] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const asker = useAsk();
   const room = s.room;
   const content = room?.content;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
@@ -74,30 +76,33 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       handle.setMuted(muted);
       onMuted(muted);
     } catch {
-      alert("알림 설정을 바꾸지 못했습니다. 다시 시도해 주세요.");
+      void asker.tell("알림 설정을 바꾸지 못했습니다", "다시 시도해 주세요.");
     }
   }
 
   /** Host only (decision 79). The room's refetch (room:update) shows the result. */
   async function manage(name: string, action: "host" | "kick", userId: string) {
-    const question = action === "host"
-      ? `${name}님에게 호스트를 넘길까요? 이후 재생은 ${name}님의 플레이어를 따라갑니다.`
-      : `${name}님을 방에서 내보낼까요? 다시 초대하기 전에는 방 코드로도 들어올 수 없습니다.`;
-    if (!confirm(question)) return;
+    const yes = action === "host"
+      ? await asker.ask(`${name}님에게 호스트를 넘길까요?`, { body: `이후 재생은 ${name}님의 플레이어를 따라갑니다.`, ok: "호스트 넘기기" })
+      : await asker.ask(`${name}님을 방에서 내보낼까요?`, { body: "다시 초대하기 전에는 방 코드로도 들어올 수 없습니다.", ok: "내보내기", danger: true });
+    if (!yes) return;
     try {
       await (action === "host" ? api.makeHost(roomId, userId) : api.kickMember(roomId, userId));
     } catch {
-      alert(action === "host" ? "호스트를 넘기지 못했습니다." : "내보내지 못했습니다.");
+      void asker.tell(action === "host" ? "호스트를 넘기지 못했습니다" : "내보내지 못했습니다", "다시 시도해 주세요.");
     }
   }
 
   async function leave() {
-    if (!confirm(isHost ? "방을 닫을까요? 모든 멤버가 나가게 됩니다." : "방에서 나갈까요?")) return;
+    const yes = isHost
+      ? await asker.ask("방을 닫을까요?", { body: "모든 멤버가 나가게 됩니다.", ok: "방 닫기", danger: true })
+      : await asker.ask("방에서 나갈까요?", { ok: "나가기", danger: true });
+    if (!yes) return;
     try {
       await api.leaveRoom(roomId);
     } catch (e) {
       // 404: already gone. Anything else: the room may still be open, so stay and let the user retry.
-      if (!(e instanceof ApiError && e.status === 404)) return alert("방을 나가지 못했습니다. 다시 시도해 주세요.");
+      if (!(e instanceof ApiError && e.status === 404)) return void asker.tell("방을 나가지 못했습니다", "다시 시도해 주세요.");
     }
     handle.exit();
     onClose();
@@ -148,11 +153,11 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
         subscribe={subscribe} position={position} onSeek={isHost && s.canPlay ? (ms) => handle.seek(ms) : undefined} />
 
       {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
+      {asker.dialog}
       {asking && asking === experiment && (
-        <dialog open className="stack">
-          <h2>{PROVIDER_NAMES[experiment]} 제어 (실험)</h2>
+        <Dialog title={`${PROVIDER_NAMES[experiment]} 제어 (실험)`} onClose={() => setAsking(null)}>
           <ExperimentControl provider={experiment} onDone={() => setAsking(null)} />
-        </dialog>
+        </Dialog>
       )}
       {s.switched && s.switched.contentId === content.contentId && <Switched content={s.switched} handle={handle} />}
       {inviting && (
@@ -161,15 +166,14 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       )}
       {askingPause && <RequestPause handle={handle} onClose={() => setAskingPause(false)} />}
       {s.pauseRequest && isHost && (
-        <dialog open className="stack" role="alertdialog">
-          <h2>{s.pauseRequest.name}님이 일시정지를 요청했습니다</h2>
+        <Dialog alert title={`${s.pauseRequest.name}님이 일시정지를 요청했습니다`} onClose={() => handle.dismissPauseRequest()}>
           {s.pauseRequest.reason && <p>{s.pauseRequest.reason}</p>}
           <p className="muted">30초 후에 자동으로 닫힙니다.</p>
-          <div className="row">
-            <button className="secondary" onClick={() => handle.dismissPauseRequest()}>닫기</button>
+          <Actions>
+            <button className="link" onClick={() => handle.dismissPauseRequest()}>닫기</button>
             <button onClick={() => handle.pauseAll()}>모두 일시정지</button>
-          </div>
-        </dialog>
+          </Actions>
+        </Dialog>
       )}
     </main>
   );
@@ -217,8 +221,7 @@ function Invite({ roomId, code, isHost, memberIds, onClose }: {
   }
 
   return (
-    <dialog open className="stack">
-      <h2>방에 초대하기</h2>
+    <Dialog title="방에 초대하기" onClose={onClose}>
       {isHost && (
         <>
           {friends?.length === 0 && <p className="muted">친구가 없습니다.</p>}
@@ -251,21 +254,25 @@ function Invite({ roomId, code, isHost, memberIds, onClose }: {
           </div>
         </>
       )}
-      <div className="row"><button className="link" onClick={onClose}>닫기</button></div>
-    </dialog>
+      <Actions><button className="link" onClick={onClose}>닫기</button></Actions>
+    </Dialog>
   );
 }
 
 function Switched({ content, handle }: { content: RoomContent; handle: RoomHandle }) {
+  const [always, setAlways] = useState(false);
   return (
-    <dialog open className="stack">
-      <h2>호스트가 영상을 바꿨습니다</h2>
+    <Dialog title="호스트가 영상을 바꿨습니다" onClose={() => handle.dismissSwitched()}>
       <p>{content.title}</p>
-      <div className="row">
-        <button className="secondary" onClick={() => handle.dismissSwitched()}>나중에</button>
-        <button onClick={() => handle.openSwitched()}>이 영상 열기</button>
-      </div>
-    </dialog>
+      <label className="row check">
+        <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />
+        <span>이 방에서 항상 허용하기 (다음부터 묻지 않고 따라감)</span>
+      </label>
+      <Actions>
+        <button className="link" onClick={() => handle.dismissSwitched()}>나중에</button>
+        <button onClick={() => handle.openSwitched(always)}>이 영상 열기</button>
+      </Actions>
+    </Dialog>
   );
 }
 
@@ -273,15 +280,14 @@ function Switched({ content, handle }: { content: RoomContent; handle: RoomHandl
 function RequestPause({ handle, onClose }: { handle: RoomHandle; onClose: () => void }) {
   const [reason, setReason] = useState("");
   return (
-    <dialog open className="stack">
-      <h2>일시정지 요청</h2>
+    <Dialog title="일시정지 요청" onClose={onClose}>
       <p className="muted">호스트에게 알림이 갑니다. 30초에 한 번 보낼 수 있습니다.</p>
       <textarea placeholder="사유 (선택)" maxLength={200} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
-      <div className="row">
-        <button className="secondary" onClick={onClose}>취소</button>
+      <Actions>
+        <button className="link" onClick={onClose}>취소</button>
         <button onClick={() => { handle.requestPause(reason); onClose(); }}>요청 보내기</button>
-      </div>
-    </dialog>
+      </Actions>
+    </Dialog>
   );
 }
 

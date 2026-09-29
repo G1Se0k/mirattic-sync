@@ -12,3 +12,6 @@ build/
 *.log
 .playwright-mcp/
 .codex-runs/
+
+# Provider logo originals (kept locally; the app uses packages/ui/src/assets)
+packages/ui/assets-source/

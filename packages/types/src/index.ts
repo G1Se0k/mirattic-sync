@@ -25,6 +25,9 @@ export type MediaPresence = {
   capturedAt: number;
 };
 
+/** What I watch, in the parts my own status lines show apart (the room title joins them: `contentTitle`). */
+export type WatchingInfo = Pick<MediaPresence, "provider" | "title" | "channel" | "season" | "episode">;
+
 /** What a provider adapter reads from the local player. Room layer adds sourceUserId/version. */
 export type PlayerSnapshot = {
   contentId: string;

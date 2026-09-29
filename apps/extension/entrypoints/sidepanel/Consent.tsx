@@ -29,6 +29,10 @@ export function Consent({ onAccept }: { onAccept: () => void }) {
         </li>
       </ul>
       <p className="muted">
+        Netflix·Laftel은 설치 때 접근 권한을 받지만, 설정에서 제어를 켜기 전에는 지금 탭이 그 사이트인지만 확인해 켤지
+        안내합니다(서버로 보내지 않음). 켜면 그 사이트의 시청 정보도 위와 같이 보냅니다.
+      </p>
+      <p className="muted">
         YouTube 비밀번호·쿠키·로그인 정보, 다른 사이트 방문 기록, 영상 자체는 읽거나 보내지 않습니다.
         광고, 판매, 제3자 제공에 쓰지 않습니다.
       </p>

@@ -1,6 +1,6 @@
 import type { SocketStatus } from '@mirattic/client';
 import type { RoomSyncState } from '@mirattic/sync-core';
-import type { ClientEvent, RoomContent, ServerEvent } from '@mirattic/types';
+import type { ClientEvent, MediaProvider, RoomContent, ServerEvent, WatchingInfo } from '@mirattic/types';
 
 // Side panel ⇄ background (plan.md decision 69). The background owns the API client (the only one that
 // refreshes tokens), the socket, the followed tab and the room's sync, so they outlive the side panel. The
@@ -9,6 +9,14 @@ import type { ClientEvent, RoomContent, ServerEvent } from '@mirattic/types';
 export const UI_PORT = 'mirattic-ui';
 
 /** Room actions the panel may call on the background's `RoomSync`. */
+/**
+ * Settings in storage.local (decision 81): the side panel writes them, the background follows storage.onChanged.
+ * One key per site, so turning on two at once can't lose one.
+ */
+export const experimentKey = (provider: 'netflix' | 'laftel') => `mirattic.experiment.${provider}`;
+/** Whether members are asked before following the host to another video. */
+export const ASK_ON_SWITCH_KEY = 'mirattic.askOnSwitch';
+
 export const ROOM_ACTIONS = ['requestPause', 'dismissPauseRequest', 'pauseAll', 'seek', 'openSwitched', 'dismissSwitched',
   'setMuted', 'reload'] as const;
 export type RoomAction = (typeof ROOM_ACTIONS)[number];
@@ -27,6 +35,9 @@ export type FromPanel =
 
 export type Shared = {
   watching: RoomContent | null;
+  watchingInfo: WatchingInfo | null;
+  offSite: { provider: MediaProvider; visit: number } | null;
+  askOnSwitch: boolean;
   experiments: { netflix: boolean; laftel: boolean };
   activeRoom: string | null;
 };

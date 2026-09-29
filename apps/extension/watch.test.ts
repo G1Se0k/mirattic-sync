@@ -11,7 +11,8 @@ const hold = <T>() => {
 };
 
 let tabs: Tab[];
-let granted: Set<string>; // optional host permissions the user gave
+let session: Record<string, unknown>; // storage.session: survives a worker restart, not the browser
+let stored: Record<string, unknown>; // storage.local: which experimental controls are on, settings
 let connects: number[];
 let listeners: Record<string, Listener[]>;
 /** When set, the next matching call waits for this instead of answering at once. */
@@ -28,10 +29,20 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 vi.mock('wxt/browser', () => ({
   browser: {
     windows: { getCurrent: async () => ({ id: 1 }) },
-    permissions: {
-      contains: async (q: { origins: string[] }) => q.origins.every((o) => granted.has(o)),
-      onAdded: on('permissions.onAdded'),
-      onRemoved: on('permissions.onRemoved'),
+    storage: {
+      local: {
+        get: async (keys: string[]) => Object.fromEntries(keys.filter((k) => k in stored).map((k) => [k, stored[k]])),
+        set: async (values: Record<string, unknown>) => {
+          const changes = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, { oldValue: stored[k], newValue: v }]));
+          Object.assign(stored, values);
+          await fire('storage.onChanged', changes, 'local');
+        },
+      },
+      onChanged: on('storage.onChanged'),
+      session: {
+        get: async (key: string) => (key in session ? { [key]: session[key] } : {}),
+        set: async (values: Record<string, unknown>) => void Object.assign(session, values),
+      },
     },
     scripting: {
       executeScript: async (q: { files?: string[] }) => {
@@ -89,7 +100,8 @@ const followed = () => connects.at(-1);
 
 beforeEach(() => {
   tabs = [];
-  granted = new Set(['https://www.netflix.com/*']);
+  stored = { 'mirattic.experiment.netflix': true };
+  session = {};
   connects = [];
   listeners = {};
   heldQuery = null;
@@ -171,21 +183,21 @@ describe('watch: which tab the side panel follows', () => {
   });
 
   it.each([
-    ['Netflix', NF, 'https://www.netflix.com/*'],
-    ['Laftel', LAFTEL, 'https://laftel.net/*'],
-  ] as const)('never connects to %s when it is turned off while the script is being injected', async (_, tab, origin) => {
-    granted.add(origin);
+    ['Netflix', NF, 'netflix'],
+    ['Laftel', LAFTEL, 'laftel'],
+  ] as const)('never connects to %s when it is turned off while the script is being injected', async (_, tab, provider) => {
+    stored[`mirattic.experiment.${provider}`] = true;
+    const platform = await watch();
     tabs = [tab(1, true)];
     heldInject = hold();
     const release = heldInject;
-    const started = watch();
+    const activated = fire('tabs.onActivated', { tabId: 1, windowId: 1 }); // waits on the held injection
     await settle();
 
-    granted.delete(origin);
-    await fire('permissions.onRemoved');
+    await platform.experimental!.setEnabled(provider, false);
     await settle();
     release.resolve();
-    await started;
+    await activated;
     await settle();
     expect(connects).toEqual([]);
   });
@@ -204,18 +216,46 @@ describe('watch: which tab the side panel follows', () => {
 
   it('follows a Laftel tab only while Laftel is turned on, independently of Netflix', async () => {
     tabs = [LAFTEL(1, true), NF(2)];
-    await watch();
-    expect(followed()).toBe(2); // Netflix is on, Laftel isn't: the active Laftel tab is invisible
+    const platform = await watch();
+    expect(followed()).toBe(2); // Netflix is on, Laftel isn't: the active Laftel tab isn't followed
+    const first = platform.offSite?.();
+    expect(first?.provider).toBe('laftel'); // but seen, to offer turning it on
+    tabs.push(LAFTEL(3));
+    activate(3); // another Laftel tab: a new arrival, asked about again
+    await fire('tabs.onActivated', { tabId: 3, windowId: 1 });
+    await settle();
+    expect(platform.offSite?.()?.provider).toBe('laftel');
+    expect(platform.offSite?.()?.visit).toBeGreaterThan(first!.visit);
+    activate(1);
+    await fire('tabs.onActivated', { tabId: 1, windowId: 1 });
+    await settle();
 
-    granted.add('https://laftel.net/*');
-    await fire('permissions.onAdded');
+    await platform.experimental!.setEnabled('laftel', true);
     await settle();
     expect(followed()).toBe(1);
+    expect(stored['mirattic.experiment.laftel']).toBe(true); // kept for the next start
 
     connects = [];
-    granted.delete('https://www.netflix.com/*'); // turning Netflix off leaves the Laftel tab alone
-    await fire('permissions.onRemoved');
+    await platform.experimental!.setEnabled('netflix', false); // turning Netflix off leaves the Laftel tab alone
     await settle();
     expect(connects).toEqual([]);
+
+    // Written by the side panel straight to storage: applied from storage.onChanged.
+    stored['mirattic.experiment.netflix'] = true;
+    await fire('storage.onChanged', { 'mirattic.experiment.netflix': { newValue: true } }, 'local');
+    await settle();
+    expect(platform.experimental!.enabled('netflix')).toBe(true);
+    await fire('storage.onChanged', { 'mirattic.askOnSwitch': { newValue: false } }, 'local');
+    expect(platform.preferences!.askOnSwitch()).toBe(false);
+  });
+
+  it('keeps an arrival across a service worker restart while the user stays on that tab', async () => {
+    tabs = [LAFTEL(1, true)];
+    const platform = await watch();
+    const arrival = platform.offSite?.();
+    expect(arrival?.provider).toBe('laftel');
+    listeners = {};
+    const restarted = await watch(); // storage.session survives; the panel's dismissal of this arrival holds
+    expect(restarted.offSite?.()).toEqual(arrival);
   });
 });

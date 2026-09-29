@@ -37,7 +37,7 @@ export function localRoom(
     dismissPauseRequest: () => sync.dismissPauseRequest(),
     pauseAll: () => sync.pauseAll(),
     seek: (ms) => sync.seek(ms),
-    openSwitched: () => sync.openSwitched(),
+    openSwitched: (always) => sync.openSwitched(always),
     dismissSwitched: () => sync.dismissSwitched(),
     setMuted: (muted) => sync.setMuted(muted),
     retry: () => void sync.reload(),

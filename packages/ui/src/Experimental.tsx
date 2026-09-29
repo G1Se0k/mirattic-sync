@@ -2,6 +2,7 @@ import { useState, useSyncExternalStore, type ReactNode } from "react";
 import type { MediaProvider } from "@mirattic/types";
 import { platform } from "./session";
 import { PROVIDER_NAMES } from "./format";
+import { Actions, Dialog } from "./Dialog";
 
 const noSubscribe = () => () => {};
 
@@ -47,50 +48,85 @@ export function useExperiment(provider?: Experiment) {
  * Turning on control of `provider`, with the risk spelled out first.
  * Shown in the settings and, as a dialog, on first entering a room of that provider.
  */
-export function ExperimentControl({ provider, onDone }: { provider: Experiment; onDone?: () => void }) {
+/** `onDone(true)` once it was turned on (saved), `onDone(false)` when left off or closed. */
+export function ExperimentControl({ provider, onDone }: { provider: Experiment; onDone?: (turnedOn: boolean) => void }) {
   const on = useExperiment(provider);
   const [failed, setFailed] = useState(false);
   if (on === undefined) return null;
   const name = PROVIDER_NAMES[provider];
-  const risk = RISK[provider];
 
   async function set(next: boolean) {
     setFailed(false);
     const ok = await platform.experimental!.setEnabled(provider, next).catch(() => false);
     if (next && !ok) return setFailed(true);
-    onDone?.();
+    onDone?.(next);
   }
 
   return (
     <div className="stack">
-      <p>{risk.terms} 실험 기능이며 위험은 사용자에게 있습니다.</p>
-      <ul className="muted">
-        <li>읽는 것: {risk.reads} (공개 범위 설정대로 친구·방에 공유)</li>
-        <li>하는 것: {risk.does}</li>
-        <li>광고가 나오는 재생은 지원하지 않습니다</li>
-        <li>켜면 Chrome이 {risk.site} 접근 권한을 묻고, 끄면 권한을 돌려줍니다</li>
-      </ul>
-      {failed && <p className="error">권한을 받지 못해 켜지 않았습니다.</p>}
-      <div className="row">
+      <RiskDetails provider={provider} />
+      {failed && <p className="error">켜지 못했습니다. 다시 시도하세요.</p>}
+      <Actions>
+        {onDone && <button className="link" onClick={() => onDone(!!on)}>{on ? "닫기" : "켜지 않고 계속"}</button>}
         {on ? (
           <button onClick={() => void set(false)}>{name} 제어 끄기</button>
         ) : (
           <button onClick={() => void set(true)}>위험을 이해하고 켜기</button>
         )}
-        {onDone && <button className="link" onClick={onDone}>{on ? "닫기" : "켜지 않고 계속"}</button>}
-      </div>
+      </Actions>
     </div>
   );
 }
 
+/** What turning it on means: the terms risk, what is read and done. */
+function RiskDetails({ provider }: { provider: Experiment }) {
+  const risk = RISK[provider];
+  return (
+    <>
+      <p>{risk.terms} 실험 기능이며 위험은 사용자에게 있습니다.</p>
+      <ul className="muted">
+        <li>읽는 것: {risk.reads} (공개 범위 설정대로 친구·방에 공유)</li>
+        <li>하는 것: {risk.does}</li>
+        <li>광고가 나오는 재생은 지원하지 않습니다</li>
+        <li>{risk.site} 접근 권한은 설치 때 받지만, 켜기 전에는 그 사이트에 들어간 것만 알아채 안내하고 페이지는 읽지 않습니다</li>
+      </ul>
+    </>
+  );
+}
+
+/** Settings: one button per site; its risks show while the pointer is on it (or it has focus). */
 function ExperimentSection({ provider }: { provider: Experiment }) {
   const on = useExperiment(provider);
   if (on === undefined) return null;
+  const name = PROVIDER_NAMES[provider];
   return (
-    <section>
-      <h2>실험 기능 · {PROVIDER_NAMES[provider]} 제어 {on ? "(켜짐)" : "(꺼짐)"}</h2>
-      <ExperimentControl provider={provider} />
+    <section className="row between">
+      <h2>실험 기능 · {name} 제어 {on ? "(켜짐)" : "(꺼짐)"}</h2>
+      <span className="tip-wrap">
+        <button className={on ? "secondary" : undefined} aria-describedby={`risk-${provider}`}
+          onClick={() => void platform.experimental!.setEnabled(provider, !on)}>
+          {on ? `${name} 제어 끄기` : "위험을 이해하고 켜기"}
+        </button>
+        <div className="tip stack" role="tooltip" id={`risk-${provider}`}>
+          <RiskDetails provider={provider} />
+        </div>
+      </span>
     </section>
+  );
+}
+
+/**
+ * The window's active tab is on Netflix / Laftel with its control off (decision 81): offered once per arrival
+ * there, with the risks. Shown on any screen.
+ */
+export function OffSitePrompt() {
+  const off = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.offSite?.() ?? null);
+  const [dismissed, setDismissed] = useState(0);
+  if (!off || off.visit === dismissed || !isExperiment(off.provider)) return null;
+  return (
+    <Dialog title={`${PROVIDER_NAMES[off.provider]}에서 같이 보려면 제어를 켜야 합니다`} onClose={() => setDismissed(off.visit)}>
+      <ExperimentControl provider={off.provider} onDone={() => setDismissed(off.visit)} />
+    </Dialog>
   );
 }
 

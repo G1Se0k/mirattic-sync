@@ -117,3 +117,46 @@ it("keeps a member's player on the credits (the host takes the room on), and let
   expect(hostCredits.filter((x) => x !== null)).toEqual([]);
   h.sync.dispose();
 });
+
+it("asks a member before following the host to another video, unless told to always follow (setting or this room)", async () => {
+  const video = (contentId: string) => ({ provider: "youtube" as const, contentId, title: contentId });
+  let content = video("aaaaaaaaaaa");
+  let ask = true;
+  const opened: string[] = [];
+  const player = new MockMediaProvider({ contentId: "other", title: "Other", durationMs: 600_000 });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => ({ ...room("host"), content }), isGone: () => false,
+    send: () => true, adapter: () => player, nowWatching: () => null, open: (url) => opened.push(url),
+    askOnSwitch: () => ask, onChange: () => {},
+  });
+  sync.setConnected(true);
+  const moveTo = async (id: string) => {
+    content = video(id);
+    sync.handle({ type: "room:update", roomId: "r1", serverTime: Date.now(), payload: null } as ServerEvent);
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  await vi.advanceTimersByTimeAsync(0);
+  await moveTo("bbbbbbbbbbb");
+  expect(sync.state.switched?.contentId).toBe("bbbbbbbbbbb"); // asked
+  sync.openSwitched(true); // "이 방에서 항상 허용"
+  expect(opened).toHaveLength(1);
+  await moveTo("ccccccccccc");
+  expect(opened.at(-1)).toContain("ccccccccccc"); // followed without asking
+  expect(sync.state.switched).toBeNull();
+  sync.dispose();
+
+  const other = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => ({ ...room("host"), content }), isGone: () => false,
+    send: () => true, adapter: () => player, nowWatching: () => null, open: (url) => opened.push(url),
+    askOnSwitch: () => ask, onChange: () => {},
+  });
+  other.setConnected(true);
+  await vi.advanceTimersByTimeAsync(0);
+  ask = false; // the setting: never ask
+  content = video("ddddddddddd");
+  other.handle({ type: "room:update", roomId: "r1", serverTime: Date.now(), payload: null } as ServerEvent);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(opened.at(-1)).toContain("ddddddddddd");
+  expect(other.state.switched).toBeNull();
+  other.dispose();
+});

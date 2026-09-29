@@ -8,23 +8,17 @@ export default defineConfig({
   manifest: {
     name: 'Mirattic Sync',
     description: 'Watch together with friends. Syncs playback state only — never media.',
-    // storage: the refresh token (storage.local, extension pages only) and the consent flag. The only site access is YouTube —
-    // the content script's match; host_permissions repeats it so the side panel can see which tab is YouTube
-    // (same install warning). The API server allows this extension's origin through CORS instead.
-    // Netflix and Laftel are opt-in (experimental, docs/platform-policy/{netflix,laftel}.md): each origin is
-    // requested only when the user turns it on, and `scripting` injects its script into the one tab we follow.
+    // storage: the refresh token (storage.local, extension pages only), the consent flag and settings. Site access:
+    // YouTube (the content script's match; host_permissions repeats it so the side panel can see which tab is
+    // YouTube). Netflix and Laftel (plan.md decision 81): granted at install so the extension sees that a tab is on
+    // one of them and can warn while its control is off; their pages are read and driven only once the user turns
+    // the control on (experimental, docs/platform-policy/{netflix,laftel}.md) — `scripting` then injects its script
+    // into the one tab we follow. The API server allows this extension's origin through CORS instead.
     permissions: ['sidePanel', 'storage', 'scripting'],
-    host_permissions: ['https://www.youtube.com/*'],
-    optional_host_permissions: [...EXPERIMENTAL_ORIGINS],
+    host_permissions: ['https://www.youtube.com/*', ...EXPERIMENTAL_ORIGINS],
     action: {},
     // Dev-only public key pinning the ID to kphihploboaigagpahhdhjiaglnfmpii so the server can allow its origin.
     // ponytail: replace with the Web Store item's public key before publishing (docs/platform-policy/chrome-web-store.md).
     key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyTeGSr6X5t4jk2nizytY4YOGiUlsskBAgzvz8fmgQMjhlSDMgERcwNLuLo0OoIXUKp/kE57mE69aDS91ScamGWfhTh7wnDK4rTSP6FQ3N4YQHg8WAmm4JoFqfiHoOgGMkjZ+RBmTMGV4QjxcQqYYu8NurFML9CzrUiyztX7yYXChOYyD8ejiW0VnLSE9vwLnfU1phxzCeXBVj38L4l7vVcduLrq1DdtUddmx5CAWT5JG3jjRjK5RaVXMHDATrGsMQEgfoHm2Sa56vJZCfPjf3LcN47zONAI/4M5NbhgYmh7Fg6zRLAF8d5+el4sGWkM9IaSBOhX2IqcKXHJrFdt1kQIDAQAB',
-  },
-  hooks: {
-    // WXT adds a runtime content script's matches to host_permissions; experimental sites must stay optional.
-    'build:manifestGenerated': (_, manifest) => {
-      manifest.host_permissions = manifest.host_permissions?.filter((p: string) => !EXPERIMENTAL_ORIGINS.includes(p));
-    },
   },
 });

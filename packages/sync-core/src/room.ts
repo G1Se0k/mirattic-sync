@@ -54,6 +54,8 @@ export type RoomSyncDeps = {
   adapter(provider: MediaProvider): MediaProviderAdapter | undefined;
   nowWatching(): RoomContent | null;
   open(url: string): void;
+  /** The user's setting: false = follow the host to any video without asking (decision 81). Default: ask. */
+  askOnSwitch?(): boolean;
 
   onChange(state: RoomSyncState): void;
 };
@@ -89,6 +91,8 @@ export class RoomSync {
   /** The content this member was last shown, to tell a series step from a switch. */
   private shown: RoomContent | null = null;
   private switchCheck = 0;
+  /** "이 방에서 항상 허용" was ticked: this room's switches open without asking (until it is left). */
+  private followAlways = false;
   private connected = false;
   private readonly sentAt = new Map<string, number>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
@@ -172,7 +176,8 @@ export class RoomSync {
     const mine = ++this.switchCheck; // the room may move on again before the tab answers
     void player.getSnapshot().then((s) => {
       if (mine !== this.switchCheck || this.disposed || s?.contentId === content.contentId) return;
-      if (sameSeries(before, content)) this.deps.open(url);
+      // The same series, the setting, or "이 방에서 항상 허용" (decision 81): opened without asking.
+      if (sameSeries(before, content) || this.followAlways || this.deps.askOnSwitch?.() === false) this.deps.open(url);
       else this.set({ switched: content });
     });
   }
@@ -344,7 +349,9 @@ export class RoomSync {
     if (this.isHost && this.player && this.player.seekable !== false) void this.player.seek(positionMs);
   }
 
-  openSwitched() {
+  /** `always`: "이 방에서 항상 허용" — the host's next videos in this room open without asking. */
+  openSwitched(always = false) {
+    if (always) this.followAlways = true;
     const url = this.state.switched && openUrl(this.state.switched);
     if (url) this.deps.open(url);
     this.set({ switched: null });

@@ -1,16 +1,17 @@
 import { browser } from 'wxt/browser';
 import type { Socket } from '@mirattic/client';
 import type { Platform } from '@mirattic/ui';
-import { contentTitle, type MediaPresence, type MediaProvider, type RoomContent } from '@mirattic/types';
+import { contentTitle, type MediaPresence, type MediaProvider, type RoomContent, type WatchingInfo } from '@mirattic/types';
 import { RemoteAdapter } from './bridge';
+import { ASK_ON_SWITCH_KEY, experimentKey } from './ui-port';
 import { describeMetadata, metadataInPage, type NetflixMetadata } from './providers/netflix';
 
 const YOUTUBE = 'https://www.youtube.com/';
 const YOUTUBE_SCRIPT = '/content-scripts/youtube.js';
 const NETFLIX_META_TRIES = 5;
 const NETFLIX_META_RETRY_MS = 2_000;
-// Experimental control (docs/platform-policy/{netflix,laftel}.md): each is off until the user grants its
-// optional host permission; while off, its tabs are invisible to us and nothing is injected into them.
+// Experimental control (docs/platform-policy/{netflix,laftel}.md): each is off until the user turns it on (a
+// setting, decision 81). While off we only see that a tab is on the site (to warn), and inject nothing into it.
 const EXPERIMENTAL = {
   netflix: { site: 'https://www.netflix.com/', script: '/content-scripts/netflix.js' },
   laftel: { site: 'https://laftel.net/', script: '/content-scripts/laftel.js' },
@@ -18,7 +19,8 @@ const EXPERIMENTAL = {
 type Experimental = keyof typeof EXPERIMENTAL;
 const EXPERIMENTS = Object.keys(EXPERIMENTAL) as Experimental[];
 const isExperimental = (p: MediaProvider): p is Experimental => p in EXPERIMENTAL;
-const originsOf = (p: Experimental) => ({ origins: [`${EXPERIMENTAL[p].site}*`] });
+
+const OFF_SITE_KEY = 'mirattic.offSite';
 const PRESENCE_DELAY_MS = 300; // the server drops presence updates closer than 250ms
 
 export type Watch = Platform & {
@@ -40,8 +42,21 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
   let presenceTimer: ReturnType<typeof setTimeout> | undefined;
   const subscribers = new Set<() => void>();
   const changed = () => subscribers.forEach((s) => s());
-  const granted = () => Promise.all(EXPERIMENTS.map(async (p) => [p, await browser.permissions.contains(originsOf(p))] as const));
-  const on = new Set((await granted()).filter(([, ok]) => ok).map(([p]) => p));
+  // ponytail: off after the update that made the sites' access permanent, even for who had it on (re-enable once).
+  const stored = await browser.storage.local.get([...EXPERIMENTS.map(experimentKey), ASK_ON_SWITCH_KEY]);
+  const on = new Set(EXPERIMENTS.filter((p) => stored[experimentKey(p)] === true));
+  let askOnSwitch = stored[ASK_ON_SWITCH_KEY] !== false;
+  /** Presence parts the room title joins: my own status lines show them apart (same object while unchanged). */
+  let info: WatchingInfo | null = null;
+  /** The window's active tab is on a site whose control is off; `visit` counts arrivals there (decision 81). */
+  // Kept in storage.session: a service worker restart while the user stays on the tab is the same arrival (the
+  // panel's dismissal still holds); the browser closing forgets it.
+  type OffSite = { provider: Experimental; visit: number; tabId?: number };
+  const kept = (await browser.storage.session.get(OFF_SITE_KEY))[OFF_SITE_KEY] as OffSite | undefined;
+  let offSite: { provider: Experimental; visit: number } | null = kept ? { provider: kept.provider, visit: kept.visit } : null;
+  let offSiteTab: number | undefined = kept?.tabId; // an arrival is per tab: another tab of the same site is asked about again
+  // Time-based, so an arrival after the service worker restarts never repeats one the panel already dismissed.
+  let visits = kept?.visit ?? 0;
 
   const sendPresence = () => {
     if (presenceTimer !== undefined) return;
@@ -70,9 +85,12 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
   const readNetflix = async (id: string, attempt: number) => {
     if (!netflixMeta.get(id)) netflixMeta.set(id, null); // a partial answer stays shown while it is read again
     const tab = tabId;
-    if (tab === null) return;
+    if (tab === null || !on.has('netflix')) return;
     const [done] = await browser.scripting.executeScript({ target: { tabId: tab }, world: 'MAIN', func: metadataInPage, args: [id] })
       .catch(() => []);
+    // Turned off while reading: Chrome can't take back a script it already runs, so its answer is dropped unused
+    // (never shown, never sent), and no further read starts while off.
+    if (!on.has('netflix')) return;
     const found = (done?.result as NetflixMetadata | null | undefined) ?? null;
     console.info('[mirattic] Netflix page data for', id, found ? `found: ${describeMetadata(found)}` : 'not found', `(try ${attempt})`);
     if (found && !(found.partial && netflixMeta.get(id) && !netflixMeta.get(id)!.partial)) {
@@ -106,6 +124,11 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     const next: RoomContent | null = p?.contentId
       ? { provider: p.provider, contentId: p.contentId, title: contentTitle(p), durationMs: p.durationMs, canonicalUrl: p.canonicalUrl, series: p.series }
       : null;
+    const nextInfo = p ? { provider: p.provider, title: p.title, channel: p.channel, season: p.season, episode: p.episode } : null;
+    if (JSON.stringify(nextInfo) !== JSON.stringify(info)) {
+      info = nextInfo;
+      changed();
+    }
     // Same object while the video is the same, as useSyncExternalStore requires.
     if (next?.contentId !== content?.contentId || next?.title !== content?.title || (next?.durationMs ?? 0) !== (content?.durationMs ?? 0)
       || next?.series !== content?.series) {
@@ -136,7 +159,8 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     // Experiments aren't in the manifest: only the tab we follow gets the script (it ignores a second injection).
     if (isExperimental(provider)) {
       const injected = await browser.scripting.executeScript({ target: { tabId: id }, files: [EXPERIMENTAL[provider].script] }).catch(() => null);
-      // Turned off (or another tab chosen) while injecting: never connect, so nothing is read.
+      // Turned off (or another tab chosen) while injecting: never connect, so nothing is read. An injection Chrome
+      // completes late only adds a listener (serveAdapter): the adapter, and any reading, starts on our connect.
       if (!injected || mine !== binding || !on.has(provider)) return;
     }
     adapter.connect(id, provider);
@@ -153,6 +177,22 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     if (tab?.id !== undefined) await bind(tab.id, tab.url);
   };
 
+  /** Whether the window's active tab is on a site whose control is off: the panel then offers to turn it on. */
+  const offSiteOf = (url?: string) => EXPERIMENTS.find((p) => !on.has(p) && url?.startsWith(EXPERIMENTAL[p].site)) ?? null;
+  let checks = 0;
+  const checkOffSite = async () => {
+    const mine = ++checks;
+    const [active] = await browser.tabs.query({ active: true, windowId });
+    if (mine !== checks) return;
+    const provider = offSiteOf(active?.url);
+    if (provider === (offSite?.provider ?? null) && (!provider || active?.id === offSiteTab)) return;
+    visits = Math.max(visits + 1, Date.now());
+    offSite = provider ? { provider, visit: visits } : null;
+    offSiteTab = provider ? active?.id : undefined;
+    void browser.storage.session.set({ [OFF_SITE_KEY]: offSite && { ...offSite, tabId: offSiteTab } });
+    changed();
+  };
+
   const setOn = (provider: Experimental, enabled: boolean) => {
     if (enabled === on.has(provider)) return;
     if (enabled) on.add(provider);
@@ -166,14 +206,25 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     }
     changed();
     void pick();
+    void checkOffSite();
   };
-  // Also when the user revokes a permission in Chrome's settings.
-  const recheck = async () => (await granted()).forEach(([p, ok]) => setOn(p, ok));
-  browser.permissions.onAdded.addListener(() => void recheck());
-  browser.permissions.onRemoved.addListener(() => void recheck());
+  // Settings changed by any page (the side panel writes them): applied here, whatever connection carried the click.
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    for (const p of EXPERIMENTS) {
+      const change = changes[experimentKey(p)];
+      if (change) setOn(p, change.newValue === true);
+    }
+    const ask = changes[ASK_ON_SWITCH_KEY];
+    if (ask && (ask.newValue !== false) !== askOnSwitch) {
+      askOnSwitch = ask.newValue !== false;
+      changed();
+    }
+  });
 
   browser.tabs.onActivated.addListener(async (info) => {
     if (info.windowId !== windowId) return;
+    void checkOffSite();
     const mine = ++activations;
     const tab = await browser.tabs.get(info.tabId).catch(() => null);
     // The user activated another tab meanwhile: its own handler decides. Only a video tab is a choice, so
@@ -182,6 +233,7 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     await bind(info.tabId, tab!.url);
   });
   browser.tabs.onUpdated.addListener((id, change, tab) => {
+    if (tab.active && tab.windowId === windowId && (change.url || change.status === 'complete')) void checkOffSite();
     // The synced tab left the provider: another video tab in this window takes over. With none, the tab
     // stays ours, so "이 영상 열기" brings it back.
     if (id === tabId && change.url && providerOf(change.url) !== adapter.provider) void pick();
@@ -203,15 +255,25 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
 
   // After the listeners: a tab switch during the first (possibly injecting) bind must not be missed.
   await pick();
+  void checkOffSite();
 
   return {
     follow: (id) => {
       if (id === windowId) return;
       windowId = id;
       void pick();
+      void checkOffSite();
     },
     adapter: (provider) => (provider === 'youtube' || (isExperimental(provider) && on.has(provider)) ? adapter.as(provider) : undefined),
     nowWatching: () => content,
+    nowWatchingInfo: () => info,
+    offSite: () => offSite,
+    preferences: {
+      askOnSwitch: () => askOnSwitch,
+      setAskOnSwitch: async (ask) => {
+        await browser.storage.local.set({ [ASK_ON_SWITCH_KEY]: ask }); // applied by storage.onChanged
+      },
+    },
     subscribe: (onChange) => {
       subscribers.add(onChange);
       return () => void subscribers.delete(onChange);
@@ -222,13 +284,11 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     },
     experimental: {
       enabled: (provider) => isExperimental(provider) && on.has(provider),
-      // permissions.request needs the click that called this; Chrome shows its own prompt.
       setEnabled: async (provider, enabled) => {
         if (!isExperimental(provider)) return false;
-        const origins = originsOf(provider);
-        const ok = enabled ? await browser.permissions.request(origins) : await browser.permissions.remove(origins);
-        setOn(provider, await browser.permissions.contains(origins));
-        return ok;
+        setOn(provider, enabled); // at once here; storage.onChanged then finds nothing to change
+        await browser.storage.local.set({ [experimentKey(provider)]: enabled });
+        return true;
       },
     },
     open: (url, newTab) => {

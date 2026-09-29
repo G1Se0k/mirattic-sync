@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { ApiError } from "@mirattic/client";
 import type { Me, Visibility } from "@mirattic/types";
 import { api } from "./session";
+import { useAsk } from "./Dialog";
 
 const LABELS: Record<Visibility, string> = { OFF: "공유 안 함", FRIENDS: "친구", ROOM_ONLY: "같은 방에서만" };
 
@@ -34,10 +35,11 @@ export function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const asker = useAsk();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!confirm("계정을 삭제하면 되돌릴 수 없습니다. 삭제할까요?")) return;
+    if (!(await asker.ask("계정을 삭제할까요?", { body: "삭제하면 되돌릴 수 없습니다.", ok: "계정 삭제", danger: true }))) return;
     setBusy(true);
     setError(null);
     try {
@@ -53,6 +55,7 @@ export function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
 
   return (
     <section>
+      {asker.dialog}
       <h2>계정 삭제</h2>
       {!open ? (
         <button className="link danger" onClick={() => setOpen(true)}>계정과 데이터 삭제…</button>
@@ -65,8 +68,8 @@ export function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
           <input type="password" placeholder="비밀번호 확인" autoComplete="current-password" required maxLength={128}
             value={password} onChange={(e) => setPassword(e.target.value)} />
           <div className="row">
-            <button type="submit" className="danger" disabled={busy}>계정 삭제</button>
             <button type="button" className="link" onClick={() => { setOpen(false); setPassword(""); setError(null); }}>취소</button>
+            <button type="submit" className="danger" disabled={busy}>계정 삭제</button>
           </div>
           {error && <p className="error" role="alert">{error}</p>}
         </form>

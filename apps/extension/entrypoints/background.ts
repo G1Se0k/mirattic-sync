@@ -43,6 +43,9 @@ export default defineBackground(() => {
   const broadcast = (message: ToPanel) => ports.forEach((p) => post(p, message));
   const shared = (): Shared => ({
     watching: platform?.nowWatching?.() ?? null,
+    watchingInfo: platform?.nowWatchingInfo?.() ?? null,
+    offSite: platform?.offSite?.() ?? null,
+    askOnSwitch: platform?.preferences?.askOnSwitch() ?? true,
     experiments: {
       netflix: platform?.experimental?.enabled('netflix') ?? false,
       laftel: platform?.experimental?.enabled('laftel') ?? false,
@@ -119,6 +122,7 @@ export default defineBackground(() => {
       send: (event) => socket?.send(event) ?? false,
       adapter: (provider) => platform?.adapter?.(provider),
       nowWatching: () => platform?.nowWatching?.() ?? null,
+      askOnSwitch: () => platform?.preferences?.askOnSwitch() ?? true,
       open: (url) => {
         console.info('[mirattic] following the host to', url); // who moved the tab, when a user reports it
         platform?.open(url);
@@ -227,6 +231,7 @@ export default defineBackground(() => {
           console.info('[mirattic] opening from the panel', m.url);
           platform?.open(m.url, m.newTab);
           break;
+
       }
     });
     port.onDisconnect.addListener(() => {

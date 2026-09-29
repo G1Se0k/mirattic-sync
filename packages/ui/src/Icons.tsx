@@ -1,6 +1,9 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { MediaProvider } from "@mirattic/types";
 import { PROVIDER_NAMES } from "./format";
+import youtube from "./assets/youtube.png";
+import netflix from "./assets/netflix.png";
+import laftel from "./assets/laftel.png";
 
 // A small stroke icon set (24px grid, drawn at 16px), inline so no icon font or package is needed.
 const PATHS = {
@@ -95,21 +98,14 @@ export function IconButton({ icon, label, tone, ...rest }: ButtonHTMLAttributes<
   );
 }
 
-/** A streaming site's mark: its initial on its color (not the site's logo). */
-const PROVIDER_MARKS: Record<MediaProvider, { letter: string; color: string }> = {
-  youtube: { letter: "Y", color: "#e62117" },
-  netflix: { letter: "N", color: "#b20710" },
-  laftel: { letter: "L", color: "#816bff" },
-  mock: { letter: "M", color: "#8a8a86" },
-};
+/** A streaming site's logo (square, transparent; the mock player gets a plain mark). */
+const PROVIDER_LOGOS: Partial<Record<MediaProvider, string>> = { youtube, netflix, laftel };
 
 export function ProviderIcon({ provider }: { provider: MediaProvider }) {
-  const mark = PROVIDER_MARKS[provider];
-  return (
-    <span className="provider" style={{ background: mark.color }} title={PROVIDER_NAMES[provider]} aria-label={PROVIDER_NAMES[provider]}>
-      {mark.letter}
-    </span>
-  );
+  const logo = PROVIDER_LOGOS[provider];
+  return logo
+    ? <img className="provider" src={logo} alt={PROVIDER_NAMES[provider]} title={PROVIDER_NAMES[provider]} />
+    : <span className="provider mock" title={PROVIDER_NAMES[provider]}>M</span>;
 }
 
 /** Initials in a circle: a face for a name without pictures. */

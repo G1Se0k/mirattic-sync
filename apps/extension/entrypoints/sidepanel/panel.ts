@@ -3,14 +3,10 @@ import { ApiError, type ApiClient, type Socket, type SocketStatus } from '@mirat
 import { emptyRoomState, type RoomSyncState } from '@mirattic/sync-core';
 import type { MediaProvider, ServerEvent } from '@mirattic/types';
 import type { Platform, RoomHandle } from '@mirattic/ui';
-import { UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
+import { ASK_ON_SWITCH_KEY, experimentKey, UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
 
 const RECONNECT_MS = 500;
 
-const EXPERIMENT_ORIGINS: Partial<Record<MediaProvider, string>> = {
-  netflix: 'https://www.netflix.com/*',
-  laftel: 'https://laftel.net/*',
-};
 
 /**
  * The side panel's view of the background (ui-port.ts): an API client whose calls run there, its socket,
@@ -27,7 +23,9 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
   };
   const replies = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void }>();
   let nextId = 0;
-  let shared: Shared = { watching: null, experiments: { netflix: false, laftel: false }, activeRoom: null };
+  let shared: Shared = {
+    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, experiments: { netflix: false, laftel: false }, activeRoom: null,
+  };
   let status: SocketStatus = 'closed';
   let socketHandlers: { onEvent(event: ServerEvent): void; onStatus(status: SocketStatus): void } | null = null;
   /** The room this panel shows; `seen` once the background made it its active room. */
@@ -49,7 +47,14 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
         return;
       }
       case 'shared': {
-        shared = m.shared;
+        // Objects equal to the ones we have keep their identity: useSyncExternalStore reads them.
+        const same = <T>(before: T, after: T) => (JSON.stringify(before) === JSON.stringify(after) ? before : after);
+        shared = {
+          ...m.shared,
+          watching: same(shared.watching, m.shared.watching),
+          watchingInfo: same(shared.watchingInfo, m.shared.watchingInfo),
+          offSite: same(shared.offSite, m.shared.offSite),
+        };
         // Another window's panel made a different room the active one: this view is over (back to the list).
         const v = view;
         if (v?.seen && shared.activeRoom !== v.roomId && !v.state.closed) {
@@ -115,6 +120,13 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
 
   const platform: Platform = {
     nowWatching: () => shared.watching,
+    nowWatchingInfo: () => shared.watchingInfo,
+    offSite: () => shared.offSite,
+    preferences: {
+      askOnSwitch: () => shared.askOnSwitch,
+      // Written to storage.local here, not sent over the port: a background restarting meanwhile can't drop it.
+      setAskOnSwitch: (ask) => browser.storage.local.set({ [ASK_ON_SWITCH_KEY]: ask }),
+    },
     activeRoom: () => shared.activeRoom,
     subscribe: (onChange) => {
       subscribers.add(onChange);
@@ -152,7 +164,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
         dismissPauseRequest: () => act('dismissPauseRequest'),
         pauseAll: () => act('pauseAll'),
         seek: (ms) => act('seek', ms),
-        openSwitched: () => act('openSwitched'),
+        openSwitched: (always) => act('openSwitched', always),
         dismissSwitched: () => act('dismissSwitched'),
         setMuted: (muted) => act('setMuted', muted),
         retry: () => act('reload'),
@@ -165,13 +177,12 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
     },
     experimental: {
       enabled: (provider) => (provider === 'netflix' || provider === 'laftel') && shared.experiments[provider],
-      // permissions.request needs the click that called this: it runs here. The background notices the change.
+      // Written to storage.local here (decision 81); the background applies it from storage.onChanged and
+      // announces it back. Resolves once saved, so a restarting background can't lose it.
       setEnabled: async (provider, on) => {
-        const origin = EXPERIMENT_ORIGINS[provider];
-        if (!origin) return false;
-        const origins = { origins: [origin] };
-        const ok = on ? await browser.permissions.request(origins) : await browser.permissions.remove(origins);
-        return ok && (await browser.permissions.contains(origins)) === on;
+        if (provider !== 'netflix' && provider !== 'laftel') return false;
+        await browser.storage.local.set({ [experimentKey(provider)]: on });
+        return true;
       },
     },
     open: (url, newTab) => send({ op: 'open', url, newTab }),

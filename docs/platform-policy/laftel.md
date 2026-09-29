@@ -30,7 +30,7 @@
 - 볼 수 없는 회차(이용권 없음, 지역)는 볼 수 없음. 우회 안내 없음
 
 ## 구현 원칙 (결정 50–52, `plan.md`)
-- **기본 꺼짐.** `optional_host_permissions`의 `https://laftel.net/*`를 켤 때 요청, 끌 때 반납. 꺼져 있으면 laftel.net에 코드를 넣지 않고 탭 URL도 볼 수 없음
+- **기본 꺼짐.** (2026-09-29 결정 81로 바뀜) `https://laftel.net/*`는 설치 때 받는 `host_permissions`, 켜고 끄는 것은 확장 설정. 꺼져 있으면 laftel.net에 코드를 넣지 않고, 지금 탭이 laftel.net인지만 봄(켤지 안내, 서버로 보내지 않음)
 - content script는 manifest에 없음(`registration: 'runtime'`). side panel이 **따라가는 라프텔 탭 하나에만** `scripting.executeScript`
 - 켜는 곳: 설정의 "실험 기능 · Laftel 제어", 라프텔 방 첫 입장 팝업. 개발자 정책이 없고 허용된 기능이 아니며 계정이 제한될 수 있음을 보여줌
 - 읽는 것: URL의 작품·에피소드 ID, 탭 제목, `<video>`의 재생 상태

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { Me, UserSummary } from "@mirattic/types";
 import { DeleteAccount, Privacy } from "./Privacy";
 import { ExperimentalSettings } from "./Experimental";
 import { Avatar, IconButton } from "./Icons";
+import { platform } from "./session";
 
 type Props = {
   me: Me;
@@ -15,6 +16,7 @@ type Props = {
 
 /** Everything that isn't watching together: my code, visibility, experiments, blocks, the account. */
 export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onClose }: Props) {
+  const [showBlocked, setShowBlocked] = useState(false);
   return (
     <>
       <header className="topbar">
@@ -31,23 +33,46 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
           <IconButton icon="logout" label="로그아웃" onClick={onSignedOut} />
         </section>
         <Privacy me={me} onChange={onMeChange} />
+        <AskOnSwitch />
         <ExperimentalSettings />
         <section>
-          <h2>차단한 사용자</h2>
-          {blocked.length === 0 && <p className="muted">없습니다.</p>}
-          <ul className="list">
-            {blocked.map((u) => (
-              <li key={u.id} className="friend">
-                <Avatar name={u.displayName} />
-                <span className="grow name">{u.displayName}</span>
-                <button className="secondary" onClick={() => onUnblock(u.id)}>차단 해제</button>
-              </li>
-            ))}
-          </ul>
+          <button className="secondary" aria-expanded={showBlocked} onClick={() => setShowBlocked((v) => !v)}>
+            차단한 사용자 ({blocked.length}) {showBlocked ? "닫기" : "보기"}
+          </button>
+          {showBlocked && blocked.length === 0 && <p className="muted">없습니다.</p>}
+          {showBlocked && (
+            <ul className="list">
+              {blocked.map((u) => (
+                <li key={u.id} className="friend">
+                  <Avatar name={u.displayName} />
+                  <span className="grow name">{u.displayName}</span>
+                  <button className="secondary" onClick={() => onUnblock(u.id)}>차단 해제</button>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
         <DeleteAccount onDeleted={onSignedOut} />
       </main>
     </>
+  );
+}
+
+const noSubscribe = () => () => {};
+
+/** Whether a member is asked before following the host to another video (decision 81). Only where kept. */
+function AskOnSwitch() {
+  const prefs = platform.preferences;
+  const ask = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => prefs?.askOnSwitch() ?? true);
+  if (!prefs) return null;
+  return (
+    <section>
+      <label className="row">
+        <input type="checkbox" checked={ask} onChange={(e) => void prefs.setAskOnSwitch(e.target.checked)} />
+        <span className="grow">호스트가 다른 영상으로 옮기면 따라갈지 물어보기</span>
+      </label>
+      <p className="muted">끄면 묻지 않고 따라갑니다. 같은 재생목록·작품의 다음 영상은 켜 두어도 묻지 않고 따라갑니다.</p>
+    </section>
   );
 }
 

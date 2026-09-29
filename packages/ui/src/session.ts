@@ -1,6 +1,6 @@
 import type { ApiClient, Socket, SocketStatus } from "@mirattic/client";
 import type { RoomSyncState } from "@mirattic/sync-core";
-import type { MediaProvider, MediaProviderAdapter, RoomContent, ServerEvent } from "@mirattic/types";
+import type { MediaProvider, MediaProviderAdapter, RoomContent, ServerEvent, WatchingInfo } from "@mirattic/types";
 
 /** A room's live side, seen from its screen (see `RoomSync`). */
 export type RoomHandle = {
@@ -11,7 +11,8 @@ export type RoomHandle = {
   dismissPauseRequest(): void;
   pauseAll(): void;
   seek(positionMs: number): void;
-  openSwitched(): void;
+  /** `always`: in this room, follow the host's next videos without asking. */
+  openSwitched(always?: boolean): void;
   dismissSwitched(): void;
   setMuted(muted: boolean): void;
   retry(): void;
@@ -29,6 +30,16 @@ export type Platform = {
   adapter?(provider: MediaProvider): MediaProviderAdapter | undefined;
   /** What the user watches now; "같이 보기" shares it. Must return the same object until it changes. */
   nowWatching?(): RoomContent | null;
+  /** The same, in the parts my own status lines show (channel, episode); the same object until it changes. */
+  nowWatchingInfo?(): WatchingInfo | null;
+  /** The active tab is on a site whose experimental control is off; `visit` counts arrivals (decision 81). */
+  offSite?(): { provider: MediaProvider; visit: number } | null;
+  /** Settings kept by the platform (decision 81). Announced via `subscribe`. */
+  preferences?: {
+    /** Ask before following the host to another video (not of the same series). Off: follow without asking. */
+    askOnSwitch(): boolean;
+    setAskOnSwitch(ask: boolean): Promise<void>;
+  };
   subscribe?(onChange: () => void): () => void;
   /** The socket went up (or down: null). The extension publishes presence through it. */
   connected?(socket: Socket | null): void;

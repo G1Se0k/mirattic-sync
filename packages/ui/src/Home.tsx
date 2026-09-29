@@ -13,7 +13,7 @@ import type {
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
-import { episodeLabel } from "@mirattic/types";
+import { episodeLabel, type WatchingInfo } from "@mirattic/types";
 import { api, platform, SOCKET_URL } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
@@ -23,6 +23,7 @@ import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, ProviderIcon } from "./Icons";
 import { ExperimentControl, isExperiment, useExperiment } from "./Experimental";
+import { Actions, Dialog, useAsk } from "./Dialog";
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
 
@@ -36,6 +37,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [screen, setScreen] = useState<"home" | "settings">("home");
   const [adding, setAdding] = useState(false);
   const [showCode, setShowCode] = useState(false);
+  const asker = useAsk();
   const [choosing, setChoosing] = useState(false);
   const [joining, setJoining] = useState(false);
   /** A site opened by "방 생성" with nothing watched: the room is made once a video of it plays. */
@@ -48,6 +50,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [reporting, setReporting] = useState<UserSummary | null>(null);
   const listeners = useRef(new Set<(event: ServerEvent) => void>());
   const watching = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatching ?? nothing);
+  const info = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatchingInfo ?? nothing);
   const activeRoom = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.activeRoom ?? nothing);
   // Read by the socket handler, which outlives renders.
   const current = useRef({ rooms, openRoom });
@@ -191,8 +194,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   /** Leaving (or closing, as the host) from the list; the extension stops syncing it if it is the active one. */
   async function leaveRoom(id: string) {
-    if (!confirm(rooms.find((r) => r.id === id)?.members.some((m) => m.user.id === me.id && m.role === "HOST")
-      ? "방을 닫을까요? 모든 멤버가 나가게 됩니다." : "방에서 나갈까요?")) return;
+    const hosting = rooms.find((r) => r.id === id)?.members.some((m) => m.user.id === me.id && m.role === "HOST");
+    const yes = hosting
+      ? await asker.ask("방을 닫을까요?", { body: "모든 멤버가 나가게 됩니다.", ok: "방 닫기", danger: true })
+      : await asker.ask("방에서 나갈까요?", { ok: "나가기", danger: true });
+    if (!yes) return;
     await act(() => api.leaveRoom(id))();
   }
 
@@ -310,6 +316,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   return (
     <div className="home">
+      {asker.dialog}
       <header className="topbar">
         <span className="wordmark grow">Mirattic <span>Sync</span></span>
         <span className={`dot ${status === "open" ? "on" : ""}`} title={status === "open" ? "연결됨" : "연결 중"} />
@@ -325,7 +332,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               <ProviderIcon provider={watching.provider} />
               <div className="grow">
                 <div className="muted">지금 보는 영상 · {PROVIDER_NAMES[watching.provider]}</div>
-                <div className="ellipsis"><strong>{watching.title}</strong></div>
+                {/* Like a friend's lines: the channel above (YouTube), the episode below (Netflix, Laftel). */}
+                {info?.channel && <div className="muted ellipsis">{info.channel}</div>}
+                <div className="ellipsis"><strong>{info?.title ?? watching.title}</strong></div>
+                {info && episodeLabel(info) && <div className="muted">{episodeLabel(info)}</div>}
               </div>
             </div>
           ) : (
@@ -376,7 +386,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             </ul>
         </section>
         {choosing && (
-          <ChooseSite onPick={(p) => { setChoosing(false); setPending(p); platform.open(SITES[p]); }} onClose={() => setChoosing(false)} />
+          <ChooseSite onPick={(p) => { setChoosing(false); setPending(p); platform.open(SITES[p], true); }} onClose={() => setChoosing(false)} />
         )}
         {joining && <JoinByCode onJoined={(id) => { setJoining(false); void reload(); enter(id); }} onClose={() => setJoining(false)} />}
 
@@ -447,10 +457,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           <Avatar name={me.displayName} on={status === "open"} />
           <div className="grow">
             <div className="name ellipsis">{me.displayName} <span className="muted">(나)</span></div>
-            <div className="muted ellipsis">
-              {watching ? `${PROVIDER_NAMES[watching.provider]} · ${watching.title}` : status === "open" ? "온라인" : "연결 중"}
-              {me.presenceVisibility === "OFF" && " · 친구에게 숨김"}
-            </div>
+            {(info ? describe({ status: "WATCHING", media: info }) : [status === "open" ? "온라인" : "연결 중"]).map((line, i) => (
+              <div key={i} className="muted ellipsis">{line || "\u00a0"}</div>
+            ))}
+            {me.presenceVisibility === "OFF" && <div className="muted">친구에게 숨김</div>}
           </div>
           <IconButton icon="hash" label={showCode ? "친구 코드 닫기" : "내 친구 코드"} onClick={() => setShowCode((v) => !v)} />
         </div>
@@ -497,14 +507,20 @@ function ChooseSite({ onPick, onClose }: { onPick: (p: keyof typeof SITES) => vo
   const [site, setSite] = useState<keyof typeof SITES | null>(null);
   const on = useExperiment(site && isExperiment(site) ? site : undefined);
   const needsTurningOn = !!site && isExperiment(site) && on === false;
+  // Once: turning the control on picks the site at once, and the shared state saying so may come before or after.
+  const picked = useRef(false);
+  const pick = (p: keyof typeof SITES) => {
+    if (picked.current) return;
+    picked.current = true;
+    onPick(p);
+  };
   useEffect(() => {
-    if (site && !needsTurningOn) onPick(site);
+    if (site && !needsTurningOn) pick(site);
   }, [site, needsTurningOn]);
   return (
-    <dialog open className="stack">
-      <h2>어디서 볼까요?</h2>
+    <Dialog title="어디서 볼까요?" onClose={onClose}>
       {needsTurningOn && isExperiment(site) ? (
-        <ExperimentControl provider={site} onDone={() => { if (!platform.experimental?.enabled(site)) setSite(null); }} />
+        <ExperimentControl provider={site} onDone={(turnedOn) => (turnedOn ? pick(site) : setSite(null))} />
       ) : (
         <div className="stack">
           {(Object.keys(SITES) as (keyof typeof SITES)[]).map((p) => (
@@ -513,8 +529,8 @@ function ChooseSite({ onPick, onClose }: { onPick: (p: keyof typeof SITES) => vo
         </div>
       )}
       <p className="muted">사이트가 열리면 볼 영상을 고르세요. 영상을 열면 방이 만들어집니다.</p>
-      <div className="row"><button className="link" onClick={onClose}>취소</button></div>
-    </dialog>
+      <Actions><button className="link" onClick={onClose}>취소</button></Actions>
+    </Dialog>
   );
 }
 
@@ -534,16 +550,17 @@ function JoinByCode({ onJoined, onClose }: { onJoined: (roomId: string) => void;
   }
 
   return (
-    <dialog open className="stack">
-      <h2>코드로 입장</h2>
-      <form className="row" onSubmit={submit}>
-        <input className="grow code" placeholder="방 코드 (예: K7QM-4XPR)" required maxLength={16} autoFocus
+    <Dialog title="코드로 입장" onClose={onClose}>
+      <form className="stack" onSubmit={submit}>
+        <input className="code" placeholder="방 코드 (예: K7QM-4XPR)" required maxLength={16} autoFocus
           autoCapitalize="characters" spellCheck={false} value={code} onChange={(e) => setCode(e.target.value)} />
-        <button type="submit">입장</button>
+        {error && <p className="error" role="alert">{error}</p>}
+        <Actions>
+          <button type="button" className="link" onClick={onClose}>취소</button>
+          <button type="submit">입장</button>
+        </Actions>
       </form>
-      {error && <p className="error" role="alert">{error}</p>}
-      <div className="row"><button className="link" onClick={onClose}>취소</button></div>
-    </dialog>
+    </Dialog>
   );
 }
 
@@ -629,12 +646,12 @@ const nothing = () => null;
  * A friend's status lines: YouTube adds the channel above the title; Netflix and Laftel put the episode ("3화") below it,
  * an empty line when it has none.
  */
-export function describe(p: PresenceView): string[] {
+export function describe(p: { status: PresenceView["status"]; media?: WatchingInfo & { positionMs?: number; episodeTitle?: string } }): string[] {
   if (p.status === "OFFLINE") return ["오프라인"];
   if (!p.media) return ["온라인"];
   const m = p.media;
   const position = m.positionMs !== undefined ? ` · ${clock(m.positionMs)}` : "";
-  const line = (title: string) => `${PROVIDER_NAMES[m.provider]} · ${title} ${m.playing ? "시청 중" : "일시정지"}${position}`;
+  const line = (title: string) => `${PROVIDER_NAMES[m.provider]} · ${title}${position}`;
   if (m.provider === "youtube") return [m.channel ?? "", line(m.title)];
   if (m.provider === "netflix" || m.provider === "laftel") return [line(m.title), episodeLabel(m)];
   return [line(m.episodeTitle ? `${m.title} · ${m.episodeTitle}` : m.title)];

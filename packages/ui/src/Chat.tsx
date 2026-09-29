@@ -4,6 +4,7 @@ import type { ChatDeleted, ChatMessage, RoomMemberView, ServerEvent } from "@mir
 import { api } from "./session";
 import { clock } from "./format";
 import { IconButton } from "./Icons";
+import { useAsk } from "./Dialog";
 
 type Props = {
   roomId: string;
@@ -32,6 +33,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   const [unseen, setUnseen] = useState(false); // new messages below while reading older ones
   /** Arrived live just now: highlighted for a moment. */
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
+  const asker = useAsk();
   const [failed, setFailed] = useState<string | null>(null);
   /** Deleted while their history was loading: a history answered before the delete must not bring them back. */
   const deleted = useRef<ChatDeleted[]>([]);
@@ -108,7 +110,10 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   }
 
   async function remove(m: ChatMessage) {
-    if (!confirm(m.userId === meId ? "이 메시지를 삭제할까요? 모두에게 \"삭제된 메시지입니다\"로 보입니다." : "호스트 권한으로 이 메시지를 삭제할까요?")) return;
+    const yes = m.userId === meId
+      ? await asker.ask("이 메시지를 삭제할까요?", { body: "모두에게 \"삭제된 메시지입니다\"로 보입니다.", ok: "삭제", danger: true })
+      : await asker.ask("호스트 권한으로 이 메시지를 삭제할까요?", { ok: "삭제", danger: true });
+    if (!yes) return;
     setFailed(null);
     // The server's chat:delete removes it here too (and on every other screen).
     await api.deleteMessage(roomId, m.id).catch(() => setFailed("메시지를 삭제하지 못했습니다."));
@@ -130,6 +135,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
 
   return (
     <section className="chat-panel">
+      {asker.dialog}
       <ul className="list chat" ref={list} onScroll={onScroll}>
         {hasOlder && (
           <li>
