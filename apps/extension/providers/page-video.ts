@@ -23,6 +23,8 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
   protected adPlaying() {
     return false;
   }
+  /** Runs with every check (every second at least): for page chores of a provider. */
+  protected tick() {}
 
   constructor() {
     // Any <video>: a player may swap in a new element for the next episode while the old one is still first
@@ -36,6 +38,7 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
     // and at once when the tab title or the URL changes (a new video shows up without waiting for the poll).
     let last = '';
     const check = () => {
+      this.tick();
       // series: a playlist joined mid-video; the video's state: a next episode whose events we missed; the title
       const video = this.video();
       const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}|${video ? video.paused : 'none'}|${this.title()}`;

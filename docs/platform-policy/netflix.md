@@ -55,7 +55,7 @@ YouTube 약관("interfere", "automated means")보다 훨씬 구체적이다.
   - content script는 manifest에 등록하지 않고, side panel이 **따라가는 Netflix 탭 하나에만** `scripting.executeScript`로 넣음
 - 켜는 곳: 설정의 "실험 기능", Netflix 방에 처음 들어갈 때 뜨는 팝업. 둘 다 약관 조항과 계정 제한 위험을 보여준 뒤 사용자가 직접 켬
 - 읽는 것: URL의 콘텐츠 ID(`/watch/<숫자>`), 탭 제목, `<video>`의 재생 상태, 그리고 결정 73부터 재생 정보(Netflix 내부 데이터의 작품명·시즌·화·에피소드 제목·작품 ID)와 플레이어 제목 줄(`[data-uia="video-title"]`). 그 밖의 페이지 DOM은 읽지 않음. (처음 결정: 에피소드 제목 등 페이지 DOM은 읽지 않음 — 결정 73으로 바뀜)
-- 제어: 재생 / 일시정지는 `<video>`로. seek는 **Netflix 내부 플레이어 API로** (결정 변경, 아래)
+- 제어: 재생 / 일시정지는 `<video>`로. seek는 **Netflix 내부 플레이어 API로** (결정 변경, 아래). 결정 76부터: 방을 따라가는 멤버의 탭에서 끝 화면의 "크레딧 보기" 버튼을 눌러 혼자 다음 화로 넘어가지 않게 함
   - `currentTime` 쓰기는 Netflix가 막고 재생 오류(M7375)를 띄움 (확장 개발자들의 공개 이슈로 확인, 아래 출처)
   - 내부 API 호출이 실패하면 (Netflix 변경) 그 탭은 예전처럼 멤버에게 "호스트와 N초 차이 · mm:ss로 직접 이동" 안내
 

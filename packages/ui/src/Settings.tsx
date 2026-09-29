@@ -31,7 +31,6 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
           </div>
           <IconButton icon="logout" label="로그아웃" onClick={onSignedOut} />
         </section>
-        <MyFriendCode me={me} onMeChange={onMeChange} />
         <Privacy me={me} onChange={onMeChange} />
         <ExperimentalSettings />
         <section>
@@ -53,7 +52,8 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
   );
 }
 
-function MyFriendCode({ me, onMeChange }: { me: Me; onMeChange: (me: Me) => void }) {
+/** My code, shown where friends are added. */
+export function MyFriendCode({ me, onMeChange }: { me: Me; onMeChange: (me: Me) => void }) {
   const [copied, setCopied] = useState(false);
   const code = `${me.friendCode.slice(0, 4)}-${me.friendCode.slice(4)}`;
 

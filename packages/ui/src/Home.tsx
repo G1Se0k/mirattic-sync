@@ -15,7 +15,7 @@ import type {
 import { api, platform, SOCKET_URL } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
-import { Settings } from "./Settings";
+import { MyFriendCode, Settings } from "./Settings";
 import { localRoom } from "./localRoom";
 import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
@@ -327,7 +327,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             <h2>친구</h2>
             <IconButton icon="userPlus" label="친구 추가" onClick={() => setAdding((a) => !a)} />
           </div>
-          {adding && <AddFriend onSent={() => { setAdding(false); void reload(); }} />}
+          {adding && (
+            <div className="stack">
+              <MyFriendCode me={me} onMeChange={onMeChange} />
+              <AddFriend onSent={() => { setAdding(false); void reload(); }} />
+            </div>
+          )}
           {sorted.length === 0 && !adding && <p className="muted">아직 친구가 없습니다. 오른쪽 위 버튼으로 친구 코드를 입력하세요.</p>}
           <ul className="list">
             {sorted.map((f) => (

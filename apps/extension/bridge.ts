@@ -7,7 +7,13 @@ import { seekInPage as netflixSeek } from './providers/netflix';
 
 export const PORT_NAME = 'mirattic-player';
 
-export type PortRequest = { id: number; op: 'snapshot' | 'play' | 'pause' | 'seek'; positionMs?: number };
+export type PortRequest = {
+  id: number;
+  op: 'snapshot' | 'play' | 'pause' | 'seek' | 'credits';
+  positionMs?: number;
+  /** 'credits': the room's video to stay on the credits of, or null. */
+  contentId?: string | null;
+};
 
 export type PortMessage =
   | { id: number; snapshot: PlayerSnapshot | null } // reply to a request
@@ -40,6 +46,7 @@ export function serveAdapter(create: () => Served) {
       if (req.op === 'play') await adapter.play();
       else if (req.op === 'pause') await adapter.pause();
       else if (req.op === 'seek' && Number.isFinite(req.positionMs)) await adapter.seek(req.positionMs!);
+      else if (req.op === 'credits') adapter.keepCredits?.(typeof req.contentId === 'string' ? req.contentId : null);
       port.postMessage({ id: req.id, snapshot: await adapter.getSnapshot() } satisfies PortMessage);
     });
     port.onDisconnect.addListener(() => {
@@ -67,6 +74,8 @@ export class RemoteAdapter implements MediaProviderAdapter {
   private tabId: number | null = null;
   /** The page seek failed on this tab (API gone): members are told where to go instead. */
   private pageSeekFailed = false;
+  /** Stay on the credits of this room video (a member following the room): told to tabs of its provider. */
+  private credits: { provider: MediaProvider; contentId: string } | null = null;
   private views = new Map<MediaProvider, MediaProviderAdapter>();
   private presence: MediaPresence | null = null;
   private nextId = 0;
@@ -112,6 +121,7 @@ export class RemoteAdapter implements MediaProviderAdapter {
       else this.goneListeners.forEach((l) => l()); // left the watch page
     });
     // Also fires right away when the tab has no content script (not YouTube, or opened before install).
+    if (this.credits?.provider === provider) void this.request({ op: 'credits', contentId: this.credits.contentId });
     port.onDisconnect.addListener(() => {
       if (this.port !== port) return;
       const dead = !this.heard;
@@ -172,6 +182,17 @@ export class RemoteAdapter implements MediaProviderAdapter {
     return () => void this.listeners.delete(callback);
   }
 
+  /** For the per-provider views (`as`): their room video, told to tabs of that provider only. */
+  keepCreditsOf(provider: MediaProvider, contentId: string | null) {
+    const was = this.credits;
+    if (was?.provider === provider && was.contentId === contentId || !was && !contentId) return;
+    this.credits = contentId ? { provider, contentId } : null;
+    // Only a tab of that provider hears it; the tab also checks it is on that very video before pressing.
+    if (this.provider === provider || was?.provider === this.provider) {
+      void this.request({ op: 'credits', contentId: this.provider === provider ? contentId : null });
+    }
+  }
+
   /** The video went away: left the watch page, or the tab closed / moved to another site. */
   onGone(callback: () => void) {
     this.goneListeners.add(callback);
@@ -207,6 +228,7 @@ export class RemoteAdapter implements MediaProviderAdapter {
       onChange: (callback) => this.onChange((s) => mine() && callback(s)),
       // Not `mine()`: the connection is already gone when a closed tab reports it.
       onGone: (callback) => this.onGone(() => this.provider === provider && callback()),
+      keepCredits: (contentId) => this.keepCreditsOf(provider, contentId),
       destroy: () => {},
     };
     this.views.set(provider, view);

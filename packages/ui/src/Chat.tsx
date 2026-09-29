@@ -123,7 +123,11 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     if (onSeek && confirm(`${clock(ms)} 위치로 이동할까요? 방의 모든 사람이 함께 이동합니다.`)) onSeek(ms);
   }
 
-  const name = (id: string) => (id === meId ? "나" : members.find((m) => m.user.id === id)?.user.displayName ?? "나간 사용자");
+  const name = (id: string) => {
+    const member = members.find((m) => m.user.id === id)?.user.displayName;
+    if (id === meId) return `${member ?? "나"}(나)`;
+    return member ?? "나간 사용자";
+  };
   const timestamp = (ms: number | undefined) =>
     ms === undefined ? null
       : onSeek ? <button className="link stamp code" title="이 위치로 이동" onClick={() => jump(ms)}>{clock(ms)}</button>

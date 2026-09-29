@@ -100,3 +100,20 @@ it("tells the room when the host's video gets its details later (same video, no 
   sync.dispose();
 });
 
+
+it("keeps a member's player on the credits (the host takes the room on), and lets go on leaving", async () => {
+  const m = start("me", "host");
+  const credits: (string | null)[] = [];
+  (m.player as MockMediaProvider & { keepCredits(id: string | null): void }).keepCredits = (id) => void credits.push(id);
+  await measured(m);
+  expect(credits.at(-1)).toBe("c1"); // the room's video
+  m.sync.dispose();
+  expect(credits.at(-1)).toBeNull();
+
+  const h = start("me", "me");
+  const hostCredits: (string | null)[] = [];
+  (h.player as MockMediaProvider & { keepCredits(id: string | null): void }).keepCredits = (id) => void hostCredits.push(id);
+  await measured(h);
+  expect(hostCredits.filter((x) => x !== null)).toEqual([]);
+  h.sync.dispose();
+});

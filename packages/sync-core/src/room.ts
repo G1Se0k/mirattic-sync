@@ -153,6 +153,8 @@ export class RoomSync {
     }
     this.memberFollows(content, sameVideo);
     this.refreshPlayer();
+    // Same player, another room video (the next episode): stay on the credits of that one now.
+    if (!sameVideo && this.engineKey === "member") this.enginePlayer?.keepCredits?.(content.contentId);
   }
 
   /**
@@ -280,6 +282,7 @@ export class RoomSync {
       });
       return;
     }
+    engineOf.keepCredits?.(this.state.room!.content.contentId); // a member stays on the credits; the host moves on
     const follower = new SyncFollower({
       adapter: engineOf,
       clock: this.clock,
@@ -290,6 +293,7 @@ export class RoomSync {
   }
 
   private stopEngines() {
+    this.enginePlayer?.keepCredits?.(null);
     this.follower?.stop();
     this.follower = null;
     this.stopPublishing?.();

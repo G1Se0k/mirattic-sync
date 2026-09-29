@@ -72,6 +72,11 @@ export interface MediaProviderAdapter {
   onChange(callback: (snapshot: PlayerSnapshot) => void): () => void;
   /** The video went away (left the watch page, tab closed). Optional: the mock player never goes. */
   onGone?(callback: () => void): () => void;
+  /**
+   * A member following the room's `contentId`: at the end of that episode, stay on the credits instead of letting
+   * the site move on to the next one by itself (the host decides). null = off. Only where a site does that (Netflix).
+   */
+  keepCredits?(contentId: string | null): void;
   destroy(): void;
 }
 

@@ -54,6 +54,25 @@ export class NetflixAdapter extends PageVideoAdapter {
   }
 
   private readonly lines = new TitleLines();
+  private credits: string | null = null;
+  /** The credits button pressed while it stays on screen: pressed again only after it went away. */
+  private pressed: Element | null = null;
+
+  /** Set by the room for a member: see `MediaProviderAdapter.keepCredits`. */
+  keepCredits(contentId: string | null) {
+    this.credits = contentId;
+  }
+
+  // At the end of an episode Netflix offers "크레딧 보기" and "다음 화" and moves on by itself: a member watching
+  // the room's episode presses the credits one (once per appearance), so only the host takes the room on.
+  protected override tick() {
+    const button = creditsButton();
+    const shown = button && button.getClientRects().length > 0 ? button : null;
+    if (shown !== this.pressed) this.pressed = null;
+    if (!shown || this.pressed || !this.credits || this.contentId() !== this.credits) return;
+    this.pressed = shown;
+    shown.click();
+  }
 
   protected title() {
     return this.lines.see(this.contentId(), playerTitle()) ?? title();
@@ -94,6 +113,11 @@ export function seekInPage(positionMs: number): boolean {
  */
 export function episodeRun(run: string | null, id: string | null) {
   return id === null ? null : (run ?? id);
+}
+
+/** Netflix's end-of-episode "크레딧 보기" (watch credits) button, if shown. */
+export function creditsButton(root: ParentNode = document) {
+  return root.querySelector<HTMLElement>('button[data-uia="watch-credits-seamless-button"], button[data-uia*="credits"]');
 }
 
 /** The title line of Netflix's player ("킹덤 · S2:E3 · 제3화"), or null while it isn't shown. */

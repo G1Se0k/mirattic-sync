@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { describeMetadata, episodeRun, metadataInPage, playerTitle, seekInPage, TitleLines } from './netflix';
+import { creditsButton, describeMetadata, episodeRun, metadataInPage, playerTitle, seekInPage, TitleLines } from './netflix';
 
 const g = globalThis as { window?: unknown };
 afterEach(() => delete g.window);
@@ -97,4 +97,12 @@ it('accepts an unchanged title once the switch is old enough (two videos with th
   expect(lines.see('B', 'Same', false, 1_000)).toBeUndefined();
   expect(lines.see('B', 'Same', false, 3_999)).toBeUndefined(); // still within 3s of the switch at 1s
   expect(lines.see('B', 'Same', false, 4_000)).toBe('Same');
+});
+
+it("finds Netflix's watch-credits button", () => {
+  const button = {};
+  let asked = '';
+  const root = { querySelector: (q: string) => ((asked = q), button) } as unknown as ParentNode;
+  expect(creditsButton(root)).toBe(button);
+  expect(asked).toContain('watch-credits-seamless-button');
 });
