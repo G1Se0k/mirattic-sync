@@ -1,5 +1,8 @@
 import { watchUrl } from '@mirattic/types';
 import { PageVideoAdapter } from './page-video';
+import { TitleLines } from './title-lines';
+
+export { TitleLines } from './title-lines';
 
 // Netflix page structure lives only here (docs/platform-policy/netflix.md). Experimental, off by default:
 // injected only into the synced tab after the user turned it on. What we read: the id in /watch/<id>,
@@ -91,33 +94,6 @@ export function seekInPage(positionMs: number): boolean {
  */
 export function episodeRun(run: string | null, id: string | null) {
   return id === null ? null : (run ?? id);
-}
-
-/**
- * The player's title line, remembered per episode (it is in the page only while the controls show). A new episode
- * takes a line only once it differs from the last line seen before it — the previous episode's may still be on
- * screen while the next one loads, even after a stop at the browse page.
- */
-export class TitleLines {
-  private readonly titles = new Map<string, string>();
-  private id: string | null = null;
-  private last: string | null = null;
-  private stale: string | null = null;
-
-  see(id: string | null, shown: string | null): string | undefined {
-    if (id !== this.id) {
-      if (id) this.stale = this.last;
-      this.id = id;
-    }
-    if (shown) {
-      if (id && shown !== this.stale) {
-        this.stale = null;
-        this.titles.set(id, shown);
-      }
-      this.last = shown;
-    }
-    return id ? this.titles.get(id) : undefined;
-  }
 }
 
 /** The title line of Netflix's player ("킹덤 · S2:E3 · 제3화"), or null while it isn't shown. */

@@ -9,7 +9,7 @@ Claude:
 - fixes after findings
 
 Codex:
-- use **Astra**
+- use **Sol**
 - execute relevant tests/checks
 - review changed code
 - inspect regression/security/error-handling risks
@@ -18,10 +18,10 @@ Codex:
 ## Loop
 
 Claude implements
-→ Codex Astra validates
+→ Codex Sol validates
 → PASS: finish
 → FAIL: Claude fixes
-→ Codex Astra validates again
+→ Codex Sol validates again
 
 Allow at most 3 automatic re-validations after the first validation.
 

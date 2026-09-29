@@ -1,11 +1,22 @@
 import { watchUrl } from '@mirattic/types';
 import { PageVideoAdapter } from './page-video';
+import { TitleLines } from './title-lines';
 
 // YouTube page structure lives only here (docs/platform-policy/youtube.md). What we read: the video id
 // in the URL, the tab title, and the <video>'s play state. We never touch ads or add anything to the page.
 const VIDEO = '#movie_player video';
 const PLAYER = '#movie_player';
 const AD_CLASS = 'ad-showing';
+const TITLE_LINK = '#movie_player a.ytp-title-link';
+
+/** The video id in a player link (`…/watch?v=<id>`), if any. */
+export function playerVideoId(href: string) {
+  try {
+    return new URL(href).searchParams.get('v');
+  } catch {
+    return null;
+  }
+}
 
 export class YouTubeAdapter extends PageVideoAdapter {
   readonly provider = 'youtube' as const;
@@ -23,8 +34,16 @@ export class YouTubeAdapter extends PageVideoAdapter {
     return id && watchUrl({ provider: 'youtube', contentId: id }) ? id : null;
   }
 
+  private readonly lines = new TitleLines();
+
+  // The player's title link names the video it belongs to, so it is never the previous video's; the tab title
+  // lags behind a switch (first "YouTube", then possibly the previous title) and is used only once it changed.
   protected title() {
-    return title();
+    const id = this.contentId();
+    const link = document.querySelector<HTMLAnchorElement>(TITLE_LINK);
+    const linked = link && id && playerVideoId(link.href) === id ? link.textContent?.trim() || null : null;
+    const tab = title();
+    return this.lines.see(id, linked ?? (tab === 'YouTube' ? null : tab), !!linked) ?? 'YouTube';
   }
 
   protected override series() {

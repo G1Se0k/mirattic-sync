@@ -83,3 +83,18 @@ it("never gives the previous episode's title line to the next one, also via the 
   expect(lines.see('C', '킹덤 · E3')).toBe('킹덤 · E3');
   expect(lines.see('B', null)).toBe('킹덤 · E2'); // remembered
 });
+
+it('takes a title verified as the new video\'s at once, even if it equals the stale one', () => {
+  const lines = new TitleLines();
+  expect(lines.see('A', 'Same')).toBe('Same');
+  expect(lines.see('B', 'Same')).toBeUndefined();
+  expect(lines.see('B', 'Same', true)).toBe('Same');
+});
+
+it('accepts an unchanged title once the switch is old enough (two videos with the same title)', () => {
+  const lines = new TitleLines();
+  expect(lines.see('A', 'Same', false, 0)).toBe('Same');
+  expect(lines.see('B', 'Same', false, 1_000)).toBeUndefined();
+  expect(lines.see('B', 'Same', false, 3_999)).toBeUndefined(); // still within 3s of the switch at 1s
+  expect(lines.see('B', 'Same', false, 4_000)).toBe('Same');
+});

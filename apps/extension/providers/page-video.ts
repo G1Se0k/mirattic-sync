@@ -32,21 +32,34 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
     };
     // Media events don't bubble, but capture sees them — also on a <video> swapped in later.
     for (const type of EVENTS) document.addEventListener(type, onMedia, true);
-    // An ad starting / ending and in-page navigation change no media event we can rely on: poll them.
+    // An ad starting / ending and in-page navigation change no media event we can rely on: checked every second,
+    // and at once when the tab title or the URL changes (a new video shows up without waiting for the poll).
     let last = '';
-    const poll = setInterval(() => {
-      // series: a playlist joined mid-video; the video's state: a next episode whose events we missed
+    const check = () => {
+      // series: a playlist joined mid-video; the video's state: a next episode whose events we missed; the title
       const video = this.video();
-      // …and the title (Netflix's appears only once its player line has been shown)
       const key = `${this.contentId()}|${this.adPlaying()}|${this.series()}|${video ? video.paused : 'none'}|${this.title()}`;
       if (key !== last) {
         last = key;
         this.emit();
       }
-    }, 1000);
+    };
+    const poll = setInterval(check, 1000);
+    const titles = new MutationObserver(check);
+    titles.observe(document.head ?? document.documentElement, { subtree: true, childList: true, characterData: true });
+    let soon: ReturnType<typeof setTimeout> | undefined;
+    const onNavigate = () => {
+      clearTimeout(soon);
+      soon = setTimeout(check, 0); // after the URL has changed
+    };
+    const navigation = (globalThis as { navigation?: EventTarget }).navigation;
+    navigation?.addEventListener('navigate', onNavigate);
     this.stop = () => {
       for (const type of EVENTS) document.removeEventListener(type, onMedia, true);
       clearInterval(poll);
+      titles.disconnect();
+      clearTimeout(soon);
+      navigation?.removeEventListener('navigate', onNavigate);
     };
   }
 
