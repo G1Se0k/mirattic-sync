@@ -14,7 +14,8 @@ export default defineConfig({
     // one of them and can warn while its control is off; their pages are read and driven only once the user turns
     // the control on (experimental, docs/platform-policy/{netflix,laftel}.md) — `scripting` then injects its script
     // into the one tab we follow. The API server allows this extension's origin through CORS instead.
-    permissions: ['sidePanel', 'storage', 'scripting'],
+    // identity: launchWebAuthFlow for the Mirattic account sign-in window.
+    permissions: ['sidePanel', 'storage', 'scripting', 'identity'],
     host_permissions: ['https://www.youtube.com/*', ...EXPERIMENTAL_ORIGINS],
     action: {},
     // Dev-only public key pinning the ID to kphihploboaigagpahhdhjiaglnfmpii so the server can allow its origin.

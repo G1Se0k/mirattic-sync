@@ -27,7 +27,7 @@ public class SecurityConfig {
 				.cors(withDefaults())
 				.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
-						.requestMatchers("/actuator/health", "/api/auth/**", "/ws").permitAll()
+						.requestMatchers("/actuator/health", "/api/auth/**", "/auth/**", "/ws").permitAll()
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(o -> o.jwt(withDefaults()))
 				.build();

@@ -5,18 +5,31 @@ ID는 UUID 문자열, 시간은 epoch ms.
 
 ## Auth
 
+Mirattic Auth 이전 중 (Auth 저장소 `docs/migration.md` 옵션 B, 2단계 이중 수용). 새 로그인은 Mirattic 계정으로만 한다.
+
+### Mirattic 계정 로그인 (확장, `chrome.identity.launchWebAuthFlow`)
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/auth/start?redirect=&challenge=` | `redirect`는 허용된 확장 redirect(`AUTH_EXTENSION_REDIRECTS`, `https://<id>.chromiumapp.org/`)와 정확히 같아야 함, `challenge`는 확장이 만든 PKCE S256(43자). state·서버 PKCE를 메모리에 10분 보관, state를 `sync_login` 쿠키(HttpOnly, SameSite=Lax, path `/auth/callback`)에 묶고 Auth `/oauth2/authorize`로 302. 그 외 400 |
+| GET | `/auth/callback` | Auth가 돌려보냄. state·쿠키 확인 → code를 client secret(Basic) + verifier로 교환 → ID token으로 `sub`·`name` 확인 → 처음 보는 UID면 Sync `users` 행 생성(제품 필드만) → `<redirect>?handoff=<일회용 코드>`로 302. 실패는 `<redirect>?error=…` (`state_mismatch`, `access_denied`, `exchange_failed`). URL에 토큰은 절대 없음 |
+| POST | `/api/auth/handoff` | `{ code, verifier }` → 200 `AuthTokens` (Auth access/refresh token). 60초, 1회용, `/auth/start`의 challenge와 맞는 verifier만. 그 외 401 |
+
+### 토큰
 | Method | Path | Body | 응답 |
 |---|---|---|---|
-| POST | `/api/auth/signup` | `{ email, password(8–128), displayName(≤32) }` | 201 `AuthTokens` / 409 이메일 중복 |
-| POST | `/api/auth/login` | `{ email, password }` | 200 `AuthTokens` / 401 |
-| POST | `/api/auth/refresh` | `{ refreshToken }` | 200 새 `AuthTokens` / 401 |
-| POST | `/api/auth/logout` | `{ refreshToken }` | 204 (해당 로그인의 토큰 family 전부 폐기) |
+| POST | `/api/auth/refresh` | `{ refreshToken }` | legacy 토큰(DB에 있음)은 기존대로, 그 외는 Auth `/oauth2/token`으로 중계. 200 새 `AuthTokens` / 401 (Auth `invalid_grant` 또는 Sync 계정 없음 → 클라이언트 로그아웃) / 502 (Auth 불가·설정 오류: 토큰 유지) |
+| POST | `/api/auth/logout` | `{ refreshToken }` | 204. legacy는 family 폐기, Auth 토큰은 `/oauth2/revoke` 중계(최선) |
+| POST | `/api/auth/signup` | legacy | 운영에서는 **410** (`LEGACY_SIGNUP=false`, 새 계정은 Auth에서만) |
+| POST | `/api/auth/login` | legacy `{ email, password }` | 200 `AuthTokens` / 401. 2단계 동안 유지, 7단계에서 제거 |
 
-- access token: HS256 JWT, 15분, `sub` = userId, `iss` = `mirattic`
-- refresh token: 불투명 랜덤 32바이트, 30일, DB에는 SHA-256만 저장
-- **rotation + 재사용 감지**: refresh할 때마다 새 토큰을 발급하고 이전 토큰을 폐기한다. 폐기된 토큰이 다시 오면 그 로그인에서 나온 토큰 전체(family)를 폐기한다.
-  클라이언트는 refresh를 동시에 하나만 보내야 한다 (`packages/client`가 보장).
-- `/api/auth/**`는 IP당 분당 20회 제한 (429)
+- API의 access token은 둘 다 받음 (alg로 구분):
+  - Auth: RS256, Auth JWKS, `iss` = `AUTH_ISSUER`, `aud` ∋ `mirattic-sync`, `scope` 있음(ID token 거부), 15분
+  - legacy: HS256, `iss` = `mirattic`, 15분
+  - 공통: `sub` = UID, 삭제된 Sync 계정이면 401
+- Auth refresh token: 128자, 30일, 사용할 때마다 회전, 재사용 감지는 Auth가 함 (10초 유예 후 재사용 → 그 로그인 전체 폐기)
+- legacy refresh token: 43자, 회전 + family 재사용 감지 (기존)
+- 클라이언트는 refresh를 동시에 하나만 보내야 한다 (`packages/client`가 보장)
+- `/api/auth/**`, `/auth/**`는 IP당 분당 20회 제한 (429)
 
 ## Users
 

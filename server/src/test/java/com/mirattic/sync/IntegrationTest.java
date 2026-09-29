@@ -13,6 +13,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -27,7 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
 		"app.jwt-secret=test-secret-test-secret-test-secret-0123456789",
-		"app.auth-rate-limit-per-minute=100000",
+		"app.auth-rate-limit-per-minute=100000", "app.legacy-signup=true",
+		"app.auth.client-secret=" + AuthStub.CLIENT_SECRET, "app.auth.redirect-uri=https://sync.test/auth/callback",
 		"app.empty-room-sweep-ms=3600000", "app.room-log-sweep-ms=3600000", "app.room-log-grace-ms=0" }) // tests sweep by hand
 @AutoConfigureMockMvc
 public abstract class IntegrationTest {
@@ -54,6 +57,11 @@ public abstract class IntegrationTest {
 		public void send(String text) throws Exception {
 			session.sendMessage(new TextMessage(text));
 		}
+	}
+
+	@DynamicPropertySource
+	static void auth(DynamicPropertyRegistry registry) {
+		registry.add("app.auth.issuer", AuthStub::issuer);
 	}
 
 	@LocalServerPort

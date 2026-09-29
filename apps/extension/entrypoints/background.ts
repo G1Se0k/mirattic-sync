@@ -1,7 +1,7 @@
 import { browser, type Browser } from 'wxt/browser';
 import { ApiError, connectSocket, createApi, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { RoomSync } from '@mirattic/sync-core';
-import { API_URL, SOCKET_URL, store } from '../session';
+import { API_URL, SOCKET_URL, authorize, store } from '../session';
 import { hasConsent } from '../consent';
 import { watch, type Watch } from '../watch';
 import { ROOM_ACTIONS, UI_PORT, type FromPanel, type Shared, type ToPanel } from '../ui-port';
@@ -18,7 +18,7 @@ export default defineBackground(() => {
   // Toolbar icon opens the side panel (outside the page, never over the player).
   void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
-  const api = createApi({ baseUrl: API_URL, store });
+  const api = createApi({ baseUrl: API_URL, store, authorize });
   const ports = new Set<Browser.runtime.Port>();
   /** Panels showing a room, and which one. */
   const viewers = new Map<Browser.runtime.Port, string>();
@@ -177,7 +177,7 @@ export default defineBackground(() => {
     if (name === 'restore' && meId) return true; // already signed in: no second token rotation
     if (name === 'logout') signOut();
     const result = await (fn as (...a: unknown[]) => Promise<unknown>)(...args);
-    if ((name === 'login' || name === 'signup' || (name === 'restore' && result === true)) && !meId) await signedIn();
+    if ((name === 'loginWithMirattic' || name === 'login' || name === 'signup' || (name === 'restore' && result === true)) && !meId) await signedIn();
     if (name === 'deleteAccount') signOut();
     return result;
   }

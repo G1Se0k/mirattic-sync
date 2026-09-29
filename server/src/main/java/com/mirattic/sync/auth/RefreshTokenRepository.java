@@ -13,6 +13,8 @@ interface RefreshTokenRepository extends JpaRepository<RefreshToken, String> {
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	Optional<RefreshToken> findByTokenHash(String tokenHash);
 
+	boolean existsByTokenHash(String tokenHash);
+
 	@Modifying
 	@Query("update RefreshToken t set t.revokedAt = :now where t.familyId = :familyId and t.revokedAt is null")
 	void revokeFamily(String familyId, long now);

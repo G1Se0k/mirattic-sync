@@ -1,11 +1,13 @@
 package com.mirattic.sync.auth;
 
 import com.mirattic.sync.user.UserRepository;
+import com.nimbusds.jose.JWSObject;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.text.ParseException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -20,6 +22,7 @@ import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -51,17 +54,35 @@ public class TokenService {
 		this.encoder = new NimbusJwtEncoder(new ImmutableSecret<>(key));
 	}
 
+	/**
+	 * Dual acceptance (migration phase B): legacy Sync tokens (HS256, iss `mirattic`) and Mirattic Auth access
+	 * tokens (RS256 via Auth's JWKS, iss = Auth, aud = mirattic-sync). Both carry the UID as `sub`. Picked by the
+	 * header's alg; each decoder accepts only its own algorithm and key.
+	 */
 	@Bean
-	JwtDecoder jwtDecoder(UserRepository users) {
-		NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
+	JwtDecoder jwtDecoder(UserRepository users, MiratticAuth auth) {
 		// A deleted account's access tokens stop working at once, not at expiry.
 		// ponytail: one primary-key lookup per request; cache briefly if it ever shows up in profiles.
 		OAuth2TokenValidator<Jwt> accountExists = jwt -> users.existsById(jwt.getSubject())
 				? OAuth2TokenValidatorResult.success()
 				: OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "account deleted", null));
-		decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer(ISSUER),
+		NimbusJwtDecoder legacy = NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
+		legacy.setJwtValidator(new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer(ISSUER),
 				accountExists));
-		return decoder;
+		// Access tokens only: Auth's ID token (same key, iss and aud) has no `scope` claim.
+		OAuth2TokenValidator<Jwt> accessToken = jwt -> jwt.hasClaim("scope")
+				? OAuth2TokenValidatorResult.success()
+				: OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "not an access token", null));
+		JwtDecoder mirattic = auth.decoder(new DelegatingOAuth2TokenValidator<>(accessToken, accountExists));
+		return token -> {
+			String alg;
+			try {
+				alg = JWSObject.parse(token).getHeader().getAlgorithm().getName();
+			} catch (ParseException e) {
+				throw new BadJwtException("malformed token", e);
+			}
+			return "HS256".equals(alg) ? legacy.decode(token) : mirattic.decode(token);
+		};
 	}
 
 	String accessToken(String userId) {

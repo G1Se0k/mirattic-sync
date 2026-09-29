@@ -35,6 +35,13 @@ public class User {
 		this.createdAt = System.currentTimeMillis();
 	}
 
+	/** A user first seen through Mirattic Auth: the UID is Auth's `sub` (the same UUID for imported accounts). */
+	public static User fromAuth(String id, String displayName) {
+		User u = new User(displayName);
+		u.id = id;
+		return u;
+	}
+
 	public String getId() { return id; }
 	public String getDisplayName() { return displayName; }
 	public String getFriendCode() { return friendCode; }

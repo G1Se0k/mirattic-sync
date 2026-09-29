@@ -29,7 +29,13 @@ export class ApiError extends Error {
 
 export type ApiClient = ReturnType<typeof createApi>;
 
-export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fetch?: typeof fetch }) {
+/**
+ * The browser part of a Mirattic account sign-in (extension: chrome.identity.launchWebAuthFlow through the server's
+ * /auth/start). Resolves to the one-time handoff code and the PKCE verifier of the challenge it sent.
+ */
+export type Authorize = () => Promise<{ code: string; verifier: string }>;
+
+export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fetch?: typeof fetch; authorize?: Authorize }) {
   const doFetch = opts.fetch ?? fetch.bind(globalThis);
   let accessToken: string | null = null;
   // Single in-flight refresh: two concurrent refreshes with one token would trip server reuse detection.
@@ -136,6 +142,12 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
 
     async signup(email: string, password: string, displayName: string): Promise<UserSummary> {
       return adopt(await parse<AuthTokens>(await send("POST", "/api/auth/signup", { email, password, displayName }, null)));
+    },
+    /** Sign in (or sign up) with a Mirattic account. */
+    async loginWithMirattic(): Promise<UserSummary> {
+      if (!opts.authorize) throw new ApiError(400, "Mirattic sign-in is not available here");
+      const { code, verifier } = await opts.authorize();
+      return adopt(await parse<AuthTokens>(await send("POST", "/api/auth/handoff", { code, verifier }, null)));
     },
     async login(email: string, password: string): Promise<UserSummary> {
       return adopt(await parse<AuthTokens>(await send("POST", "/api/auth/login", { email, password }, null)));

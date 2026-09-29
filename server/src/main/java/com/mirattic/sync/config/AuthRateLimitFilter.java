@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Fixed one-minute window per client IP on /api/auth/** and DELETE /api/me (password brute-force guard).
+ * Fixed one-minute window per client IP on /api/auth/**, /auth/** (Mirattic Auth sign-in) and DELETE /api/me (password brute-force guard).
  * ponytail: in-memory and uses the socket address; behind a proxy, trust X-Forwarded-For via
  * server.forward-headers-strategy, and move counters to Redis when running more than one instance.
  */
@@ -32,7 +32,7 @@ class AuthRateLimitFilter extends OncePerRequestFilter {
 	@Override
 	protected boolean shouldNotFilter(HttpServletRequest request) {
 		// Account deletion checks a password too.
-		return !request.getRequestURI().startsWith("/api/auth/")
+		return !request.getRequestURI().startsWith("/api/auth/") && !request.getRequestURI().startsWith("/auth/")
 				&& !("DELETE".equals(request.getMethod()) && "/api/me".equals(request.getRequestURI()));
 	}
 

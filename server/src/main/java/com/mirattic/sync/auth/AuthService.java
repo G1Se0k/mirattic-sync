@@ -68,6 +68,11 @@ public class AuthService {
 		return issue(user, UUID.randomUUID().toString());
 	}
 
+	/** A legacy Sync refresh token (dual acceptance); anything else is relayed to Mirattic Auth. */
+	public boolean isLegacy(String rawToken) {
+		return refreshTokens.existsByTokenHash(TokenService.sha256(rawToken));
+	}
+
 	@Transactional(noRollbackFor = InvalidRefreshToken.class)
 	public Tokens refresh(String rawToken) {
 		long now = System.currentTimeMillis();

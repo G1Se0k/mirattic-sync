@@ -41,6 +41,19 @@ describe("createApi", () => {
     expect(store.value).toBe("r2");
   });
 
+  it("signs in with a Mirattic account by redeeming the handoff code with its verifier", async () => {
+    const store = memoryStore(null);
+    const fetchMock: typeof fetch = async (url, init) => {
+      expect(String(url)).toBe("http://api/api/auth/handoff");
+      expect(JSON.parse(String(init?.body))).toEqual({ code: "h1", verifier: "v1" });
+      return json(200, { accessToken: "a1", refreshToken: "r1", user: { id: "u", displayName: "U" } });
+    };
+    const api = createApi({ baseUrl: "http://api", store, fetch: fetchMock, authorize: async () => ({ code: "h1", verifier: "v1" }) });
+
+    await expect(api.loginWithMirattic()).resolves.toEqual({ id: "u", displayName: "U" });
+    expect(store.value).toBe("r1");
+  });
+
   it("clears the stored token when refresh is rejected", async () => {
     const store = memoryStore("stale");
     const api = createApi({ baseUrl: "http://api", store, fetch: async () => json(401) });

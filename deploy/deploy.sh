@@ -18,6 +18,9 @@ if [ ! -f .env ]; then
   } > .env
 fi
 
+# The Mirattic Auth client secret is added by hand (it comes from the Auth host's client-secrets.txt).
+grep -q '^AUTH_CLIENT_SECRET=.' .env || { echo "deploy/.env: AUTH_CLIENT_SECRET missing (Mirattic Auth client mirattic-sync)" >&2; exit 1; }
+
 # Daily DB backup (backup.sh) as a launchd agent, refreshed on every deploy.
 support="$HOME/Library/Application Support/mirattic-sync"
 agent="$HOME/Library/LaunchAgents/com.mirattic.sync.backup.plist"
