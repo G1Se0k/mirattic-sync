@@ -78,7 +78,7 @@ public class MiratticAuth {
 	 * Signature (Auth JWKS), iss, exp and aud = this client. `extra` adds the API's checks; without it, used for
 	 * tokens Sync receives straight from Auth (ID token at the callback, access token of a relayed refresh).
 	 */
-	NimbusJwtDecoder decoder(OAuth2TokenValidator<Jwt> extra) {
+	public NimbusJwtDecoder decoder(OAuth2TokenValidator<Jwt> extra) {
 		NimbusJwtDecoder d = NimbusJwtDecoder.withJwkSetUri(issuer + "/oauth2/jwks").build();
 		OAuth2TokenValidator<Jwt> audience = jwt -> jwt.getAudience() != null && jwt.getAudience().contains(clientId)
 				? OAuth2TokenValidatorResult.success()

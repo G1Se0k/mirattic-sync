@@ -2,12 +2,14 @@ package com.mirattic.sync.config;
 
 import static org.springframework.security.config.Customizer.withDefaults;
 
+import com.mirattic.sync.account.AccountController;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -15,6 +17,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 public class SecurityConfig {
+
+	private static final DefaultBearerTokenResolver BEARER = new DefaultBearerTokenResolver();
 
 	// Bearer-token API (Mirattic Auth access tokens): stateless, no cookies, so CSRF does not apply.
 	// /ws is authenticated by a one-time ticket in the handshake (see WebSocketConfig).
@@ -25,9 +29,12 @@ public class SecurityConfig {
 				.cors(withDefaults())
 				.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
+						.requestMatchers(AccountController.DELETION_ORDER).permitAll()
 						.requestMatchers("/actuator/health", "/api/auth/**", "/auth/**", "/ws", "/privacy.html", "/", "/index.html", "/landing/**").permitAll()
 						.anyRequest().authenticated())
-				.oauth2ResourceServer(o -> o.jwt(withDefaults()))
+				// Auth's deletion order is not an access token: AccountController verifies it itself.
+				.oauth2ResourceServer(o -> o.jwt(withDefaults()).bearerTokenResolver(request ->
+						AccountController.DELETION_ORDER.equals(request.getRequestURI()) ? null : BEARER.resolve(request)))
 				.build();
 	}
 

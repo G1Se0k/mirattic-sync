@@ -195,6 +195,49 @@ class SafetyFlowTest extends IntegrationTest {
 		}
 	}
 
+	@Test
+	void miratticAccountDeletionOrderFromAuthDeletesTheProfileAndTellsTheOthers() throws Exception {
+		TestUser leaving = signup();
+		TestUser friend = signup();
+		befriend(leaving, friend);
+		String joined = room(friend, leaving);
+		Client leavingWs = connect(leaving);
+		Client friendWs = connect(friend);
+
+		deletionOrder(order(leaving.id(), AuthStub.CLIENT_ID, "account_deletion")).andExpect(status().isNoContent());
+		assertThat(friendWs.nextOfType("friend:update")).isNotNull();
+		awaitClosed(leavingWs.session());
+		call(HttpMethod.GET, "/api/me", leaving.accessToken(), null).andExpect(status().isUnauthorized());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + joined, friend.accessToken(), null))
+				.path("members").findValuesAsString("id")).containsExactly(friend.id());
+		assertThat(jdbc.queryForObject("select count(*) from users where id = ?", Long.class, leaving.id())).isZero();
+
+		// Same order again, or for a UID Sync never saw: nothing to do, still 204.
+		deletionOrder(order(leaving.id(), AuthStub.CLIENT_ID, "account_deletion")).andExpect(status().isNoContent());
+		deletionOrder(order(java.util.UUID.randomUUID().toString(), AuthStub.CLIENT_ID, "account_deletion"))
+				.andExpect(status().isNoContent());
+	}
+
+	@Test
+	void onlyAuthsDeletionOrderIsAccepted() throws Exception {
+		TestUser u = signup();
+		deletionOrder(u.accessToken()).andExpect(status().isUnauthorized());
+		deletionOrder(AuthStub.sign(java.util.Map.of("sub", u.id(), "aud", AuthStub.CLIENT_ID)))
+				.andExpect(status().isUnauthorized()); // ID-token shaped: no purpose
+		deletionOrder(order(u.id(), "mirattic-flow", "account_deletion")).andExpect(status().isUnauthorized());
+		deletionOrder("not-a-jwt").andExpect(status().isUnauthorized());
+		deletionOrder(null).andExpect(status().isUnauthorized());
+		call(HttpMethod.GET, "/api/me", u.accessToken(), null).andExpect(status().isOk());
+	}
+
+	private static String order(String uid, String audience, String purpose) {
+		return AuthStub.sign(java.util.Map.of("sub", uid, "aud", audience, "purpose", purpose));
+	}
+
+	private ResultActions deletionOrder(String token) throws Exception {
+		return call(HttpMethod.POST, "/api/internal/account-deletion", token, null);
+	}
+
 	private static void awaitClosed(WebSocketSession session) throws InterruptedException {
 		for (int i = 0; i < 30 && session.isOpen(); i++) {
 			TimeUnit.MILLISECONDS.sleep(100);
