@@ -10,8 +10,11 @@ import jakarta.validation.constraints.Size;
 import com.mirattic.sync.user.UserSummary;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -77,22 +80,59 @@ class RoomController {
 		this.roomLog = roomLog;
 	}
 
-	/** Creates a room hosted by the caller; invitees get `room:invite` with the room. */
+	/**
+	 * Creates a room hosted by the caller; invitees get an invitation (`room:invite`, decision 85), except those
+	 * whose watch request this answers: members at once, with `watch:answer`.
+	 */
 	@PostMapping
 	RoomService.RoomView create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateRoom body) {
-		RoomService.RoomView room = rooms.create(jwt.getSubject(), body.content(), body.inviteIds());
-		sendInvites(jwt.getSubject(), room, List.of(jwt.getSubject()), body.inviteIds());
+		String me = jwt.getSubject();
+		Set<String> answering = answering(me, body.inviteIds());
+		RoomService.RoomView room = rooms.create(me, body.content(), body.inviteIds(), answering);
+		sendInvites(me, room, List.of(me), body.inviteIds(), answering);
 		return room;
 	}
 
-	/** Host invites more friends; they get `room:invite`, current members `room:update`. */
+	/** Host invites more friends: invitations (or membership, answering a watch request); members get `room:update`. */
 	@PostMapping("/{id}/invites")
 	RoomService.RoomView invite(@AuthenticationPrincipal Jwt jwt, @PathVariable String id,
 			@Valid @RequestBody Invite body) {
-		RoomService.Invited invited = rooms.invite(jwt.getSubject(), id, body.userIds());
-		sendInvites(jwt.getSubject(), invited.room(), invited.before(), body.userIds());
+		String me = jwt.getSubject();
+		Set<String> answering = answering(me, body.userIds());
+		RoomService.Invited invited = rooms.invite(me, id, body.userIds(), answering);
+		sendInvites(me, invited.room(), invited.before(), body.userIds(), answering);
 		rooms.announce(id, invited.before());
 		return invited.room();
+	}
+
+	/** The rooms inviting me (decision 85), for a panel opened after the `room:invite`. */
+	@GetMapping("/invitations")
+	List<RoomService.RoomView> invitations(@AuthenticationPrincipal Jwt jwt) {
+		return rooms.invitations(jwt.getSubject());
+	}
+
+	/** Accepts the room's invitation: now a member; the members get `room:update`. 404 without one, 409 full. */
+	@PostMapping("/{id}/invitation")
+	RoomService.RoomView accept(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
+		RoomService.Invited joined = rooms.accept(jwt.getSubject(), id);
+		if (!joined.before().contains(jwt.getSubject())) {
+			rooms.announce(id, joined.before());
+		}
+		answered(jwt.getSubject(), id);
+		return joined.room();
+	}
+
+	/** Declines the room's invitation. */
+	@DeleteMapping("/{id}/invitation")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void decline(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
+		rooms.decline(jwt.getSubject(), id);
+		answered(jwt.getSubject(), id);
+	}
+
+	/** My other apps drop the invitation's banner (and list the room if I accepted): they reload on `room:update`. */
+	private void answered(String me, String roomId) {
+		hub.sendEvent(me, new ServerEvent("room:update", roomId, me, null, System.currentTimeMillis(), null));
 	}
 
 	/**
@@ -167,19 +207,35 @@ class RoomController {
 		}
 	}
 
-	/** `room:invite`, once each, to the room's members who aren't in `alreadyIn`. */
-	private void sendInvites(String hostId, RoomService.RoomView room, List<String> alreadyIn, List<String> invitedIds) {
-		ServerEvent invite = new ServerEvent("room:invite", room.id(), hostId, null, System.currentTimeMillis(), room);
-		for (RoomService.MemberView m : room.members()) {
-			String id = m.user().id();
-			if (!alreadyIn.contains(id)) {
-				hub.sendEvent(id, invite);
+	/** Invitees whose open watch request to me (not older than the hour) this invite answers. */
+	private Set<String> answering(String hostId, List<String> invitees) {
+		long now = System.currentTimeMillis();
+		Set<String> result = new HashSet<>();
+		for (String id : invitees) {
+			Long askedAt = openWatchRequests.get(id + ">" + hostId);
+			if (!id.equals(hostId) && askedAt != null && now - askedAt < OPEN_WATCH_REQUEST_MS) {
+				result.add(id);
 			}
-			// Invited by name (a member already, too): the answer to their open request — closed, and their app
-			// enters the room. Inviting someone else answers nobody.
-			Long askedAt = invitedIds.contains(id) && !id.equals(hostId) ? openWatchRequests.remove(id + ">" + hostId) : null;
-			if (askedAt != null && invite.serverTime() - askedAt < OPEN_WATCH_REQUEST_MS) {
-				hub.sendEvent(id, new ServerEvent("watch:answer", room.id(), hostId, null, invite.serverTime(), null));
+		}
+		return result;
+	}
+
+	/**
+	 * After a create or invite: `room:invite` (an invitation) to the invitees who weren't members; those whose
+	 * watch request it answered (members now, or already) get `watch:answer` instead and their request is closed.
+	 */
+	private void sendInvites(String hostId, RoomService.RoomView room, List<String> alreadyIn, List<String> invitedIds,
+			Set<String> answered) {
+		long now = System.currentTimeMillis();
+		for (String id : new LinkedHashSet<>(invitedIds)) {
+			if (id.equals(hostId)) {
+				continue;
+			}
+			if (answered.contains(id)) {
+				openWatchRequests.remove(id + ">" + hostId);
+				hub.sendEvent(id, new ServerEvent("watch:answer", room.id(), hostId, null, now, null));
+			} else if (!alreadyIn.contains(id)) {
+				hub.sendEvent(id, new ServerEvent("room:invite", room.id(), hostId, null, now, room));
 			}
 		}
 	}

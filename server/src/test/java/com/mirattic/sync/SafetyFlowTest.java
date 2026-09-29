@@ -207,9 +207,13 @@ class SafetyFlowTest extends IntegrationTest {
 		for (TestUser u : invitees) {
 			ids.append(ids.isEmpty() ? "" : ",").append('"').append(u.id()).append('"');
 		}
-		return body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+		String roomId = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
 				{"content":{"provider":"mock","contentId":"c1","title":"Fake"},"inviteIds":[%s]}""".formatted(ids)))
 				.path("id").asString();
+		for (TestUser u : invitees) { // invited, then in (decision 85)
+			call(HttpMethod.POST, "/api/rooms/" + roomId + "/invitation", u.accessToken(), null).andExpect(status().isOk());
+		}
+		return roomId;
 	}
 
 	/** Sends a chat message over a fresh socket and returns its id. */

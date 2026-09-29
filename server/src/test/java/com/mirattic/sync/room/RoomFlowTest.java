@@ -7,7 +7,9 @@ import com.mirattic.sync.IntegrationTest;
 import com.mirattic.sync.presence.MediaProvider;
 import com.mirattic.sync.ws.RoomLog;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -297,6 +299,7 @@ class RoomFlowTest extends IntegrationTest {
 		String roomId = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
 				{"content":{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"First"},"inviteIds":["%s"]}"""
 				.formatted(friend.id()))).path("id").asString();
+		accept(friend, roomId).andExpect(status().isOk());
 		Client friendWs = connect(friend);
 		friendWs.send(event("room:join", roomId, "{}"));
 		friendWs.nextOfType("playback:update");
@@ -574,9 +577,11 @@ class RoomFlowTest extends IntegrationTest {
 		call(HttpMethod.POST, "/api/rooms/join", b.accessToken(), "{\"code\":\"" + code + "\"}").andExpect(status().isNotFound());
 		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + b.id() + "\"]}")
 				.andExpect(status().isOk());
+		accept(b, roomId).andExpect(status().isOk());
 		call(HttpMethod.DELETE, members + b.id(), host.accessToken(), null).andExpect(status().isNoContent());
 		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + b.id() + "\"]}")
 				.andExpect(status().isOk());
+		accept(b, roomId).andExpect(status().isOk());
 		call(HttpMethod.DELETE, members + "me", b.accessToken(), null).andExpect(status().isNoContent());
 		call(HttpMethod.POST, "/api/rooms/join", b.accessToken(), "{\"code\":\"" + code + "\"}").andExpect(status().isOk());
 
@@ -715,22 +720,74 @@ class RoomFlowTest extends IntegrationTest {
 
 		JsonNode room = body(call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(),
 				"{\"userIds\":[\"%s\",\"%s\"]}".formatted(late.id(), friend.id())).andExpect(status().isOk()));
-		assertThat(room.path("members")).hasSize(3);
+		assertThat(room.path("members")).hasSize(2); // an invitation, not a member yet (decision 85)
 		assertThat(lateWs.nextOfType("room:invite").path("roomId").asString()).isEqualTo(roomId);
-		assertThat(friendWs.nextOfType("room:update")).isNotNull();
 		assertThat(friendWs.nextOfType("room:invite")).isNull(); // already a member: not invited again
+		assertThat(body(call(HttpMethod.GET, "/api/rooms", late.accessToken(), null)).size()).isZero();
+		call(HttpMethod.GET, "/api/rooms/" + roomId, late.accessToken(), null).andExpect(status().isNotFound());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/invitations", late.accessToken(), null)).get(0).path("id")
+				.asString()).isEqualTo(roomId);
+
+		// Accepted: a member, the others told; the invitation is used up.
+		assertThat(body(accept(late, roomId).andExpect(status().isOk())).path("members")).hasSize(3);
+		assertThat(friendWs.nextOfType("room:update")).isNotNull();
+		accept(late, roomId).andExpect(status().isNotFound());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/invitations", late.accessToken(), null)).size()).isZero();
+		// Accepting without an invitation, or after declining: 404.
+		accept(stranger, roomId).andExpect(status().isNotFound());
+		TestUser declining = signup();
+		befriend(host, declining);
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(),
+				"{\"userIds\":[\"%s\"]}".formatted(declining.id())).andExpect(status().isOk());
+		Client decliningWs = connect(declining);
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/invitation", declining.accessToken(), null)
+				.andExpect(status().isNoContent());
+		assertThat(decliningWs.nextOfType("room:update")).isNotNull(); // their other apps drop the banner
+		accept(declining, roomId).andExpect(status().isNotFound());
 	}
 
 	@Test
-	void concurrentInvitesStayWithinTheLimitAndInviteOnce() throws Exception {
+	void aKickedInviteeCantComeBackOnTheOldInvitation() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		JsonNode created = body(inviteToNewRoom(host, friend));
+		String roomId = created.path("id").asString();
+		// Invited, but in by the code instead; then kicked.
+		call(HttpMethod.POST, "/api/rooms/join", friend.accessToken(), "{\"code\":\"" + created.path("code").asString() + "\"}")
+				.andExpect(status().isOk());
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/" + friend.id(), host.accessToken(), null)
+				.andExpect(status().isNoContent());
+		accept(friend, roomId).andExpect(status().isNotFound());
+		// A new invite from the host lets them back.
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + friend.id() + "\"]}")
+				.andExpect(status().isOk());
+		accept(friend, roomId).andExpect(status().isOk());
+	}
+
+	@Test
+	void aBlockDropsTheInvitationsBetweenThePair() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(inviteToNewRoom(host, friend)).path("id").asString();
+		call(HttpMethod.PUT, "/api/blocks/" + host.id(), friend.accessToken(), null).andExpect(status().is2xxSuccessful());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/invitations", friend.accessToken(), null)).size()).isZero();
+		accept(friend, roomId).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void concurrentAcceptsStayWithinTheLimitAndInviteOnce() throws Exception {
 		TestUser host = signup();
 		String roomId = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(),
 				"{\"content\":%s,\"inviteIds\":[]}".formatted(CONTENT))).path("id").asString();
 		List<String> ids = new ArrayList<>();
+		Map<String, TestUser> friends = new HashMap<>();
 		for (int i = 0; i < 2 * RoomService.MAX_INVITES; i++) {
 			TestUser friend = signup();
 			befriend(host, friend);
 			ids.add(friend.id());
+			friends.put(friend.id(), friend);
 		}
 		List<List<String>> batches = List.of(ids.subList(0, RoomService.MAX_INVITES), ids.subList(RoomService.MAX_INVITES, ids.size()));
 		CountDownLatch start = new CountDownLatch(1);
@@ -744,12 +801,29 @@ class RoomFlowTest extends IntegrationTest {
 				}));
 			}
 			start.countDown();
-			List<Integer> statuses = new ArrayList<>();
 			for (Future<Integer> r : results) {
-				statuses.add(r.get());
+				assertThat(r.get()).isEqualTo(200); // invitations don't take a place (decision 85)
 			}
-			assertThat(statuses).containsExactlyInAnyOrder(200, 400);
 		}
+		// Everyone accepts at once: only as many as fit get in, the rest are told it's full and stay invited.
+		List<Integer> accepted = new ArrayList<>();
+		try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+			CountDownLatch go = new CountDownLatch(1);
+			List<Future<Integer>> answers = new ArrayList<>();
+			for (String id : ids) {
+				TestUser invitee = friends.get(id);
+				answers.add(pool.submit(() -> {
+					go.await();
+					return accept(invitee, roomId).andReturn().getResponse().getStatus();
+				}));
+			}
+			go.countDown();
+			for (Future<Integer> a : answers) {
+				accepted.add(a.get());
+			}
+		}
+		assertThat(accepted.stream().filter(st -> st == 200)).hasSize(RoomService.MAX_INVITES);
+		assertThat(accepted.stream().filter(st -> st == 409)).hasSize(RoomService.MAX_INVITES);
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, host.accessToken(), null)).path("members"))
 				.hasSize(1 + RoomService.MAX_INVITES);
 
@@ -840,7 +914,7 @@ class RoomFlowTest extends IntegrationTest {
 			// A room creation that has checked the friendship and added the friend, but not committed yet.
 			Future<String> room = pool.submit(() -> new TransactionTemplate(transactions).execute(tx -> {
 				String id = roomService.create(host.id(), new RoomContent(MediaProvider.mock, "c1", "Fake", null, null, null),
-						List.of(friend.id())).id();
+						List.of(friend.id()), List.of(friend.id())).id(); // joining at once (a watch request answered)
 				created.countDown();
 				try {
 					commit.await();
@@ -979,10 +1053,28 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(response.path("serverTime").asLong()).isGreaterThanOrEqualTo(before);
 	}
 
+	/** A room with the invitees in it: invited, then each accepts (decision 85). A refused create is returned as is. */
 	private ResultActions createRoom(TestUser host, TestUser... invitees) throws Exception {
+		ResultActions created = inviteToNewRoom(host, invitees);
+		if (created.andReturn().getResponse().getStatus() != 200) {
+			return created;
+		}
+		String roomId = body(created).path("id").asString();
+		for (TestUser invitee : invitees) {
+			accept(invitee, roomId); // 404 when already a member (a watch request it answered)
+		}
+		return call(HttpMethod.GET, "/api/rooms/" + roomId, host.accessToken(), null);
+	}
+
+	/** A room whose invitees only got an invitation. */
+	private ResultActions inviteToNewRoom(TestUser host, TestUser... invitees) throws Exception {
 		String ids = java.util.Arrays.stream(invitees).map(u -> "\"" + u.id() + "\"").collect(Collectors.joining(","));
 		return call(HttpMethod.POST, "/api/rooms", host.accessToken(),
 				"{\"content\":%s,\"inviteIds\":[%s]}".formatted(CONTENT, ids));
+	}
+
+	private ResultActions accept(TestUser invitee, String roomId) throws Exception {
+		return call(HttpMethod.POST, "/api/rooms/" + roomId + "/invitation", invitee.accessToken(), null);
 	}
 
 	private static String event(String type, String roomId, String payload) {

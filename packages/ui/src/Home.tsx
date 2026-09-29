@@ -46,6 +46,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [watchRequests, setWatchRequests] = useState<UserSummary[]>([]);
+  /** Rooms inviting me (decision 85): shown as banners until I accept or decline. */
+  const [invitations, setInvitations] = useState<RoomView[]>([]);
+  const invitationLoads = useRef(0);
   /** Friends I asked to watch together: their invite then opens the room by itself. */
   const [asked, setAsked] = useState<string[]>([]);
   /** A request on its way: its cancel waits, or the server wouldn't know the request yet. */
@@ -121,7 +124,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const reload = useCallback(async () => {
     try {
       const fresh = roomsLoad.begin();
-      const [f, r, b, rs] = await Promise.all([api.friends(), api.friendRequests(), api.blocked(), api.rooms()]);
+      const invites = ++invitationLoads.current;
+      const [f, r, b, rs, inv] = await Promise.all([
+        api.friends(), api.friendRequests(), api.blocked(), api.rooms(), api.invitations(),
+      ]);
+      // Only the newest load, and not one started before I answered an invitation: it would bring it back.
+      if (invites === invitationLoads.current) setInvitations(inv);
       setFriends(f);
       setRequests(r);
       setBlocked(b);
@@ -158,6 +166,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         }
         // The friend I asked answered with an invite (the server says so): in at once, no "입장" to press.
         if (event.type === "watch:answer" && event.roomId) {
+          void reload(); // a member now: the list has it
           const friendId = event.userId;
           if (friendId) settledAsks.current.add(friendId);
           setAsked((list) => list.filter((id) => id !== friendId));
@@ -342,6 +351,37 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   }, [handle]);
   useEffect(() => local.current?.setConnected(status === "open"), [handle, status]);
 
+  async function answerInvitation(room: RoomView, accept: boolean) {
+    setError(null);
+    invitationLoads.current++; // a list read before this answer mustn't bring it back
+    setInvitations((list) => list.filter((r) => r.id !== room.id));
+    try {
+      if (accept) {
+        await api.acceptInvitation(room.id);
+        setOpenRoom(room.id);
+      } else await api.declineInvitation(room.id);
+      void reload();
+    } catch (e) {
+      const status = e instanceof ApiError ? e.status : 0;
+      // Still invited unless the server says it's gone: the banner stays for another try.
+      if (status !== 404) setInvitations((list) => [room, ...list.filter((r) => r.id !== room.id)]);
+      setError(status === 404 ? "초대가 취소되었거나 방이 닫혔습니다." : status === 409 ? "방이 가득 찼습니다."
+        : accept ? "입장하지 못했습니다." : "거절하지 못했습니다.");
+    }
+  }
+
+  const invitationBanner = invitations.map((r) => {
+    const host = r.members.find((m) => m.role === "HOST")?.user;
+    return (
+      <div key={r.id} className="banner">
+        <Avatar name={host?.displayName ?? "?"} />
+        <span className="grow ellipsis">{host?.displayName ?? "친구"}님이 같이 보기에 초대했습니다 · {r.content.title}</span>
+        <button onClick={() => void answerInvitation(r, true)}>입장</button>
+        <IconButton icon="close" label="거절" onClick={() => void answerInvitation(r, false)} />
+      </div>
+    );
+  });
+
   const requestBanner = watchRequests.map((u) => (
     <div key={u.id} className="banner">
       <Avatar name={u.displayName} />
@@ -354,6 +394,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   if (openRoom && socket && handle) {
     return (
       <div className="room-page">
+        {invitationBanner}
         {requestBanner}
         {error && <div className="banner"><p className="error grow" role="alert">{error}</p></div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
@@ -382,6 +423,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <span className={`dot ${status === "open" ? "on" : ""}`} title={status === "open" ? "연결됨" : "연결 중"} />
         <IconButton icon="settings" label="설정" onClick={() => setScreen("settings")} />
       </header>
+      {invitationBanner}
       {requestBanner}
       <main className="container">
         {error && <p className="error" role="alert">{error}</p>}

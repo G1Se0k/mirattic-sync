@@ -41,6 +41,11 @@ public class Room {
 	@CollectionTable(name = "room_bans", joinColumns = @JoinColumn(name = "room_id"))
 	@Column(name = "user_id")
 	private Set<String> banned = new HashSet<>();
+	/** Invited by the host, not answered yet (decision 85): accepting makes them a member. */
+	@ElementCollection
+	@CollectionTable(name = "room_invitations", joinColumns = @JoinColumn(name = "room_id"))
+	@Column(name = "user_id")
+	private Set<String> invited = new HashSet<>();
 
 	protected Room() {
 	}
@@ -67,6 +72,10 @@ public class Room {
 	boolean isBanned(String userId) { return banned.contains(userId); }
 	void ban(String userId) { banned.add(userId); }
 	void unban(String userId) { banned.remove(userId); }
+
+	void invite(String userId) { invited.add(userId); }
+	/** @return whether they were invited (and now aren't). */
+	boolean uninvite(String userId) { return invited.remove(userId); }
 
 	RoomContent content() {
 		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl, series);

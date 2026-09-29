@@ -86,8 +86,12 @@ public class RoomService {
 		this.hub = hub;
 	}
 
+	/**
+	 * A room hosted by me. Invitees get an invitation (decision 85); those in `joinIds` (a watch request of theirs
+	 * this answers) become members at once.
+	 */
 	@Transactional
-	public RoomView create(String me, RoomContent content, Collection<String> inviteIds) {
+	public RoomView create(String me, RoomContent content, Collection<String> inviteIds, Collection<String> joinIds) {
 		requireKnownId(content);
 		Set<String> invitees = new HashSet<>(inviteIds);
 		invitees.remove(me);
@@ -105,7 +109,11 @@ public class RoomService {
 		Room room = rooms.save(fresh);
 		members.save(new RoomMember(room.getId(), me, RoomMember.Role.HOST));
 		for (String id : invitees) {
-			members.save(new RoomMember(room.getId(), id, RoomMember.Role.MEMBER));
+			if (joinIds.contains(id)) {
+				members.save(new RoomMember(room.getId(), id, RoomMember.Role.MEMBER));
+			} else {
+				room.invite(id);
+			}
 		}
 		return view(room, members.findByRoomId(room.getId()), me);
 	}
@@ -114,16 +122,20 @@ public class RoomService {
 	public record Invited(RoomView room, List<String> before) {
 	}
 
-	/** Host adds friends to an existing room. Existing members are skipped. */
+	/**
+	 * Host invites friends to an existing room: an invitation each (decision 85), or membership at once for those
+	 * in `joinIds` (answering their watch request). Existing members are skipped.
+	 */
 	@Transactional
-	public Invited invite(String me, String roomId, Collection<String> inviteIds) {
+	public Invited invite(String me, String roomId, Collection<String> inviteIds, Collection<String> joinIds) {
 		// The row lock serializes concurrent invites, so together they can't pass the member limit.
 		Room room = lockAsHost(me, roomId);
 		List<String> before = memberIds(roomId);
 		Set<String> current = new HashSet<>(before);
 		Set<String> invitees = new HashSet<>(inviteIds);
 		invitees.removeAll(current);
-		if (current.size() - 1 + invitees.size() > MAX_INVITES) {
+		long joining = invitees.stream().filter(joinIds::contains).count();
+		if (invitees.size() > MAX_INVITES || current.size() - 1 + joining > MAX_INVITES) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "too many invites");
 		}
 		if (!areFriends(me, invitees)) {
@@ -131,7 +143,11 @@ public class RoomService {
 		}
 		for (String id : invitees) {
 			room.unban(id); // the host asked them back
-			members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER));
+			if (joinIds.contains(id)) {
+				members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER));
+			} else {
+				room.invite(id);
+			}
 		}
 		return new Invited(view(rooms.findById(roomId).orElseThrow(RoomService::notFound), members.findByRoomId(roomId),
 				null), before);
@@ -157,12 +173,60 @@ public class RoomService {
 			members.delete(requireMember(leaving, mine.getRoomId()));
 			result.add(new Separation(mine.getRoomId(), leaving, everyone));
 		}
+		// Invitations into a room the other is in go too.
+		for (String[] pair : new String[][] {{blocker, blocked}, {blocked, blocker}}) {
+			for (Room room : rooms.findInviting(pair[1])) {
+				if (memberIds(room.getId()).contains(pair[0])) {
+					room.uninvite(pair[1]);
+				}
+			}
+		}
 		return result;
 	}
 
 	/** Checked with a share lock held to the end of the transaction, so a concurrent block waits (see separate). */
 	private boolean areFriends(String me, Set<String> others) {
 		return others.isEmpty() || friendships.lockFriendships(me, others).size() == others.size();
+	}
+
+	/** The rooms inviting me, newest first (decision 85). */
+	@Transactional(readOnly = true)
+	public List<RoomView> invitations(String me) {
+		return rooms.findInviting(me).stream()
+				.sorted(java.util.Comparator.comparingLong(Room::getCreatedAt).reversed())
+				.map(r -> view(r, members.findByRoomId(r.getId()), null))
+				.toList();
+	}
+
+	/**
+	 * Accepting an invitation: I become a member (the members before, to tell). 404 without one, or when I and a
+	 * member block each other; 409 when the room is full (the invitation stays).
+	 */
+	@Transactional
+	public Invited accept(String me, String roomId) {
+		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+		// Kicked since (after coming in by the code): only a new invite from the host lets them back (it unbans).
+		if (!room.uninvite(me) || room.isBanned(me)) {
+			throw notFound();
+		}
+		List<String> before = memberIds(roomId);
+		if (!before.contains(me)) {
+			// Share-locking, as in joinByCode: a block committed first is seen, one made meanwhile waits for this.
+			if (!before.isEmpty() && !blocks.lockBetween(me, before).isEmpty()) {
+				throw notFound();
+			}
+			if (before.size() > MAX_INVITES) {
+				throw new ResponseStatusException(HttpStatus.CONFLICT, "room full"); // rolled back: still invited
+			}
+			members.save(new RoomMember(roomId, me, RoomMember.Role.MEMBER));
+		}
+		return new Invited(view(room, members.findByRoomId(roomId), me), before);
+	}
+
+	/** Declining (or dropping) an invitation. Nothing to decline is fine. */
+	@Transactional
+	public void decline(String me, String roomId) {
+		rooms.findForUpdate(roomId).ifPresent(room -> room.uninvite(me));
 	}
 
 	/** A watch request goes only to a friend. @return the requester, as the friend will see them. */
@@ -418,6 +482,7 @@ public class RoomService {
 				throw new ResponseStatusException(HttpStatus.CONFLICT, "room full");
 			}
 			members.save(new RoomMember(found.getId(), me, RoomMember.Role.MEMBER));
+			found.uninvite(me); // in by the code: an invitation to it is answered
 		}
 		return new Invited(view(found, members.findByRoomId(found.getId()), me), before);
 	}
