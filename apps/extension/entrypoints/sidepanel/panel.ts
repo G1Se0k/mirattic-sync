@@ -98,7 +98,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
         attach();
         send({ op: 'hello', windowId });
         if (socketHandlers) send({ op: 'socket' });
-        if (view?.shown) send({ op: 'room:open', roomId: view.roomId });
+        if (view?.shown) send({ op: 'room:open', roomId: view.roomId, resume: true });
       }, RECONNECT_MS);
     });
   };

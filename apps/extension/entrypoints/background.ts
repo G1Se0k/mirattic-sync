@@ -211,7 +211,7 @@ export default defineBackground(() => {
           socket?.send(m.event);
           break;
         case 'room:open':
-          openRoom(m.roomId, true);
+          openRoom(m.roomId, !m.resume);
           viewers.set(port, m.roomId);
           if (room) post(port, { kind: 'room', state: room.state });
           markRead();

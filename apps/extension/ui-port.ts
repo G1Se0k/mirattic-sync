@@ -26,7 +26,8 @@ export type FromPanel =
   | { op: 'api'; id: number; name: string; args: unknown[] }
   | { op: 'socket' }
   | { op: 'send'; event: ClientEvent }
-  | { op: 'room:open'; roomId: string }
+  /** `resume`: a panel restating its room after a worker restart, not the user entering it (no video tab). */
+  | { op: 'room:open'; roomId: string; resume?: boolean }
   // With the room they are about: another window's panel may have made a different room the active one.
   | { op: 'room:close'; roomId: string }
   | { op: 'room:exit'; roomId: string }

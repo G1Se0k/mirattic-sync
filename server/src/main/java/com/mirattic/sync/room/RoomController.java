@@ -10,7 +10,7 @@ import jakarta.validation.constraints.Size;
 import com.mirattic.sync.user.UserSummary;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -69,6 +69,11 @@ class RoomController {
 	 */
 	private final Map<String, Long> openWatchRequests = new ConcurrentHashMap<>();
 	static final long OPEN_WATCH_REQUEST_MS = 3_600_000;
+	/**
+	 * Orders answering a watch request (an invite, through its room write) against cancelling it.
+	 * ponytail: one lock for every create/invite on this instance; per-pair locks if invites ever get busy.
+	 */
+	private final Object answerLock = new Object();
 
 	private final RoomService rooms;
 	private final SocketHub hub;
@@ -87,10 +92,18 @@ class RoomController {
 	@PostMapping
 	RoomService.RoomView create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateRoom body) {
 		String me = jwt.getSubject();
-		Set<String> answering = answering(me, body.inviteIds());
-		RoomService.RoomView room = rooms.create(me, body.content(), body.inviteIds(), answering);
-		sendInvites(me, room, List.of(me), body.inviteIds(), answering);
-		return room;
+		synchronized (answerLock) {
+			Map<String, Long> answering = answering(me, body.inviteIds());
+			RoomService.RoomView room;
+			try {
+				room = rooms.create(me, body.content(), body.inviteIds(), answering.keySet());
+			} catch (RuntimeException e) {
+				unclaim(me, answering);
+				throw e;
+			}
+			sendInvites(me, room, List.of(me), body.inviteIds(), answering.keySet());
+			return room;
+		}
 	}
 
 	/** Host invites more friends: invitations (or membership, answering a watch request); members get `room:update`. */
@@ -98,9 +111,17 @@ class RoomController {
 	RoomService.RoomView invite(@AuthenticationPrincipal Jwt jwt, @PathVariable String id,
 			@Valid @RequestBody Invite body) {
 		String me = jwt.getSubject();
-		Set<String> answering = answering(me, body.userIds());
-		RoomService.Invited invited = rooms.invite(me, id, body.userIds(), answering);
-		sendInvites(me, invited.room(), invited.before(), body.userIds(), answering);
+		RoomService.Invited invited;
+		synchronized (answerLock) {
+			Map<String, Long> answering = answering(me, body.userIds());
+			try {
+				invited = rooms.invite(me, id, body.userIds(), answering.keySet());
+			} catch (RuntimeException e) {
+				unclaim(me, answering);
+				throw e;
+			}
+			sendInvites(me, invited.room(), invited.before(), body.userIds(), answering.keySet());
+		}
 		rooms.announce(id, invited.before());
 		return invited.room();
 	}
@@ -202,22 +223,37 @@ class RoomController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void cancelWatchRequest(@AuthenticationPrincipal Jwt jwt, @PathVariable String friendId) {
 		UserSummary me = rooms.requestWatch(jwt.getSubject(), friendId);
-		if (openWatchRequests.remove(me.id() + ">" + friendId) != null) {
+		Long removed;
+		synchronized (answerLock) { // after an invite answering it: gone (answered) or back (the invite failed)
+			removed = openWatchRequests.remove(me.id() + ">" + friendId);
+		}
+		if (removed != null) {
 			hub.sendEvent(friendId, new ServerEvent("watch:cancel", null, me.id(), null, System.currentTimeMillis(), me));
 		}
 	}
 
-	/** Invitees whose open watch request to me (not older than the hour) this invite answers. */
-	private Set<String> answering(String hostId, List<String> invitees) {
+	/**
+	 * Claims the invitees' open watch requests to me (not older than the hour; older ones stay for their cancel)
+	 * that this invite answers. Called holding `answerLock` through the invite, like a cancel, so a cancel either
+	 * came first (no request: an invitation instead) or comes after (answered: nothing to cancel; failed: put
+	 * back, so the cancel still tells the friend).
+	 */
+	private Map<String, Long> answering(String hostId, List<String> invitees) {
 		long now = System.currentTimeMillis();
-		Set<String> result = new HashSet<>();
+		Map<String, Long> claimed = new HashMap<>();
 		for (String id : invitees) {
-			Long askedAt = openWatchRequests.get(id + ">" + hostId);
+			String key = id + ">" + hostId;
+			Long askedAt = openWatchRequests.get(key);
 			if (!id.equals(hostId) && askedAt != null && now - askedAt < OPEN_WATCH_REQUEST_MS) {
-				result.add(id);
+				openWatchRequests.remove(key);
+				claimed.put(id, askedAt);
 			}
 		}
-		return result;
+		return claimed;
+	}
+
+	private void unclaim(String hostId, Map<String, Long> claimed) {
+		claimed.forEach((id, at) -> openWatchRequests.put(id + ">" + hostId, at));
 	}
 
 	/**
@@ -232,7 +268,6 @@ class RoomController {
 				continue;
 			}
 			if (answered.contains(id)) {
-				openWatchRequests.remove(id + ">" + hostId);
 				hub.sendEvent(id, new ServerEvent("watch:answer", room.id(), hostId, null, now, null));
 			} else if (!alreadyIn.contains(id)) {
 				hub.sendEvent(id, new ServerEvent("room:invite", room.id(), hostId, null, now, room));

@@ -15,3 +15,4 @@ build/
 
 # Provider logo originals (kept locally; the app uses packages/ui/src/assets)
 packages/ui/assets-source/
+output/

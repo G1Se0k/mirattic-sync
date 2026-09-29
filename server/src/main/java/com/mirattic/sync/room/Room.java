@@ -74,6 +74,7 @@ public class Room {
 	void unban(String userId) { banned.remove(userId); }
 
 	void invite(String userId) { invited.add(userId); }
+	Set<String> invitedIds() { return Set.copyOf(invited); }
 	/** @return whether they were invited (and now aren't). */
 	boolean uninvite(String userId) { return invited.remove(userId); }
 

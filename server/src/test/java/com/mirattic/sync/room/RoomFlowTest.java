@@ -766,6 +766,31 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void invitationsEndWithTheRoomAndWithAnAnsweredWatchRequest() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		// Closed by the host: the invitee is told and the invitation is gone.
+		String closing = body(inviteToNewRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		call(HttpMethod.DELETE, "/api/rooms/" + closing + "/members/me", host.accessToken(), null)
+				.andExpect(status().isNoContent());
+		assertThat(friendWs.nextOfType("room:update").path("roomId").asString()).isEqualTo(closing);
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/invitations", friend.accessToken(), null)).size()).isZero();
+
+		// Invited, then asks to watch together; the host's invite answers it: in, and the invitation is used up.
+		String roomId = body(inviteToNewRoom(host, friend)).path("id").asString();
+		connect(host); // a watch request goes to an online friend
+		call(HttpMethod.POST, "/api/rooms/requests", friend.accessToken(), "{\"friendId\":\"" + host.id() + "\"}")
+				.andExpect(status().isAccepted());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + friend.id() + "\"]}")
+				.andExpect(status().isOk());
+		assertThat(friendWs.nextOfType("watch:answer").path("roomId").asString()).isEqualTo(roomId);
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/invitations", friend.accessToken(), null)).size()).isZero();
+		call(HttpMethod.GET, "/api/rooms/" + roomId, friend.accessToken(), null).andExpect(status().isOk());
+	}
+
+	@Test
 	void aBlockDropsTheInvitationsBetweenThePair() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();

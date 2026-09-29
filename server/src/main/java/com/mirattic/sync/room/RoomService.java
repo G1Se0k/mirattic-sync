@@ -145,6 +145,7 @@ public class RoomService {
 			room.unban(id); // the host asked them back
 			if (joinIds.contains(id)) {
 				members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER));
+				room.uninvite(id); // an earlier invitation to it is answered too
 			} else {
 				room.invite(id);
 			}
@@ -256,12 +257,12 @@ public class RoomService {
 	@Transactional
 	public Left leave(String me, String roomId) {
 		// Roles read under the room lock: a hand-over in progress decides first whether this closes the room.
-		rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		RoomMember self = requireMember(me, roomId);
 		List<String> everyone = memberIds(roomId);
 		if (self.getRole() == RoomMember.Role.HOST) {
 			rooms.deleteById(roomId);
-			return new Left(everyone, true);
+			return new Left(withInvited(everyone, room), true);
 		}
 		members.delete(self);
 		return new Left(everyone, false);
@@ -451,12 +452,20 @@ public class RoomService {
 	/** Closes a room nobody is in (decision 75). @return its members (to tell them), empty if already gone. */
 	@Transactional
 	public List<String> close(String roomId) {
-		if (rooms.findForUpdate(roomId).isEmpty()) {
+		Room room = rooms.findForUpdate(roomId).orElse(null);
+		if (room == null) {
 			return List.of();
 		}
 		List<String> everyone = memberIds(roomId);
 		rooms.deleteById(roomId);
-		return everyone;
+		return withInvited(everyone, room);
+	}
+
+	/** A closing room's members and invitees: all told (`room:update`), so an invitation's banner goes too. */
+	private static List<String> withInvited(List<String> memberIds, Room room) {
+		List<String> all = new ArrayList<>(memberIds);
+		room.invitedIds().stream().filter(id -> !all.contains(id)).forEach(all::add);
+		return all;
 	}
 
 	/**
