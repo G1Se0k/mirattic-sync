@@ -1,6 +1,7 @@
 package com.mirattic.sync.room;
 
 import com.mirattic.sync.presence.MediaProvider;
+import com.mirattic.sync.user.FriendCode;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -27,6 +28,8 @@ public class Room {
 	private String playbackBy;
 	private long playbackVersion;
 	private long createdAt;
+	/** Joining by code (decision 77). */
+	private String code;
 
 	protected Room() {
 	}
@@ -41,10 +44,14 @@ public class Room {
 		this.series = content.series();
 		this.createdAt = this.capturedAt = System.currentTimeMillis();
 		this.playbackBy = hostId;
+		this.code = FriendCode.generate();
 	}
 
 	public String getId() { return id; }
 	public long getCreatedAt() { return createdAt; }
+	public String getCode() { return code; }
+
+	void newCode() { this.code = FriendCode.generate(); }
 
 	RoomContent content() {
 		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl, series);

@@ -119,8 +119,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   }
 
   function jump(ms: number) {
-    // Never seek on a click alone: it moves everyone in the room.
-    if (onSeek && confirm(`${clock(ms)} 위치로 이동할까요? 방의 모든 사람이 함께 이동합니다.`)) onSeek(ms);
+    onSeek?.(ms); // the host's click moves everyone there
   }
 
   const name = (id: string) => {

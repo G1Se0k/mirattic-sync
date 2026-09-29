@@ -7,6 +7,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import com.mirattic.sync.user.UserSummary;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,6 +42,14 @@ class RoomController {
 
 	record Mute(@NotNull Boolean muted) {
 	}
+
+	record JoinByCode(@NotBlank @Size(max = 16) String code) {
+	}
+
+	/** Code attempts per user in any 60 s: a code can't be found by trying (decision 77). */
+	static final int MAX_CODE_ATTEMPTS_PER_MINUTE = 10;
+	// ponytail: in-memory, pruned past 10k users; single server, like the other limits.
+	private final Map<String, Deque<Long>> codeAttempts = new ConcurrentHashMap<>();
 
 	/** One watch request per (requester, friend) per this interval. */
 	static final long WATCH_REQUEST_INTERVAL_MS = 30_000;
@@ -76,6 +86,37 @@ class RoomController {
 	 * Asks a friend to start (or open) a room with the caller: the friend gets `watch:request` with the caller,
 	 * and answers by inviting them. 409 if the friend is offline (nobody would see it), 429 if asked recently.
 	 */
+	/** Joins the room with this code (anyone who knows it); its members get `room:update`. */
+	@PostMapping("/join")
+	RoomService.RoomView joinByCode(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody JoinByCode body) {
+		String me = jwt.getSubject();
+		long now = System.currentTimeMillis();
+		if (codeAttempts.size() > 10_000) {
+			codeAttempts.values().removeIf(times -> now - times.peekLast() >= 60_000);
+		}
+		boolean[] allowed = {false};
+		// Sliding 60 s: check and record in one atomic step; refused attempts aren't recorded.
+		codeAttempts.compute(me, (k, times) -> {
+			Deque<Long> t = times == null ? new ArrayDeque<>() : times;
+			while (!t.isEmpty() && now - t.peekFirst() >= 60_000) {
+				t.pollFirst();
+			}
+			allowed[0] = t.size() < MAX_CODE_ATTEMPTS_PER_MINUTE;
+			if (allowed[0]) {
+				t.addLast(now);
+			}
+			return t.isEmpty() ? null : t;
+		});
+		if (!allowed[0]) {
+			throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
+		}
+		RoomService.Invited joined = rooms.joinByCode(me, body.code());
+		if (!joined.before().contains(me)) {
+			rooms.announce(joined.room().id(), joined.before());
+		}
+		return joined.room();
+	}
+
 	@PostMapping("/requests")
 	@ResponseStatus(HttpStatus.ACCEPTED)
 	void requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body) {

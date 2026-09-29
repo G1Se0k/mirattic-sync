@@ -16,7 +16,8 @@ public final class FriendCode {
 	private FriendCode() {
 	}
 
-	static String generate() {
+	/** Also the format of room codes (decision 77). */
+	public static String generate() {
 		StringBuilder sb = new StringBuilder(LENGTH);
 		for (int i = 0; i < LENGTH; i++) {
 			sb.append(ALPHABET.charAt(RANDOM.nextInt(ALPHABET.length())));

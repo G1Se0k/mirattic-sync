@@ -201,6 +201,8 @@ export type RoomView = {
   createdAt: number;
   unread: number;
   muted: boolean;
+  /** Join code (decision 77); absent for rooms made before codes. */
+  code?: string;
 };
 
 /**

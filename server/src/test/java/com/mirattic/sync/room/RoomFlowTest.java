@@ -149,6 +149,48 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void anyoneWithTheCodeJoinsUpToTheLimit() throws Exception {
+		TestUser host = signup();
+		TestUser stranger = signup();
+		TestUser blocked = signup();
+		JsonNode room = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(),
+				"{\"content\":%s,\"inviteIds\":[]}".formatted(CONTENT)));
+		String roomId = room.path("id").asString();
+		String code = room.path("code").asString();
+		assertThat(code).matches("[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}");
+		Client hostWs = connect(host);
+
+		String typed = code.substring(0, 4).toLowerCase() + "-" + code.substring(4); // as people type it
+		JsonNode joined = body(call(HttpMethod.POST, "/api/rooms/join", stranger.accessToken(),
+				"{\"code\":\"%s\"}".formatted(typed)));
+		assertThat(joined.path("id").asString()).isEqualTo(roomId);
+		assertThat(joined.path("members").findValuesAsString("id")).contains(stranger.id());
+		assertThat(hostWs.nextOfType("room:update")).isNotNull();
+		call(HttpMethod.POST, "/api/rooms/join", stranger.accessToken(), "{\"code\":\"%s\"}".formatted(code))
+				.andExpect(status().isOk()); // already in
+
+		call(HttpMethod.PUT, "/api/blocks/" + host.id(), blocked.accessToken(), null).andExpect(status().isNoContent());
+		call(HttpMethod.POST, "/api/rooms/join", blocked.accessToken(), "{\"code\":\"%s\"}".formatted(code))
+				.andExpect(status().isNotFound());
+		call(HttpMethod.POST, "/api/rooms/join", blocked.accessToken(), "{\"code\":\"ZZZZ-ZZZZ\"}")
+				.andExpect(status().isNotFound());
+
+		for (int i = 0; i < 6; i++) { // host + stranger + 6 = 8, the limit
+			call(HttpMethod.POST, "/api/rooms/join", signup().accessToken(), "{\"code\":\"%s\"}".formatted(code))
+					.andExpect(status().isOk());
+		}
+		call(HttpMethod.POST, "/api/rooms/join", signup().accessToken(), "{\"code\":\"%s\"}".formatted(code))
+				.andExpect(status().isConflict());
+
+		TestUser guesser = signup();
+		for (int i = 0; i < RoomController.MAX_CODE_ATTEMPTS_PER_MINUTE; i++) {
+			call(HttpMethod.POST, "/api/rooms/join", guesser.accessToken(), "{\"code\":\"ZZZZZZZ%d\"}".formatted(i % 8 + 2));
+		}
+		call(HttpMethod.POST, "/api/rooms/join", guesser.accessToken(), "{\"code\":\"%s\"}".formatted(code))
+				.andExpect(status().isTooManyRequests());
+	}
+
+	@Test
 	void roomsNobodyIsInCloseAfterTwoSweeps() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();

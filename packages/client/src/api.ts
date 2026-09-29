@@ -182,6 +182,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** Asks an online friend to watch together; they get `watch:request`. 409 offline, 429 asked recently. */
     requestWatch: (friendId: string) => authed<void>("POST", "/api/rooms/requests", { friendId }),
     rooms: () => authed<RoomView[]>("GET", "/api/rooms"),
+    /** Joins by a room code, typed as-is ("abcd-2345"). 404 unknown, 409 full, 429 too many tries. */
+    joinRoomByCode: (code: string) => authed<RoomView>("POST", "/api/rooms/join", { code }),
     /** 404 once the room is closed or you left it. */
     room: (id: string) => authed<RoomView>("GET", `/api/rooms/${id}`),
     /** Leave or decline. The host leaving closes the room. */

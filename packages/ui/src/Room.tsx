@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { openUrl, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
+import { openUrl, type FriendView, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
 import type { FollowerStatus, RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
@@ -11,6 +11,10 @@ import { Avatar, IconButton } from "./Icons";
 
 /** "room|provider" already asked about in this session: the dialog comes up once per room and provider, not on every entry. */
 const askedExperiment = new Set<string>();
+
+/** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
+const invitedAt = new Map<string, number>();
+const INVITE_COOLDOWN_MS = 30_000;
 
 type Props = {
   roomId: string;
@@ -33,6 +37,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   const s = useSyncExternalStore(handle.subscribe, handle.state);
   const [reporting, setReporting] = useState<{ id: string; name: string } | null>(null);
   const [askingPause, setAskingPause] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const room = s.room;
   const content = room?.content;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
@@ -101,6 +106,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       <header className="topbar">
         <IconButton icon="back" label="친구 목록" onClick={onClose} />
         <h1 title={content.title}>{content.title}</h1>
+        <IconButton icon="userPlus" label="방에 초대하기" onClick={() => setInviting(true)} />
         <IconButton icon={room.muted ? "bellOff" : "bell"} label={room.muted ? "채팅 알림 켜기" : "채팅 알림 끄기"}
           onClick={() => void toggleMute()} />
         <IconButton icon="logout" tone="danger" label={isHost ? "방 닫기" : "방 나가기"} onClick={() => void leave()} />
@@ -135,6 +141,10 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
         </dialog>
       )}
       {s.switched && s.switched.contentId === content.contentId && <Switched content={s.switched} handle={handle} />}
+      {inviting && (
+        <Invite roomId={roomId} code={room.code} isHost={isHost} memberIds={room.members.map((m) => m.user.id)}
+          onClose={() => setInviting(false)} />
+      )}
       {askingPause && <RequestPause handle={handle} onClose={() => setAskingPause(false)} />}
       {s.pauseRequest && isHost && (
         <dialog open className="stack" role="alertdialog">
@@ -148,6 +158,87 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
         </dialog>
       )}
     </main>
+  );
+}
+
+/** Friends to invite (host only, as on the server), then the room's code for anyone. */
+function Invite({ roomId, code, isHost, memberIds, onClose }: {
+  roomId: string;
+  code?: string;
+  isHost: boolean;
+  memberIds: string[];
+  onClose: () => void;
+}) {
+  const [friends, setFriends] = useState<FriendView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [, tick] = useState(0);
+  const shown = code && `${code.slice(0, 4)}-${code.slice(4)}`;
+
+  useEffect(() => {
+    if (isHost) api.friends().then(setFriends, () => setError("친구 목록을 불러오지 못했습니다."));
+  }, [isHost]);
+  // Re-render each second so a "초대됨" turns back into "초대" when its 30 s are up.
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  async function invite(userId: string) {
+    setError(null);
+    invitedAt.set(`${roomId}|${userId}`, Date.now());
+    tick((n) => n + 1);
+    try {
+      await api.inviteToRoom(roomId, [userId]);
+    } catch (e) {
+      invitedAt.delete(`${roomId}|${userId}`);
+      setError(e instanceof ApiError && e.status === 409 ? "방이 가득 찼습니다." : "초대하지 못했습니다.");
+    }
+  }
+
+  async function copy() {
+    await navigator.clipboard.writeText(shown!);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <dialog open className="stack">
+      <h2>방에 초대하기</h2>
+      {isHost && (
+        <>
+          {friends?.length === 0 && <p className="muted">친구가 없습니다.</p>}
+          <ul className="list">
+            {friends?.map((f) => {
+              const inRoom = memberIds.includes(f.user.id);
+              const recent = Date.now() - (invitedAt.get(`${roomId}|${f.user.id}`) ?? 0) < INVITE_COOLDOWN_MS;
+              return (
+                <li key={f.user.id} className="friend">
+                  <Avatar name={f.user.displayName} />
+                  <span className="grow name">{f.user.displayName}</span>
+                  {inRoom || recent ? (
+                    <button className="secondary" disabled>{inRoom ? "방에 있음" : "초대됨"}</button>
+                  ) : (
+                    <button onClick={() => void invite(f.user.id)}>초대</button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+      {shown && (
+        <>
+          <p className="muted">{isHost ? "또는 방 코드로 초대" : "방 코드로 초대"}</p>
+          <div className="card row">
+            <code className="code grow">{shown}</code>
+            <IconButton icon={copied ? "check" : "copy"} label={copied ? "복사됨" : "복사"} onClick={() => void copy()} />
+          </div>
+        </>
+      )}
+      <div className="row"><button className="link" onClick={onClose}>닫기</button></div>
+    </dialog>
   );
 }
 

@@ -4,6 +4,8 @@ import com.mirattic.sync.friend.FriendshipRepository;
 import com.mirattic.sync.presence.MediaProvider;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
+import com.mirattic.sync.user.FriendCode;
+import com.mirattic.sync.friend.BlockRepository;
 import com.mirattic.sync.user.UserSummary;
 import com.mirattic.sync.ws.ServerEvent;
 import com.mirattic.sync.ws.SocketHub;
@@ -36,7 +38,7 @@ public class RoomService {
 
 	/** `unread` and `muted` are the viewer's own (0 / false in a view sent to someone else). */
 	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, long unread,
-			boolean muted) {
+			boolean muted, String code) {
 	}
 
 	/** A member removed from a room because of a block, and who to tell (before the removal). */
@@ -73,9 +75,11 @@ public class RoomService {
 	private final UserRepository users;
 	private final ChatMessageRepository messages;
 	private final SocketHub hub;
+	private final BlockRepository blocks;
 
 	RoomService(RoomRepository rooms, RoomMemberRepository members, FriendshipRepository friendships,
-			UserRepository users, ChatMessageRepository messages, SocketHub hub) {
+			UserRepository users, ChatMessageRepository messages, SocketHub hub, BlockRepository blocks) {
+		this.blocks = blocks;
 		this.rooms = rooms;
 		this.members = members;
 		this.friendships = friendships;
@@ -95,7 +99,12 @@ public class RoomService {
 		if (!areFriends(me, invitees)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "can only invite friends");
 		}
-		Room room = rooms.save(new Room(content, me));
+		Room fresh = new Room(content, me);
+		// ponytail: check-then-insert; two creations drawing the same code at once still hit the unique index (1 in 31^8)
+		while (rooms.findByCode(fresh.getCode()).isPresent()) {
+			fresh.newCode();
+		}
+		Room room = rooms.save(fresh);
 		members.save(new RoomMember(room.getId(), me, RoomMember.Role.HOST));
 		for (String id : invitees) {
 			members.save(new RoomMember(room.getId(), id, RoomMember.Role.MEMBER));
@@ -306,6 +315,33 @@ public class RoomService {
 		return everyone;
 	}
 
+	/**
+	 * Joining by a room's code (decision 77): anyone who knows it, up to the member limit. 404 for an unknown code
+	 * and also when I and a member block each other (a shared room would undo the block, and this doesn't say so).
+	 * Already a member: just the room.
+	 */
+	@Transactional
+	public Invited joinByCode(String me, String input) {
+		String code = input == null ? null : FriendCode.normalize(input);
+		Room found = code == null ? null : rooms.findByCodeForUpdate(code).orElse(null);
+		if (found == null) {
+			throw notFound();
+		}
+		List<String> before = memberIds(found.getId());
+		if (!before.contains(me)) {
+			// A share-locking read: a block committed first is seen, and a block made meanwhile waits for this join
+			// to commit, so the separation after it sees the new member.
+			if (!before.isEmpty() && !blocks.lockBetween(me, before).isEmpty()) {
+				throw notFound();
+			}
+			if (before.size() > MAX_INVITES) {
+				throw new ResponseStatusException(HttpStatus.CONFLICT, "room full");
+			}
+			members.save(new RoomMember(found.getId(), me, RoomMember.Role.MEMBER));
+		}
+		return new Invited(view(found, members.findByRoomId(found.getId()), me), before);
+	}
+
 	/** For a member's `pause:request`: the host to ask. 404 if not a member, 400 for the host itself. */
 	@Transactional(readOnly = true)
 	public String hostToAsk(String me, String roomId) {
@@ -423,7 +459,7 @@ public class RoomService {
 				: messages.countByRoomIdAndUserIdNotAndReactionFalseAndDeletedFalseAndSeqGreaterThan(room.getId(), viewer,
 						self.getLastReadSeq());
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), unread,
-				self != null && self.isMuted());
+				self != null && self.isMuted(), room.getCode());
 	}
 
 	private static ResponseStatusException notFound() {

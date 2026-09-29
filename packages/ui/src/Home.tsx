@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ApiError, connectSocket, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
+  MediaProvider,
   ChatDeleted,
   ChatMessage,
   FriendRequests,
@@ -20,6 +21,7 @@ import { localRoom } from "./localRoom";
 import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton } from "./Icons";
+import { ExperimentControl, isExperiment, useExperiment } from "./Experimental";
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
 
@@ -32,6 +34,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [openRoom, setOpenRoom] = useState<string | null>(() => platform.activeRoom?.() ?? null);
   const [screen, setScreen] = useState<"home" | "settings">("home");
   const [adding, setAdding] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const [joining, setJoining] = useState(false);
+  /** A site opened by "방 생성" with nothing watched: the room is made once a video of it plays. */
+  const [pending, setPending] = useState<MediaProvider | null>(null);
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -210,6 +216,37 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     }
   }
 
+  /** "방 생성": with what I watch now, else pick a site and the room comes when a video of it is open. */
+  async function createRoom() {
+    if (creating.current) return;
+    setError(null);
+    // Only the extension sees what plays in a tab; the desktop app can't wait for a video to be opened.
+    if (!watching) return platform.nowWatching ? setChoosing(true) : setError("지금 보는 영상이 없습니다. 영상을 연 뒤 다시 시도하세요.");
+    await makeRoom(watching);
+  }
+  /** One creation at a time; its answer opens the room only if I haven't entered another meanwhile. */
+  const creating = useRef(false);
+  async function makeRoom(content: NonNullable<typeof watching>) {
+    creating.current = true;
+    try {
+      const room = await api.createRoom(content, []);
+      if (!current.current.openRoom) setOpenRoom(room.id);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
+    } finally {
+      creating.current = false;
+    }
+  }
+  // Entering any room drops the wait: it must not later make a room and pull me out of this one.
+  useEffect(() => {
+    if (openRoom) setPending(null);
+  }, [openRoom]);
+  useEffect(() => {
+    if (!pending || openRoom || watching?.provider !== pending || creating.current) return;
+    setPending(null);
+    void makeRoom(watching);
+  }, [pending, watching, openRoom]);
+
   async function requestWatch(friend: UserSummary) {
     setError(null);
     setNotice(null);
@@ -291,9 +328,21 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           )}
         </div>
 
-        {rooms.length > 0 && (
-          <section>
+        {pending && (
+          <div className="card row">
+            <span className="grow muted">{PROVIDER_NAMES[pending]}에서 영상을 열면 방이 만들어집니다.</span>
+            <button className="secondary" onClick={() => setPending(null)}>취소</button>
+          </div>
+        )}
+        <section>
+          <div className="row between">
             <h2>방</h2>
+            <span className="row">
+              <IconButton icon="plus" label="방 생성" onClick={() => void createRoom()} />
+              <IconButton icon="hash" label="코드로 입장" onClick={() => setJoining(true)} />
+            </span>
+          </div>
+          {rooms.length === 0 && <p className="muted">아직 방이 없습니다.</p>}
             <ul className="list">
               {rooms.map((r) => {
                 const host = r.members.find((m) => m.role === "HOST");
@@ -319,8 +368,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 );
               })}
             </ul>
-          </section>
+        </section>
+        {choosing && (
+          <ChooseSite onPick={(p) => { setChoosing(false); setPending(p); platform.open(SITES[p]); }} onClose={() => setChoosing(false)} />
         )}
+        {joining && <JoinByCode onJoined={(id) => { setJoining(false); void reload(); enter(id); }} onClose={() => setJoining(false)} />}
 
         <section>
           <div className="row between">
@@ -346,7 +398,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                   {f.presence.status === "WATCHING" && (
                     <IconButton icon="join" label="합류 요청" onClick={() => void requestWatch(f.user)} />
                   )}
-                  <IconButton icon="watch" label="같이 보기" onClick={() => void watchTogether(f.user)} />
                   <Menu label={`${f.user.displayName} 메뉴`} items={[
                     { label: "친구 삭제", icon: "userMinus", run: act(() => api.removeFriend(f.user.id)) },
                     { label: "신고", icon: "flag", run: () => setReporting(f.user) },
@@ -413,6 +464,67 @@ function Menu({ label, items }: { label: string; items: MenuItem[] }) {
         </div>
       )}
     </span>
+  );
+}
+
+const SITES: Record<Exclude<MediaProvider, "mock">, string> = {
+  youtube: "https://www.youtube.com/",
+  netflix: "https://www.netflix.com/browse",
+  laftel: "https://laftel.net/",
+};
+
+/** Nothing watched yet: which site to watch on (an experiment is turned on first). */
+function ChooseSite({ onPick, onClose }: { onPick: (p: keyof typeof SITES) => void; onClose: () => void }) {
+  const [site, setSite] = useState<keyof typeof SITES | null>(null);
+  const on = useExperiment(site && isExperiment(site) ? site : undefined);
+  const needsTurningOn = !!site && isExperiment(site) && on === false;
+  useEffect(() => {
+    if (site && !needsTurningOn) onPick(site);
+  }, [site, needsTurningOn]);
+  return (
+    <dialog open className="stack">
+      <h2>어디서 볼까요?</h2>
+      {needsTurningOn && isExperiment(site) ? (
+        <ExperimentControl provider={site} onDone={() => { if (!platform.experimental?.enabled(site)) setSite(null); }} />
+      ) : (
+        <div className="stack">
+          {(Object.keys(SITES) as (keyof typeof SITES)[]).map((p) => (
+            <button key={p} className="secondary" onClick={() => setSite(p)}>{PROVIDER_NAMES[p]}</button>
+          ))}
+        </div>
+      )}
+      <p className="muted">사이트가 열리면 볼 영상을 고르세요. 영상을 열면 방이 만들어집니다.</p>
+      <div className="row"><button className="link" onClick={onClose}>취소</button></div>
+    </dialog>
+  );
+}
+
+function JoinByCode({ onJoined, onClose }: { onJoined: (roomId: string) => void; onClose: () => void }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      onJoined((await api.joinRoomByCode(code)).id);
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : 0;
+      setError(status === 404 ? "그 코드의 방이 없습니다." : status === 409 ? "방이 가득 찼습니다." : status === 429 ? "잠시 후 다시 시도하세요." : "입장하지 못했습니다.");
+    }
+  }
+
+  return (
+    <dialog open className="stack">
+      <h2>코드로 입장</h2>
+      <form className="row" onSubmit={submit}>
+        <input className="grow code" placeholder="방 코드 (예: K7QM-4XPR)" required maxLength={16} autoFocus
+          autoCapitalize="characters" spellCheck={false} value={code} onChange={(e) => setCode(e.target.value)} />
+        <button type="submit">입장</button>
+      </form>
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="row"><button className="link" onClick={onClose}>취소</button></div>
+    </dialog>
   );
 }
 

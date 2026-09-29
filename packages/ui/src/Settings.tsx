@@ -76,7 +76,6 @@ export function MyFriendCode({ me, onMeChange }: { me: Me; onMeChange: (me: Me) 
         <IconButton icon={copied ? "check" : "copy"} label={copied ? "복사됨" : "복사"} onClick={() => void copy()} />
         <IconButton icon="refresh" label="새로 발급" onClick={() => void regenerate()} />
       </div>
-      <p className="muted">친구에게 이 코드를 알려주면 친구 요청을 받을 수 있습니다.</p>
     </section>
   );
 }

@@ -12,4 +12,11 @@ interface RoomRepository extends JpaRepository<Room, String> {
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select r from Room r where r.id = :id")
 	Optional<Room> findForUpdate(String id);
+
+	Optional<Room> findByCode(String code);
+
+	/** Locked from the first read, so the member count and blocks checked after it are current. */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select r from Room r where r.code = :code")
+	Optional<Room> findByCodeForUpdate(String code);
 }
