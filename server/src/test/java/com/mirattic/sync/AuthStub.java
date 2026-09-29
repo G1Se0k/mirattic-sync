@@ -17,6 +17,7 @@ import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
@@ -33,7 +34,7 @@ public final class AuthStub {
 	/** Has + / =: the Basic credentials must be form-encoded (RFC 6749 2.3.1). */
 	public static final String CLIENT_SECRET = "test+secret/with=chars";
 
-	private record Login(String sub, String name, String challenge, String redirectUri) {
+	private record Login(String sub, String name, String challenge, String redirectUri, Instant authTime) {
 	}
 
 	private static final RSAKey KEY;
@@ -48,6 +49,15 @@ public final class AuthStub {
 			SERVER = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 			SERVER.createContext("/oauth2/jwks", ex -> send(ex, 200, new JWKSet(KEY.toPublicJWK()).toString()));
 			SERVER.createContext("/oauth2/token", AuthStub::token);
+			SERVER.createContext("/userinfo", ex -> {
+				String bearer = String.valueOf(ex.getRequestHeaders().getFirst("Authorization"));
+				try {
+					String sub = SignedJWT.parse(bearer.replace("Bearer ", "")).getJWTClaimsSet().getSubject();
+					send(ex, 200, "{\"sub\":\"" + sub + "\",\"email\":\"" + email(sub) + "\"}");
+				} catch (java.text.ParseException e) {
+					send(ex, 401, "{}");
+				}
+			});
 			SERVER.createContext("/oauth2/revoke", ex -> {
 				if (!authorized(ex)) {
 					send(ex, 401, "{}");
@@ -73,9 +83,19 @@ public final class AuthStub {
 
 	/** What Auth would do after the user signs in: a code for this user, bound to the given PKCE challenge. */
 	public static String code(String sub, String name, String challenge, String redirectUri) {
+		return code(sub, name, challenge, redirectUri, Instant.now());
+	}
+
+	/** `authTime`: when the password was typed (ID token `auth_time`). */
+	public static String code(String sub, String name, String challenge, String redirectUri, Instant authTime) {
 		String code = UUID.randomUUID().toString();
-		CODES.put(code, new Login(sub, name, challenge, redirectUri));
+		CODES.put(code, new Login(sub, name, challenge, redirectUri, authTime));
 		return code;
+	}
+
+	/** The email UserInfo reports for a UID. */
+	public static String email(String sub) {
+		return sub + "@example.com";
 	}
 
 	/** An Auth-signed JWT with these claims on top of iss / exp. */
@@ -105,6 +125,7 @@ public final class AuthStub {
 		Map<String, String> f = form(ex);
 		String sub;
 		String name = null;
+		Instant authTime = null;
 		if ("authorization_code".equals(f.get("grant_type"))) {
 			Login login = CODES.remove(f.get("code"));
 			if (login == null || !login.redirectUri().equals(f.get("redirect_uri"))
@@ -114,6 +135,7 @@ public final class AuthStub {
 			}
 			sub = login.sub();
 			name = login.name();
+			authTime = login.authTime();
 		} else {
 			sub = REFRESH.remove(String.valueOf(f.get("refresh_token")));
 			if (sub == null) {
@@ -126,6 +148,9 @@ public final class AuthStub {
 		Map<String, Object> id = new HashMap<>(Map.of("sub", sub, "aud", CLIENT_ID));
 		if (name != null) {
 			id.put("name", name);
+		}
+		if (authTime != null) {
+			id.put("auth_time", authTime.getEpochSecond());
 		}
 		send(ex, 200, "{\"access_token\":\"" + accessToken(sub) + "\",\"refresh_token\":\"" + refresh
 				+ "\",\"id_token\":\"" + sign(id) + "\",\"token_type\":\"Bearer\",\"expires_in\":899}");

@@ -27,7 +27,6 @@ services:
       DB_URL: jdbc:mysql://mysql:3306/mirattic
       DB_USERNAME: mirattic
       DB_PASSWORD: ${DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
       # Raw secret of the Mirattic Auth client mirattic-sync (Auth keeps only its hash).
       AUTH_CLIENT_SECRET: ${AUTH_CLIENT_SECRET}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}

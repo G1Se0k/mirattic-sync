@@ -8,8 +8,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.factory.PasswordEncoderFactories;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -18,7 +16,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 public class SecurityConfig {
 
-	// Bearer-token API: stateless, no cookies, so CSRF does not apply.
+	// Bearer-token API (Mirattic Auth access tokens): stateless, no cookies, so CSRF does not apply.
 	// /ws is authenticated by a one-time ticket in the handshake (see WebSocketConfig).
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -31,11 +29,6 @@ public class SecurityConfig {
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(o -> o.jwt(withDefaults()))
 				.build();
-	}
-
-	@Bean
-	PasswordEncoder passwordEncoder() {
-		return PasswordEncoderFactories.createDelegatingPasswordEncoder();
 	}
 
 	@Bean

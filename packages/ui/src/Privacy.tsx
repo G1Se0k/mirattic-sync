@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { ApiError } from "@mirattic/client";
 import type { Me, Visibility } from "@mirattic/types";
 import { api } from "./session";
@@ -29,25 +29,28 @@ export function Privacy({ me, onChange }: { me: Me; onChange: (me: Me) => void }
   );
 }
 
-/** Deletes the account and all its data after the password is typed again. */
+/** Deletes the Sync profile and all its data after the Mirattic password is typed again (a sign-in window). */
 export function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const asker = useAsk();
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!(await asker.ask("계정을 삭제할까요?", { body: "삭제하면 되돌릴 수 없습니다.", ok: "계정 삭제", danger: true }))) return;
+  async function remove() {
+    if (!(await asker.ask("계정을 삭제할까요?", {
+      body: "친구·차단 목록, 내가 보낸 채팅 메시지, 신고 기록이 모두 삭제되고 내가 만든 방은 닫힙니다. 되돌릴 수 없습니다. 확인을 위해 Mirattic 계정 비밀번호를 한 번 더 입력합니다.",
+      ok: "계정 삭제",
+      danger: true,
+    }))) return;
     setBusy(true);
     setError(null);
     try {
-      await api.deleteAccount(password);
+      await api.deleteAccount();
       onDeleted();
     } catch (err) {
-      const status = err instanceof ApiError ? err.status : 0;
-      setError(status === 403 ? "비밀번호가 맞지 않습니다." : status === 429 ? "잠시 후 다시 시도하세요." : "계정을 삭제하지 못했습니다.");
+      const status = err instanceof ApiError ? err.status : -1;
+      if (status === 0) return; // the sign-in window was closed
+      setError(status === 403 ? "본인 확인이 되지 않아 삭제하지 않았습니다. 이 계정으로 다시 로그인해 주세요."
+        : status === 429 ? "잠시 후 다시 시도하세요." : "계정을 삭제하지 못했습니다.");
     } finally {
       setBusy(false);
     }
@@ -57,23 +60,9 @@ export function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
     <section>
       {asker.dialog}
       <h2>계정 삭제</h2>
-      {!open ? (
-        <button className="link danger" onClick={() => setOpen(true)}>계정과 데이터 삭제…</button>
-      ) : (
-        <form className="stack" onSubmit={submit}>
-          <p className="muted">
-            계정, 친구·차단 목록, 내가 보낸 채팅 메시지, 신고 기록이 모두 삭제되고 내가 만든 방은 닫힙니다.
-            다른 기기의 로그인도 모두 끝납니다.
-          </p>
-          <input type="password" placeholder="비밀번호 확인" autoComplete="current-password" required maxLength={128}
-            value={password} onChange={(e) => setPassword(e.target.value)} />
-          <div className="row">
-            <button type="button" className="link" onClick={() => { setOpen(false); setPassword(""); setError(null); }}>취소</button>
-            <button type="submit" className="danger" disabled={busy}>계정 삭제</button>
-          </div>
-          {error && <p className="error" role="alert">{error}</p>}
-        </form>
-      )}
+      <p className="muted">Mirattic 계정 자체는 남고, Mirattic Sync의 데이터만 삭제됩니다.</p>
+      <button className="link danger" onClick={remove} disabled={busy}>계정과 데이터 삭제…</button>
+      {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
 }

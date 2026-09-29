@@ -1,8 +1,8 @@
 package com.mirattic.sync.user;
 
+import com.mirattic.sync.auth.MiratticAuth;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
-import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -20,27 +20,27 @@ import org.springframework.web.server.ResponseStatusException;
 public class UserController {
 
 	/**
-	 * `email` is the contact email of the user's first identity that has one; null for email-less OAuth users.
+	 * `email` is the Mirattic account's email, read live from Mirattic Auth (null if Auth can't be reached).
 	 * `friendCode` is only ever shown to its owner, who shares it to be added as a friend.
 	 */
-	public record Me(String id, String email, List<IdentityProvider> providers, String displayName,
-			String friendCode, Visibility presenceVisibility, Visibility positionVisibility) {
+	public record Me(String id, String email, String displayName, String friendCode, Visibility presenceVisibility,
+			Visibility positionVisibility) {
 	}
 
 	public record PrivacyRequest(@NotNull Visibility presenceVisibility, @NotNull Visibility positionVisibility) {
 	}
 
 	private final UserRepository users;
-	private final UserIdentityRepository identities;
+	private final MiratticAuth auth;
 
-	UserController(UserRepository users, UserIdentityRepository identities) {
+	UserController(UserRepository users, MiratticAuth auth) {
 		this.users = users;
-		this.identities = identities;
+		this.auth = auth;
 	}
 
 	@GetMapping("/me")
 	Me me(@AuthenticationPrincipal Jwt jwt) {
-		return me(load(jwt.getSubject()));
+		return me(load(jwt.getSubject()), jwt);
 	}
 
 	@PutMapping("/me/privacy")
@@ -48,7 +48,7 @@ public class UserController {
 	Me updatePrivacy(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody PrivacyRequest req) {
 		User me = load(jwt.getSubject());
 		me.setPrivacy(req.presenceVisibility(), req.positionVisibility());
-		return me(me);
+		return me(me, jwt);
 	}
 
 	@PostMapping("/me/friend-code")
@@ -56,14 +56,12 @@ public class UserController {
 	Me regenerateFriendCode(@AuthenticationPrincipal Jwt jwt) {
 		User me = load(jwt.getSubject());
 		me.regenerateFriendCode();
-		return me(me);
+		return me(me, jwt);
 	}
 
-	private Me me(User u) {
-		List<UserIdentity> list = identities.findByUserId(u.getId());
-		String email = list.stream().map(UserIdentity::getEmail).filter(e -> e != null).findFirst().orElse(null);
-		return new Me(u.getId(), email, list.stream().map(UserIdentity::getProvider).distinct().toList(),
-				u.getDisplayName(), u.getFriendCode(), u.getPresenceVisibility(), u.getPositionVisibility());
+	private Me me(User u, Jwt jwt) {
+		return new Me(u.getId(), auth.email(jwt.getTokenValue()), u.getDisplayName(), u.getFriendCode(),
+				u.getPresenceVisibility(), u.getPositionVisibility());
 	}
 
 	private User load(String id) {

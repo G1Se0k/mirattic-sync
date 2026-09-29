@@ -27,10 +27,10 @@ const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replac
 // Mirattic account sign-in (Mirattic Auth migration.md, option B): a browser window runs the server's /auth/start →
 // Mirattic Auth → /auth/callback, which lands back here with a one-time handoff code, never a token. The code is
 // redeemed with the verifier of the challenge sent at the start, so only this extension instance can use it.
-export const authorize: Authorize = async () => {
+export const authorize: Authorize = async ({ reauth = false } = {}) => {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
-  const url = `${API_URL}/auth/start?${new URLSearchParams({ redirect: browser.identity.getRedirectURL(), challenge })}`;
+  const url = `${API_URL}/auth/start?${new URLSearchParams({ redirect: browser.identity.getRedirectURL(), challenge, reauth: String(reauth) })}`;
   let landed: string | undefined;
   try {
     landed = await browser.identity.launchWebAuthFlow({ url, interactive: true });

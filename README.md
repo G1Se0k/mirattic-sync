@@ -34,14 +34,19 @@ pnpm --filter @mirattic/extension dev
 
 # Backend
 docker compose up -d mysql
-cd server && JWT_SECRET=$(openssl rand -base64 48) ./mvnw spring-boot:run   # http://localhost:8080/actuator/health
+# Mirattic Auth를 로컬로 띄운 뒤 (Auth 저장소, 기본 http://127.0.0.1:9000, dev client secret `dev-sync-secret`)
+cd server && AUTH_ISSUER=http://127.0.0.1:9000 AUTH_CLIENT_SECRET=dev-sync-secret \
+  AUTH_REDIRECT_URI=http://127.0.0.1:8080/auth/callback ./mvnw spring-boot:run   # http://127.0.0.1:8080/actuator/health
 ```
 
 서버 환경변수:
 
 | 변수 | 필수 | 설명 |
 |---|---|---|
-| `JWT_SECRET` | ✅ | HS256 키, 32바이트 이상. 없으면 서버가 시작하지 않음 |
+| `AUTH_CLIENT_SECRET` | ✅ | Mirattic Auth client `mirattic-sync`의 원본 secret. 없으면 서버가 시작하지 않음 |
+| `AUTH_ISSUER` | | 기본 `https://auth.mirattic.com` |
+| `AUTH_REDIRECT_URI` | | 기본 `https://sync.mirattic.com/auth/callback`. 로컬은 `http://127.0.0.1:8080/auth/callback` (확장도 `VITE_API_URL=http://127.0.0.1:8080`: 로그인 쿠키가 같은 호스트여야 함) |
+| `AUTH_EXTENSION_REDIRECTS` | | 로그인을 돌려줄 확장 redirect (기본 `https://ffoifpjldcgdiipbhljkofgifmefgohk.chromiumapp.org/`) |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | | 기본값은 docker-compose 로컬 개발용 |
 | `ALLOWED_ORIGINS` | | CORS/WebSocket 허용 origin (콤마 구분). 기본값은 Tauri + Vite dev + dev extension ID |
 

@@ -3,19 +3,13 @@ package com.mirattic.sync.auth;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.UserSummary;
-import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
-import java.util.Base64;
+import java.time.Instant;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +17,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,7 +36,8 @@ import org.springframework.web.util.UriComponentsBuilder;
  * /api/auth/handoff ← extension (handoff code + its verifier) → Auth access + refresh token
  * </pre>
  * No token ever appears in a URL. The state is bound to the browser by a cookie (login CSRF), the handoff to the
- * extension instance by its verifier.
+ * extension instance by its verifier. `reauth=true` asks Auth for the password again (`prompt=login`), for account
+ * deletion.
  */
 @RestController
 class MiratticLoginController {
@@ -55,29 +51,26 @@ class MiratticLoginController {
 	private static final Logger log = LoggerFactory.getLogger(MiratticLoginController.class);
 	private static final String COOKIE = "sync_login";
 	private static final Duration LOGIN_TTL = Duration.ofMinutes(10);
-	private static final Duration HANDOFF_TTL = Duration.ofSeconds(60);
 
 	private final MiratticAuth auth;
+	private final Handoffs handoffs;
 	private final UserRepository users;
 	private final List<String> extensionRedirects;
 	private final boolean secureCookie;
-	// ponytail: in memory, so a restart drops logins in progress (they retry) and one instance only.
 	private final ShortLived<Pending> pending = new ShortLived<>(LOGIN_TTL);
-	private final ShortLived<HandoffEntry> handoffs = new ShortLived<>(HANDOFF_TTL);
 
-	private record HandoffEntry(AuthService.Tokens tokens, String challenge) {
-	}
-
-	MiratticLoginController(MiratticAuth auth, UserRepository users,
+	MiratticLoginController(MiratticAuth auth, Handoffs handoffs, UserRepository users,
 			@Value("${app.auth.extension-redirects}") List<String> extensionRedirects) {
 		this.auth = auth;
+		this.handoffs = handoffs;
 		this.users = users;
 		this.extensionRedirects = extensionRedirects;
 		this.secureCookie = auth.redirectUri.startsWith("https://");
 	}
 
 	@GetMapping("/auth/start")
-	ResponseEntity<Void> start(@RequestParam String redirect, @RequestParam String challenge) {
+	ResponseEntity<Void> start(@RequestParam String redirect, @RequestParam String challenge,
+			@RequestParam(defaultValue = "false") boolean reauth) {
 		// Only our extension's own redirect: the handoff code must never go anywhere else.
 		if (!extensionRedirects.contains(redirect) || !challenge.matches("[A-Za-z0-9_-]{43}")) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad login request");
@@ -85,16 +78,18 @@ class MiratticLoginController {
 		String state = TokenService.newOpaqueToken();
 		String verifier = TokenService.newOpaqueToken();
 		pending.put(state, new Pending(verifier, redirect, challenge));
-		URI authorize = UriComponentsBuilder.fromUriString(auth.issuer + "/oauth2/authorize")
+		UriComponentsBuilder authorize = UriComponentsBuilder.fromUriString(auth.issuer + "/oauth2/authorize")
 				.queryParam("response_type", "code")
 				.queryParam("client_id", auth.clientId)
 				.queryParam("redirect_uri", auth.redirectUri)
 				.queryParam("scope", "openid profile email")
 				.queryParam("state", state)
-				.queryParam("code_challenge", s256(verifier))
-				.queryParam("code_challenge_method", "S256")
-				.encode().build().toUri();
-		return redirect(authorize, cookie(state, LOGIN_TTL));
+				.queryParam("code_challenge", Handoffs.s256(verifier))
+				.queryParam("code_challenge_method", "S256");
+		if (reauth) {
+			authorize.queryParam("prompt", "login");
+		}
+		return redirect(authorize.encode().build().toUri(), cookie(state, LOGIN_TTL));
 	}
 
 	@GetMapping("/auth/callback")
@@ -113,29 +108,26 @@ class MiratticLoginController {
 		if (error != null || code == null) {
 			return redirect(back(p.redirect(), "error", error != null && error.matches("[a-z_]{1,40}") ? error : "failed"), clear);
 		}
-		AuthService.Tokens tokens;
+		Handoffs.Handoff handoff;
 		try {
 			MiratticAuth.TokenResponse t = auth.exchange(code, p.verifier());
-			var id = auth.decode(t.id_token());
+			Jwt id = auth.decode(t.id_token());
 			// First Auth login of this UID: its Sync profile (product fields only) starts here.
 			User user = users.findById(id.getSubject()).orElseGet(() -> users.save(User.fromAuth(id.getSubject(),
 					displayName(id.getClaimAsString("name")))));
-			tokens = new AuthService.Tokens(t.access_token(), t.refresh_token(), UserSummary.of(user));
+			Instant authTime = id.hasClaim("auth_time") ? id.getClaimAsInstant("auth_time") : Instant.EPOCH;
+			handoff = new Handoffs.Handoff(new AuthTokens(t.access_token(), t.refresh_token(), UserSummary.of(user)), authTime);
 		} catch (RuntimeException e) {
 			log.warn("Mirattic Auth code exchange failed: {}", e.getClass().getSimpleName());
 			return redirect(back(p.redirect(), "error", "exchange_failed"), clear);
 		}
-		String handoff = TokenService.newOpaqueToken();
-		handoffs.put(handoff, new HandoffEntry(tokens, p.challenge()));
-		return redirect(back(p.redirect(), "handoff", handoff), clear);
+		return redirect(back(p.redirect(), "handoff", handoffs.put(handoff, p.challenge())), clear);
 	}
 
-	/** Single use, 60 s, and only with the verifier of the challenge sent to /auth/start. */
 	@PostMapping("/api/auth/handoff")
-	AuthService.Tokens handoff(@Valid @RequestBody HandoffRequest req) {
-		HandoffEntry h = handoffs.take(req.code());
-		if (h == null || !MessageDigest.isEqual(h.challenge().getBytes(StandardCharsets.US_ASCII),
-				s256(req.verifier()).getBytes(StandardCharsets.US_ASCII))) {
+	AuthTokens handoff(@Valid @RequestBody HandoffRequest req) {
+		Handoffs.Handoff h = handoffs.redeem(req.code(), req.verifier());
+		if (h == null) {
 			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid handoff");
 		}
 		return h.tokens();
@@ -161,44 +153,5 @@ class MiratticLoginController {
 	private static ResponseEntity<Void> redirect(URI to, String cookie) {
 		return ResponseEntity.status(HttpStatus.FOUND).location(to).header(HttpHeaders.SET_COOKIE, cookie)
 				.header(HttpHeaders.CACHE_CONTROL, "no-store").build();
-	}
-
-	static String s256(String verifier) {
-		try {
-			byte[] hash = MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII));
-			return Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
-		} catch (NoSuchAlgorithmException e) {
-			throw new IllegalStateException(e);
-		}
-	}
-
-	/** Expiring single-use entries, capped so unauthenticated /auth/start calls can't fill the heap. */
-	private static final class ShortLived<V> {
-		private record Entry<V>(V value, long expiresAt) {
-		}
-
-		private static final int MAX = 10_000;
-		private final Map<String, Entry<V>> map = new ConcurrentHashMap<>();
-		private final long ttlMillis;
-
-		ShortLived(Duration ttl) {
-			this.ttlMillis = ttl.toMillis();
-		}
-
-		void put(String key, V value) {
-			long now = System.currentTimeMillis();
-			if (map.size() >= MAX) {
-				map.values().removeIf(e -> e.expiresAt() <= now);
-				if (map.size() >= MAX) {
-					throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "too many logins in progress");
-				}
-			}
-			map.put(key, new Entry<>(value, now + ttlMillis));
-		}
-
-		V take(String key) {
-			Entry<V> e = map.remove(key);
-			return e == null || e.expiresAt() <= System.currentTimeMillis() ? null : e.value();
-		}
 	}
 }

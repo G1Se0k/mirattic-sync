@@ -5,29 +5,23 @@ ID는 UUID 문자열, 시간은 epoch ms.
 
 ## Auth
 
-Mirattic Auth 이전 중 (Auth 저장소 `docs/migration.md` 옵션 B, 2단계 이중 수용). 새 로그인은 Mirattic 계정으로만 한다.
+Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/migration.md` 옵션 B). Sync는 토큰을 발급·저장하지 않는다.
 
 ### Mirattic 계정 로그인 (확장, `chrome.identity.launchWebAuthFlow`)
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/auth/start?redirect=&challenge=` | `redirect`는 허용된 확장 redirect(`AUTH_EXTENSION_REDIRECTS`, `https://<id>.chromiumapp.org/`)와 정확히 같아야 함, `challenge`는 확장이 만든 PKCE S256(43자). state·서버 PKCE를 메모리에 10분 보관, state를 `sync_login` 쿠키(HttpOnly, SameSite=Lax, path `/auth/callback`)에 묶고 Auth `/oauth2/authorize`로 302. 그 외 400 |
-| GET | `/auth/callback` | Auth가 돌려보냄. state·쿠키 확인 → code를 client secret(Basic) + verifier로 교환 → ID token으로 `sub`·`name` 확인 → 처음 보는 UID면 Sync `users` 행 생성(제품 필드만) → `<redirect>?handoff=<일회용 코드>`로 302. 실패는 `<redirect>?error=…` (`state_mismatch`, `access_denied`, `exchange_failed`). URL에 토큰은 절대 없음 |
+| GET | `/auth/start?redirect=&challenge=&reauth=` | `redirect`는 허용된 확장 redirect(`AUTH_EXTENSION_REDIRECTS`, `https://<id>.chromiumapp.org/`)와 정확히 같아야 함, `challenge`는 확장이 만든 PKCE S256(43자). `reauth=true`면 Auth에 `prompt=login`(계정 삭제 전 비밀번호 재확인). state·서버 PKCE를 메모리에 10분 보관, state를 `sync_login` 쿠키(HttpOnly, SameSite=Lax, path `/auth/callback`)에 묶고 Auth `/oauth2/authorize`로 302. 그 외 400 |
+| GET | `/auth/callback` | Auth가 돌려보냄. state·쿠키 확인 → code를 client secret(Basic) + verifier로 교환 → ID token으로 `sub`·`name`·`auth_time` 확인 → 처음 보는 UID면 Sync `users` 행 생성(제품 필드만) → `<redirect>?handoff=<일회용 코드>`로 302. 실패는 `<redirect>?error=…` (`state_mismatch`, `access_denied`, `exchange_failed`). URL에 토큰은 절대 없음 |
 | POST | `/api/auth/handoff` | `{ code, verifier }` → 200 `AuthTokens` (Auth access/refresh token). 60초, 1회용, `/auth/start`의 challenge와 맞는 verifier만. 그 외 401 |
 
 ### 토큰
 | Method | Path | Body | 응답 |
 |---|---|---|---|
-| POST | `/api/auth/refresh` | `{ refreshToken }` | legacy 토큰(DB에 있음)은 기존대로, 그 외는 Auth `/oauth2/token`으로 중계. 200 새 `AuthTokens` / 401 (Auth `invalid_grant` 또는 Sync 계정 없음 → 클라이언트 로그아웃) / 502 (Auth 불가·설정 오류: 토큰 유지) |
-| POST | `/api/auth/logout` | `{ refreshToken }` | 204. legacy는 family 폐기, Auth 토큰은 `/oauth2/revoke` 중계(최선) |
-| POST | `/api/auth/signup` | legacy | 운영에서는 **410** (`LEGACY_SIGNUP=false`, 새 계정은 Auth에서만) |
-| POST | `/api/auth/login` | legacy `{ email, password }` | 200 `AuthTokens` / 401. 2단계 동안 유지, 7단계에서 제거 |
+| POST | `/api/auth/refresh` | `{ refreshToken }` | Auth `/oauth2/token`으로 중계. 200 새 `AuthTokens` / 401 (Auth `invalid_grant` 또는 Sync 프로필 없음 → 클라이언트 로그아웃) / 502 (Auth 불가·설정 오류: 토큰 유지) |
+| POST | `/api/auth/logout` | `{ refreshToken }` | 204. Auth `/oauth2/revoke`로 중계(최선) |
 
-- API의 access token은 둘 다 받음 (alg로 구분):
-  - Auth: RS256, Auth JWKS, `iss` = `AUTH_ISSUER`, `aud` ∋ `mirattic-sync`, `scope` 있음(ID token 거부), 15분
-  - legacy: HS256, `iss` = `mirattic`, 15분
-  - 공통: `sub` = UID, 삭제된 Sync 계정이면 401
-- Auth refresh token: 128자, 30일, 사용할 때마다 회전, 재사용 감지는 Auth가 함 (10초 유예 후 재사용 → 그 로그인 전체 폐기)
-- legacy refresh token: 43자, 회전 + family 재사용 감지 (기존)
+- API의 access token: Mirattic Auth, RS256, Auth JWKS, `iss` = `AUTH_ISSUER`, `aud` ∋ `mirattic-sync`, `scope` 있음(ID token 거부), 15분, `sub` = UID. Sync 프로필이 삭제된 UID면 401
+- refresh token: Auth 발급, 128자, 30일, 사용할 때마다 회전, 재사용 감지는 Auth가 함 (10초 유예 후 재사용 → 그 로그인 전체 폐기)
 - 클라이언트는 refresh를 동시에 하나만 보내야 한다 (`packages/client`가 보장)
 - `/api/auth/**`, `/auth/**`는 IP당 분당 20회 제한 (429)
 
@@ -35,10 +29,10 @@ Mirattic Auth 이전 중 (Auth 저장소 `docs/migration.md` 옵션 B, 2단계 �
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/me` | `Me` `{ id(UID), email?, providers[], displayName, friendCode, presenceVisibility, positionVisibility }` |
+| GET | `/api/me` | `Me` `{ id(UID), email?, displayName, friendCode, presenceVisibility, positionVisibility }`. `email`은 Mirattic Auth UserInfo에서 매번 읽음(실패하면 없음) |
 | POST | `/api/me/friend-code` | 친구 코드 재발급 (이전 코드는 즉시 무효) → `Me`. UI에서는 뺐음 (2026-09-29 사용자 요청) |
 | PUT | `/api/me/privacy` | `{ presenceVisibility, positionVisibility }` → `Me` |
-| DELETE | `/api/me` | `{ password }` → 204. 계정과 데이터 삭제 (Phase 9). 비밀번호가 틀리면 **403** (401이면 클라이언트가 refresh 후 재시도하므로). IP당 분당 제한은 `/api/auth/**`와 같음 (429). 삭제 후: 호스트인 방은 닫히고 나머지 방에서는 빠짐 (멤버들에게 `room:update`, 남은 방에는 `chat:delete { userId }`), 친구·요청 상대에게 `friend:update`, 내 WebSocket 연결은 모두 닫힘, 기존 access token은 즉시 401 |
+| DELETE | `/api/me` | `{ code, verifier }` → 204. Sync 프로필과 데이터 삭제 (Phase 9, 결정 82). `reauth=true` 로그인의 handoff여야 하고 같은 UID, `auth_time` 5분 이내가 아니면 **403** (401이면 클라이언트가 refresh 후 재시도하므로). 그 재인증 로그인은 Auth에서 바로 폐기. Mirattic 계정은 Auth에 남음. IP당 분당 제한은 `/api/auth/**`와 같음 (429). 삭제 후: 호스트인 방은 닫히고 나머지 방에서는 빠짐 (멤버들에게 `room:update`, 남은 방에는 `chat:delete { userId }`), 친구·요청 상대에게 `friend:update`, 내 WebSocket 연결은 모두 닫힘, 기존 access token은 즉시 401 |
 
 삭제 이후 access token은 만료 전이라도 서버가 계정 존재를 확인해 401로 거절한다 (요청마다 기본 키 조회 한 번).
 

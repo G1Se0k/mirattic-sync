@@ -66,12 +66,29 @@ describe("createApi", () => {
     const api = createApi({
       baseUrl: "http://api",
       store: memoryStore(null),
-      fetch: async () => json(409, { detail: "email already registered" }),
+      fetch: async () => json(401, { detail: "invalid handoff" }),
+      authorize: async () => ({ code: "h", verifier: "v" }),
     });
-    await expect(api.signup("a@b.c", "password123", "A")).rejects.toMatchObject({
-      status: 409,
-      message: "email already registered",
+    await expect(api.loginWithMirattic()).rejects.toMatchObject({ status: 401, message: "invalid handoff" });
+  });
+
+  it("deletes the account with a fresh re-auth handoff", async () => {
+    const asked: unknown[] = [];
+    let sent: unknown;
+    const api = createApi({
+      baseUrl: "http://api",
+      store: memoryStore("r1"),
+      fetch: async (url, init) => {
+        const path = String(url).replace("http://api", "");
+        if (path === "/api/auth/refresh") return json(200, { accessToken: "a1", refreshToken: "r2", user: { id: "u", displayName: "U" } });
+        sent = { method: init?.method, path, body: JSON.parse(String(init?.body)) };
+        return json(204);
+      },
+      authorize: async (o) => (asked.push(o), { code: "h2", verifier: "v2" }),
     });
+    await api.deleteAccount();
+    expect(asked).toEqual([{ reauth: true }]);
+    expect(sent).toEqual({ method: "DELETE", path: "/api/me", body: { code: "h2", verifier: "v2" } });
   });
 
   it("a refresh answering after logout doesn't bring the session back", async () => {

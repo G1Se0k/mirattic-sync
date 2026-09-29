@@ -31,16 +31,17 @@ export type ApiClient = ReturnType<typeof createApi>;
 
 /**
  * The browser part of a Mirattic account sign-in (extension: chrome.identity.launchWebAuthFlow through the server's
- * /auth/start). Resolves to the one-time handoff code and the PKCE verifier of the challenge it sent.
+ * /auth/start). Resolves to the one-time handoff code and the PKCE verifier of the challenge it sent. `reauth` asks
+ * for the password again even inside a Mirattic session (before deleting the account).
  */
-export type Authorize = () => Promise<{ code: string; verifier: string }>;
+export type Authorize = (opts?: { reauth?: boolean }) => Promise<{ code: string; verifier: string }>;
 
 export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fetch?: typeof fetch; authorize?: Authorize }) {
   const doFetch = opts.fetch ?? fetch.bind(globalThis);
   let accessToken: string | null = null;
   // Single in-flight refresh: two concurrent refreshes with one token would trip server reuse detection.
   let refreshing: Promise<boolean> | null = null;
-  // Bumped by sign-in, sign-up and sign-out: a refresh that answers after one of them belongs to an older
+  // Bumped by sign-in and sign-out: a refresh that answers after one of them belongs to an older
   // session and must not bring its tokens back.
   let session = 0;
 
@@ -72,6 +73,10 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     writes = next.catch(() => {});
     return next;
   }
+  const authorize: Authorize = (o) => {
+    if (!opts.authorize) throw new ApiError(400, "Mirattic sign-in is not available here");
+    return opts.authorize(o);
+  };
   const revoke = (refreshToken: string) =>
     send("POST", "/api/auth/logout", { refreshToken }, null).then(() => {}, () => {});
 
@@ -140,17 +145,10 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** Resume a session from the stored refresh token. */
     restore: refresh,
 
-    async signup(email: string, password: string, displayName: string): Promise<UserSummary> {
-      return adopt(await parse<AuthTokens>(await send("POST", "/api/auth/signup", { email, password, displayName }, null)));
-    },
     /** Sign in (or sign up) with a Mirattic account. */
     async loginWithMirattic(): Promise<UserSummary> {
-      if (!opts.authorize) throw new ApiError(400, "Mirattic sign-in is not available here");
-      const { code, verifier } = await opts.authorize();
+      const { code, verifier } = await authorize();
       return adopt(await parse<AuthTokens>(await send("POST", "/api/auth/handoff", { code, verifier }, null)));
-    },
-    async login(email: string, password: string): Promise<UserSummary> {
-      return adopt(await parse<AuthTokens>(await send("POST", "/api/auth/login", { email, password }, null)));
     },
     async logout(): Promise<void> {
       const mine = ++session;
@@ -168,8 +166,14 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     me: () => authed<Me>("GET", "/api/me"),
     updatePrivacy: (presenceVisibility: Visibility, positionVisibility: Visibility) =>
       authed<Me>("PUT", "/api/me/privacy", { presenceVisibility, positionVisibility }),
-    /** Deletes my account and all its data. 403 wrong password. Sign out locally afterwards. */
-    deleteAccount: (password: string) => authed<void>("DELETE", "/api/me", { password }),
+    /**
+     * Deletes my Sync profile and all its data after the Mirattic password is typed again (a re-auth window).
+     * 403 if that sign-in isn't this account's or isn't fresh. Sign out locally afterwards.
+     */
+    async deleteAccount(): Promise<void> {
+      const { code, verifier } = await authorize({ reauth: true });
+      return authed<void>("DELETE", "/api/me", { code, verifier });
+    },
     /** Invalidates the current friend code and returns the updated profile. */
 
     friends: () => authed<FriendView[]>("GET", "/api/friends"),

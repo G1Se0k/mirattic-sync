@@ -3,6 +3,7 @@ package com.mirattic.sync;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -153,8 +154,16 @@ class SafetyFlowTest extends IntegrationTest {
 		Client askedWs = connect(asked);
 		String lateTicket = ticket(leaving); // issued before, used after the deletion
 
-		deleteAccount(leaving, "wrong-password").andExpect(status().isForbidden());
-		deleteAccount(leaving, "password123").andExpect(status().isNoContent());
+		// Needs a fresh password sign-in of the same account (reauth → prompt=login at Auth).
+		int revoked = AuthStub.REVOKED.size();
+		deleteAccount(leaving, new Handoff("unknown", "x".repeat(43))).andExpect(status().isForbidden());
+		deleteAccount(leaving, signIn(friend.id(), "x", true, Instant.now())).andExpect(status().isForbidden());
+		deleteAccount(leaving, signIn(leaving.id(), "x", true, Instant.now().minusSeconds(600)))
+				.andExpect(status().isForbidden());
+		Handoff proof = signIn(leaving.id(), "x", true, Instant.now());
+		deleteAccount(leaving, proof).andExpect(status().isNoContent());
+		// Each re-auth was a login of its own (other user, stale, good): all three ended at Auth.
+		assertThat(AuthStub.REVOKED.size() - revoked).isEqualTo(3);
 
 		JsonNode gone = friendWs.nextOfType("chat:delete");
 		assertThat(gone.path("roomId").asString()).isEqualTo(joined);
@@ -165,10 +174,8 @@ class SafetyFlowTest extends IntegrationTest {
 
 		call(HttpMethod.GET, "/api/me", leaving.accessToken(), null).andExpect(status().isUnauthorized());
 		call(HttpMethod.POST, "/api/ws-ticket", leaving.accessToken(), null).andExpect(status().isUnauthorized());
+		// Auth still knows the account (it owns it); Sync has no profile for it any more.
 		call(HttpMethod.POST, "/api/auth/refresh", null, "{\"refreshToken\":\"%s\"}".formatted(leaving.refreshToken()))
-				.andExpect(status().isUnauthorized());
-		call(HttpMethod.POST, "/api/auth/login", null,
-				"{\"email\":\"%s\",\"password\":\"password123\"}".formatted(leaving.email()))
 				.andExpect(status().isUnauthorized());
 		awaitClosed(open(lateTicket, new LinkedBlockingQueue<>()));
 
@@ -181,8 +188,7 @@ class SafetyFlowTest extends IntegrationTest {
 				.findValuesAsString("id")).containsExactly(host.id());
 		assertThat(body(call(HttpMethod.GET, "/api/friends/requests", asked.accessToken(), null))
 				.path("incoming")).isEmpty();
-		for (String table : new String[] {"users where id", "user_identities where user_id",
-				"refresh_tokens where user_id", "room_members where user_id", "chat_messages where user_id",
+		for (String table : new String[] {"users where id", "room_members where user_id", "chat_messages where user_id",
 				"friendships where requester_id = ? or addressee_id", "reports where reporter_id = ? or target_user_id"}) {
 			Object[] args = table.contains("or") ? new Object[] {leaving.id(), leaving.id()} : new Object[] {leaving.id()};
 			assertThat(jdbc.queryForObject("select count(*) from " + table + " = ?", Long.class, args)).as(table).isZero();
@@ -223,7 +229,8 @@ class SafetyFlowTest extends IntegrationTest {
 		return call(HttpMethod.POST, "/api/reports", u.accessToken(), jsonBody);
 	}
 
-	private ResultActions deleteAccount(TestUser u, String password) throws Exception {
-		return call(HttpMethod.DELETE, "/api/me", u.accessToken(), "{\"password\":\"%s\"}".formatted(password));
+	private ResultActions deleteAccount(TestUser u, Handoff proof) throws Exception {
+		return call(HttpMethod.DELETE, "/api/me", u.accessToken(),
+				"{\"code\":\"%s\",\"verifier\":\"%s\"}".formatted(proof.code(), proof.verifier()));
 	}
 }

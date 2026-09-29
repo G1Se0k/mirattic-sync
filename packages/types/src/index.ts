@@ -91,16 +91,13 @@ export type Visibility = "OFF" | "FRIENDS" | "ROOM_ONLY";
 // REST DTOs (mirror server records).
 export type UserSummary = { id: string; displayName: string };
 
-/** How a user can sign in. OAuth providers are added here when implemented. */
-export type IdentityProvider = "LOCAL";
-
 /**
- * `id` is the user's UID — never an email or provider id. `email` may be absent for OAuth-only users.
- * `friendCode` (8 chars, shown as XXXX-XXXX) is how others add you; only its owner ever sees it.
+ * `id` is the Mirattic UID — never an email. `email` is the Mirattic account's, read live from Mirattic Auth
+ * (absent if Auth couldn't be reached). `friendCode` (8 chars, shown as XXXX-XXXX) is how others add you; only its
+ * owner ever sees it.
  */
 export type Me = UserSummary & {
   email?: string;
-  providers: IdentityProvider[];
   friendCode: string;
   presenceVisibility: Visibility;
   positionVisibility: Visibility;

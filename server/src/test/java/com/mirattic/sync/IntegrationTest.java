@@ -1,7 +1,13 @@
 package com.mirattic.sync;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -13,12 +19,14 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.socket.TextMessage;
+import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
@@ -28,8 +36,7 @@ import tools.jackson.databind.json.JsonMapper;
 /** Shared context (one MySQL container) for all integration tests. Each test uses fresh random users. */
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-		"app.jwt-secret=test-secret-test-secret-test-secret-0123456789",
-		"app.auth-rate-limit-per-minute=100000", "app.legacy-signup=true",
+		"app.auth-rate-limit-per-minute=100000",
 		"app.auth.client-secret=" + AuthStub.CLIENT_SECRET, "app.auth.redirect-uri=https://sync.test/auth/callback",
 		"app.empty-room-sweep-ms=3600000", "app.room-log-sweep-ms=3600000", "app.room-log-grace-ms=0" }) // tests sweep by hand
 @AutoConfigureMockMvc
@@ -71,14 +78,53 @@ public abstract class IntegrationTest {
 	@Autowired
 	protected JsonMapper json;
 
+	protected static final String EXTENSION = "https://ffoifpjldcgdiipbhljkofgifmefgohk.chromiumapp.org/";
+	protected static final String CALLBACK = "https://sync.test/auth/callback";
+
+	/** Where the extension's sign-in window lands: a handoff code, and the verifier of the challenge it sent. */
+	public record Handoff(String code, String verifier) {
+	}
+
+	/** A new Mirattic account signed in through the extension flow (Auth stubbed by {@link AuthStub}). */
 	protected TestUser signup() throws Exception {
-		String email = UUID.randomUUID() + "@example.com";
-		JsonNode body = body(call(HttpMethod.POST, "/api/auth/signup", null,
-				"{\"email\":\"" + email + "\",\"password\":\"password123\",\"displayName\":\"Tester\"}"));
+		String uid = UUID.randomUUID().toString();
+		JsonNode body = body(redeem(signIn(uid, "Tester", false, Instant.now())).andExpect(status().isOk()));
 		String accessToken = body.path("accessToken").asString();
 		String friendCode = body(call(HttpMethod.GET, "/api/me", accessToken, null)).path("friendCode").asString();
-		return new TestUser(body.path("user").path("id").asString(), email, friendCode, accessToken,
-				body.path("refreshToken").asString());
+		return new TestUser(uid, AuthStub.email(uid), friendCode, accessToken, body.path("refreshToken").asString());
+	}
+
+	/** /auth/start → (Auth: password typed at `authTime`) → /auth/callback, as launchWebAuthFlow would. */
+	protected Handoff signIn(String uid, String name, boolean reauth, Instant authTime) throws Exception {
+		String verifier = UUID.randomUUID() + "-abcdefgh";
+		MockHttpServletResponse start = start(verifier, reauth);
+		String authorize = start.getRedirectedUrl();
+		assertThat(authorize).startsWith(AuthStub.issuer() + "/oauth2/authorize");
+		assertThat(param(authorize, "prompt")).isEqualTo(reauth ? "login" : null);
+		String code = AuthStub.code(uid, name, param(authorize, "code_challenge"), param(authorize, "redirect_uri"),
+				authTime);
+		MockHttpServletResponse cb = mvc.perform(get("/auth/callback").param("code", code)
+				.param("state", param(authorize, "state")).cookie(start.getCookie("sync_login"))).andReturn().getResponse();
+		assertThat(cb.getRedirectedUrl()).startsWith(EXTENSION + "?handoff=").doesNotContain("eyJ"); // no token in a URL
+		return new Handoff(param(cb.getRedirectedUrl(), "handoff"), verifier);
+	}
+
+	protected MockHttpServletResponse start(String verifier, boolean reauth) throws Exception {
+		MockHttpServletResponse res = mvc.perform(get("/auth/start").param("redirect", EXTENSION)
+				.param("challenge", AuthStub.s256(verifier)).param("reauth", String.valueOf(reauth)))
+				.andExpect(status().isFound()).andReturn().getResponse();
+		assertThat(param(res.getRedirectedUrl(), "redirect_uri")).isEqualTo(CALLBACK);
+		return res;
+	}
+
+	protected ResultActions redeem(Handoff h) throws Exception {
+		return call(HttpMethod.POST, "/api/auth/handoff", null,
+				"{\"code\":\"" + h.code() + "\",\"verifier\":\"" + h.verifier() + "\"}");
+	}
+
+	protected static String param(String url, String name) {
+		String raw = UriComponentsBuilder.fromUriString(url).build(true).getQueryParams().getFirst(name);
+		return raw == null ? null : URLDecoder.decode(raw, StandardCharsets.UTF_8);
 	}
 
 	protected ResultActions call(HttpMethod method, String path, String token, String jsonBody) throws Exception {

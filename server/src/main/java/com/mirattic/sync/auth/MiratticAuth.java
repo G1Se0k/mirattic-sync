@@ -5,6 +5,7 @@ import com.mirattic.sync.user.UserSummary;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +34,13 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @Component
 public class MiratticAuth {
+
+	/** Committed as a 401: the client drops its refresh token and signs out. */
+	static class InvalidRefreshToken extends ResponseStatusException {
+		InvalidRefreshToken() {
+			super(HttpStatus.UNAUTHORIZED, "invalid refresh token");
+		}
+	}
 
 	/** Auth's token endpoint answer. Field names are the OAuth wire names. */
 	record TokenResponse(String access_token, String refresh_token, String id_token) {
@@ -96,7 +104,7 @@ public class MiratticAuth {
 	}
 
 	/** Rotates the extension's Auth refresh token. 401 when Auth refuses it, so the client signs out. */
-	AuthService.Tokens refresh(String refreshToken) {
+	AuthTokens refresh(String refreshToken) {
 		MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
 		body.add("grant_type", "refresh_token");
 		body.add("refresh_token", refreshToken);
@@ -106,7 +114,7 @@ public class MiratticAuth {
 		} catch (HttpClientErrorException.BadRequest e) {
 			// invalid_grant: expired, revoked, rotated away. Only this means "signed out"; anything else (e.g. a
 			// wrong client secret → 401 invalid_client) must not make every client drop its token.
-			throw new AuthService.InvalidRefreshToken();
+			throw new InvalidRefreshToken();
 		} catch (RestClientException e) {
 			log.warn("Mirattic Auth refresh failed: {}", e.getClass().getSimpleName());
 			throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "auth server unavailable");
@@ -116,13 +124,24 @@ public class MiratticAuth {
 		UserSummary user = users.findById(sub).map(UserSummary::of).orElse(null);
 		if (user == null) {
 			revoke(t.refresh_token());
-			throw new AuthService.InvalidRefreshToken();
+			throw new InvalidRefreshToken();
 		}
-		return new AuthService.Tokens(t.access_token(), t.refresh_token(), user);
+		return new AuthTokens(t.access_token(), t.refresh_token(), user);
+	}
+
+	/** The account's current email from Auth's UserInfo (Auth owns it), or null if Auth can't say right now. */
+	public String email(String accessToken) {
+		try {
+			Map<?, ?> info = http.get().uri("/userinfo").headers(h -> h.setBearerAuth(accessToken)).retrieve().body(Map.class);
+			return info != null && info.get("email") instanceof String e ? e : null;
+		} catch (RestClientException e) {
+			log.warn("Mirattic Auth userinfo failed: {}", e.getClass().getSimpleName());
+			return null;
+		}
 	}
 
 	/** Revokes the login behind this refresh token at Auth. Best effort, like the legacy logout. */
-	void revoke(String refreshToken) {
+	public void revoke(String refreshToken) {
 		MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
 		body.add("token", refreshToken);
 		body.add("token_type_hint", "refresh_token");

@@ -177,7 +177,7 @@ export default defineBackground(() => {
     if (name === 'restore' && meId) return true; // already signed in: no second token rotation
     if (name === 'logout') signOut();
     const result = await (fn as (...a: unknown[]) => Promise<unknown>)(...args);
-    if ((name === 'loginWithMirattic' || name === 'login' || name === 'signup' || (name === 'restore' && result === true)) && !meId) await signedIn();
+    if ((name === 'loginWithMirattic' || (name === 'restore' && result === true)) && !meId) await signedIn();
     if (name === 'deleteAccount') signOut();
     return result;
   }
