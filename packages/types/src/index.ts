@@ -36,6 +36,8 @@ export type PlayerSnapshot = {
   playing: boolean;
   capturedAt: number;
   adPlaying?: boolean;
+  /** The user is holding the page's seek bar (decision 86); absent where the page can't tell. */
+  scrubbing?: boolean;
 };
 
 export type PlaybackState = {
@@ -216,7 +218,8 @@ export type RoomView = {
  * Payload of host `playback:play|pause|seek`. `capturedAt` is the host's estimate of *server* time
  * when `positionMs` was read; the server clamps it to the last few seconds.
  */
-export type PlaybackCommand = { positionMs: number; capturedAt: number };
+/** `scrubbing`: the host holds the seek bar, so a pause may be the start of a drag (decision 86). */
+export type PlaybackCommand = { positionMs: number; capturedAt: number; scrubbing?: boolean };
 
 // WebSocket envelopes. Clients never send userId; the server stamps it from the authenticated session.
 export type ClientEvent<T = unknown> = {

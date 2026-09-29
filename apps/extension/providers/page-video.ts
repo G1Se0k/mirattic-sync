@@ -31,6 +31,10 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
   protected adPlaying() {
     return false;
   }
+  /** Whether the user holds the page's seek bar, where the page shows it (YouTube); undefined elsewhere. */
+  protected scrubbing(): boolean | undefined {
+    return undefined;
+  }
   /** Runs with every check (every second at least): for page chores of a provider. */
   protected tick() {}
 
@@ -89,6 +93,7 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
       playing: !video.paused && !video.ended,
       capturedAt: Date.now(),
       adPlaying: this.adPlaying(),
+      scrubbing: this.scrubbing(),
     };
   }
 
@@ -147,7 +152,7 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
     return this.adPlaying() ? null : this.video();
   }
 
-  private async emit() {
+  protected async emit() {
     const s = await this.getSnapshot();
     if (s) for (const l of this.listeners) l(s);
     else for (const l of this.goneListeners) l();

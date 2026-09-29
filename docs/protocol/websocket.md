@@ -61,7 +61,7 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `watch:cancel` | S→C | `UserSummary` | 친구가 합류 요청을 취소함 (`DELETE /api/rooms/requests/{friendId}`). `userId` = 요청했던 사람. 받은 사람은 그 요청 배너를 지움 |
 | `watch:answer` | S→C | 없음 | 내가 합류 요청한 친구가 초대로 응답함 (이미 멤버가 됨, `room:invite`는 오지 않음). `roomId` = 그 방, `userId` = 친구. 받은 앱은 그 방으로 바로 입장. 서버에 열린 요청이 있을 때만 (다른 초대에는 없음) |
 | `room:update` | S→C | 없음, 또는 `{ muted }` | 참가 / 나감 / 방 닫힘 시 모든 멤버에게. 클라이언트는 `GET /api/rooms/{id}`로 다시 조회 (404면 닫힘). 채팅 알림 설정을 바꾸면 그 사용자의 연결에만 `{ muted }`를 담아 보냄 → 조회 응답 전에 바로 적용 |
-| `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt }` | HOST만 (`not_host`). `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회 |
+| `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt, scrubbing? }` | HOST만 (`not_host`). `scrubbing`(결정 86): 호스트가 시크바를 누르고 있는지 — 페이지가 알 수 있을 때만(YouTube). `false`인 일시정지는 방 기록에 바로, `true`는 드래그가 끝날 때까지 붙잡음, 없으면 1초 붙잡음. `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회 |
 | `playback:content-change` | C→S | `RoomContent` | HOST만. 호스트 플레이어의 영상이 바뀌었을 때 다음 명령 전에 보냄. 방 콘텐츠를 바꾸고 0초·일시정지로 초기화, version 증가 → `playback:update` + `room:update`. YouTube는 contentId가 11자 영상 ID, Netflix는 1–12자리 숫자, Laftel은 `작품ID/에피소드ID`(각 1–10자리 숫자)여야 함 (`bad_payload`). playback 명령과 같은 초당 예산. `series`가 이전 콘텐츠와 같으면 멤버 클라이언트가 묻지 않고 새 영상을 열고, 다르면 팝업으로 물음 (결정 67) |
 
 호스트 이탈 (결정 67): 호스트 탭의 영상이 사라지면(시청 페이지를 벗어남, 탭 닫힘) 호스트 클라이언트가 재생 중이던 위치로 `playback:pause`를 보냄. 호스트의 연결이 방에서 모두 빠지면(`room:leave`, 연결 끊김 — 창 · side panel 닫기, 방 화면 나가기) 서버가 재생 중인 방을 지금 위치로 일시정지하고 `playback:update`를 보냄.

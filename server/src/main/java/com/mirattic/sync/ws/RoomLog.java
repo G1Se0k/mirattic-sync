@@ -14,8 +14,10 @@ import org.springframework.stereotype.Component;
  * Joins and leaves: a user joins with their first connection in the room; they leave once none of their
  * connections has been in it for the grace period, so a reconnect or the extension's worker restarting writes nothing.
  * The host's playback: play / pause when the state flips, a seek when the position jumps. Dragging the seek bar
- * pauses, moves and plays again, so a pause is held for a moment: a play soon after it makes one "seek" line (if
- * it moved) instead of "pause" + "play".
+ * pauses, moves and plays again, so that pause is held: a play after it makes one "seek" line (if it moved)
+ * instead of "pause" + "play". Where the host's page says whether the seek bar is held (`scrubbing`, decision 86:
+ * YouTube), a pause without it is written at once and one with it is held until the drag ends; elsewhere every
+ * pause is held a moment.
  * ponytail: in memory, single instance; after a server restart everyone reconnecting is logged as joining again.
  * Lines are written under one lock (a few per minute), so a leave can't land after a newer join.
  */
@@ -35,6 +37,8 @@ public class RoomLog {
 	private final Map<String, Object> order = new ConcurrentHashMap<>();
 	/** Room → the newest playback version logged: a command applied earlier but arriving here later is dropped. */
 	private final Map<String, Long> versions = new ConcurrentHashMap<>();
+	/** A pause held while the host holds the seek bar is written anyway after this long (a drag left hanging). */
+	public static final long SCRUB_HOLD_MS = 30_000;
 	/** Room → a pause not written yet (guarded by this). */
 	private final Map<String, Held> held = new ConcurrentHashMap<>();
 
@@ -46,14 +50,26 @@ public class RoomLog {
 		long position;
 		long lastAt;
 		boolean moved;
+		/** Held because the host's page says the seek bar is held: waits for the drag to end, not the hold time. */
+		final boolean scrubbing;
+		/** When the hold started: a drag's hold ends SCRUB_HOLD_MS after it, however long the moves go on. */
+		final long since;
 
-		Held(String userId, long pausedPosition, long baseline, long position, long lastAt, boolean moved) {
+		Held(String userId, long pausedPosition, long baseline, long position, long lastAt, boolean moved,
+				boolean scrubbing) {
 			this.userId = userId;
 			this.pausedPosition = pausedPosition;
 			this.baseline = baseline;
 			this.position = position;
 			this.lastAt = lastAt;
 			this.moved = moved;
+			this.scrubbing = scrubbing;
+			this.since = lastAt;
+		}
+
+		/** Past its time: a drag SCRUB_HOLD_MS after it began, otherwise the hold time after the last command. */
+		boolean due(long now, long pauseHoldMs) {
+			return scrubbing ? now - since >= SCRUB_HOLD_MS : now - lastAt >= pauseHoldMs;
 		}
 	}
 
@@ -122,8 +138,11 @@ public class RoomLog {
 		}
 	}
 
-	/** After a host's playback command was applied. */
-	synchronized void playback(String roomId, String me, RoomService.Applied a) {
+	/**
+	 * After a host's playback command was applied. `scrubbing`: whether the host holds the seek bar, null where
+	 * their page can't tell.
+	 */
+	synchronized void playback(String roomId, String me, RoomService.Applied a, Boolean scrubbing) {
 		if (!newer(roomId, a.state().version())) {
 			return;
 		}
@@ -131,7 +150,7 @@ public class RoomLog {
 		boolean jumped = Math.abs(a.landed() - a.expected()) >= MIN_JUMP_MS;
 		Held h = held.get(roomId);
 		// Held past its time (the sweep hasn't run yet), or another host now: written as it was.
-		if (h != null && (now - h.lastAt >= pauseHoldMs || !h.userId.equals(me))) {
+		if (h != null && (h.due(now, pauseHoldMs) || !h.userId.equals(me))) {
 			writeHeld(roomId, held.remove(roomId));
 			h = null;
 		}
@@ -144,12 +163,20 @@ public class RoomLog {
 				if (h.moved) {
 					post(roomId, rooms.log(roomId, me, "seek", "", a.landed()));
 				}
+			} else if (Boolean.FALSE.equals(scrubbing)) { // the bar let go and still paused: a real pause (+ move)
+				writeHeld(roomId, held.remove(roomId));
 			}
 			return;
 		}
 		if (a.wasPlaying() && !a.state().playing()) {
 			// Paused somewhere else (the drag's first report): the pause is where it was, the move comes after.
-			held.put(roomId, new Held(me, jumped ? a.expected() : a.landed(), a.expected(), a.landed(), now, jumped));
+			Held pause = new Held(me, jumped ? a.expected() : a.landed(), a.expected(), a.landed(), now, jumped,
+					Boolean.TRUE.equals(scrubbing));
+			if (Boolean.FALSE.equals(scrubbing)) {
+				writeHeld(roomId, pause); // not the seek bar: a pause, now
+			} else {
+				held.put(roomId, pause);
+			}
 		} else if (!a.wasPlaying() && a.state().playing()) {
 			post(roomId, rooms.log(roomId, me, "play", "", a.landed()));
 		} else if (jumped) {
@@ -185,7 +212,7 @@ public class RoomLog {
 	public synchronized void flushHeld(long now) {
 		for (Iterator<Map.Entry<String, Held>> it = held.entrySet().iterator(); it.hasNext();) {
 			Map.Entry<String, Held> e = it.next();
-			if (now - e.getValue().lastAt >= pauseHoldMs) {
+			if (e.getValue().due(now, pauseHoldMs)) {
 				it.remove();
 				writeHeld(e.getKey(), e.getValue());
 			}

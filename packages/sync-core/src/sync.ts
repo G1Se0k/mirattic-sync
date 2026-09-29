@@ -199,7 +199,8 @@ export function publishHost(
     // restarts the room paused, so its first command always states play or pause.
     const fresh = !last || s.contentId !== last.contentId || s.playing !== last.playing;
     const type = fresh ? (s.playing ? "playback:play" : "playback:pause") : "playback:seek";
-    const command = { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(s.capturedAt)) };
+    const command: PlaybackCommand = { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(s.capturedAt)) };
+    if (s.scrubbing !== undefined) command.scrubbing = s.scrubbing;
     if (send(type, command, s) !== false) last = s;
   };
   const queue = (s: PlayerSnapshot) => {

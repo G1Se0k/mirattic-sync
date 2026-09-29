@@ -517,6 +517,49 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(small.path("kind").asString()).isEqualTo("seek");
 		assertThat(small.path("mediaPositionMs").asLong()).isEqualTo(35_100);
 
+		// The page says whether the seek bar is held (decision 86): a pause without it is written at once...
+		String flagged = "{\"positionMs\":%d,\"capturedAt\":%d,\"scrubbing\":%b}";
+		Thread.sleep(1_000);
+		hostWs.send(event("playback:pause", roomId, flagged.formatted(36_000, System.currentTimeMillis(), false)));
+		JsonNode paused = friendWs.nextOfType("chat:log").path("payload"); // no flush needed
+		assertThat(paused.path("kind").asString()).isEqualTo("pause");
+		assertThat(paused.path("mediaPositionMs").asLong()).isEqualTo(36_000);
+		hostWs.send(event("playback:play", roomId, flagged.formatted(36_000, System.currentTimeMillis(), false)));
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("play");
+		// ...one with it waits for the drag: let go and playing is one "seek" line,
+		Thread.sleep(1_000);
+		hostWs.send(event("playback:pause", roomId, flagged.formatted(36_100, System.currentTimeMillis(), true)));
+		hostWs.send(event("playback:seek", roomId, flagged.formatted(50_000, System.currentTimeMillis(), true)));
+		hostWs.send(event("playback:play", roomId, flagged.formatted(50_000, System.currentTimeMillis(), false)));
+		JsonNode scrubbed = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(scrubbed.path("kind").asString()).isEqualTo("seek");
+		assertThat(scrubbed.path("mediaPositionMs").asLong()).isEqualTo(50_000);
+		// let go and still paused is a pause and a move, at once.
+		Thread.sleep(1_000);
+		long tq = System.currentTimeMillis();
+		hostWs.send(event("playback:pause", roomId, flagged.formatted(50_100, tq, true)));
+		hostWs.send(event("playback:seek", roomId, flagged.formatted(70_000, tq, true)));
+		hostWs.send(event("playback:seek", roomId, flagged.formatted(70_000, tq, false)));
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
+		JsonNode moved = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(moved.path("kind").asString()).isEqualTo("seek");
+		assertThat(moved.path("mediaPositionMs").asLong()).isEqualTo(70_000);
+		// A drag left hanging is written 30 s after it began, however long its moves go on.
+		Thread.sleep(1_000);
+		hostWs.send(event("playback:play", roomId, flagged.formatted(70_000, System.currentTimeMillis(), false)));
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("play");
+		Thread.sleep(1_000);
+		long began = System.currentTimeMillis();
+		hostWs.send(event("playback:pause", roomId, flagged.formatted(70_100, began, true)));
+		Thread.sleep(1_000); // still moving a second later
+		hostWs.send(event("playback:seek", roomId, flagged.formatted(90_000, System.currentTimeMillis(), true)));
+		friendWs.nextOfType("playback:update");
+		roomLog.flushHeld(began + RoomLog.SCRUB_HOLD_MS - 1_000); // not yet
+		assertThat(friendWs.nextOfType("chat:log")).isNull();
+		roomLog.flushHeld(began + RoomLog.SCRUB_HOLD_MS + 500); // 30 s since it began, not since the last move
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("seek");
+
 		// Leaving: only once the last connection is gone for the grace period (0 here, two sweeps).
 		friendWs.session().close();
 		roomLog.sweep();
@@ -542,7 +585,7 @@ class RoomFlowTest extends IntegrationTest {
 		List<String> kinds = new ArrayList<>();
 		history.forEach(m -> kinds.add(m.path("kind").asString()));
 		assertThat(kinds).containsExactly("join", "join", "play", "seek", "seek", "pause", "seek", "content", "play", "seek", "seek",
-				"seek", "leave");
+				"seek", "pause", "play", "seek", "pause", "seek", "play", "pause", "seek", "leave");
 		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/messages/" + play.path("id").asString(), host.accessToken(), null)
 				.andExpect(status().isNotFound());
 		assertThat(myRoom(friend).path("unread").asLong()).isZero();

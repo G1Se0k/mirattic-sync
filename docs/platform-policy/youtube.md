@@ -28,7 +28,7 @@ Developer Policies (참고 기준으로 따름): 플레이어 기능 수정·차
 - 광고 건너뛰기·숨기기·음소거·가리기, 광고 중 seek. 광고 중에는 동기화를 멈추고 호스트는 명령을 보내지 않는다
 - 페이지 DOM에 UI 삽입 (플레이어를 가리지 않음, side panel만 사용)
 - 미디어 URL / 스트림 추출, 다운로드, 재전송, 오디오/비디오 분리
-- 댓글·추천 목록 등 페이지 데이터 수집 (읽는 것: URL의 영상 ID, 문서 제목, 플레이어 제목 링크 `#movie_player a.ytp-title-link`의 제목과 링크 속 영상 ID(지금 영상의 제목인지 확인용, 2026-09-29), `<video>`의 재생 상태, 영상 아래 채널 이름 `ytd-watch-flexy[video-id=지금 영상] ytd-video-owner-renderer ytd-channel-name a`의 글자(친구 목록 표시용, 2026-09-29 결정 80))
+- 댓글·추천 목록 등 페이지 데이터 수집 (읽는 것: URL의 영상 ID, 문서 제목, 플레이어 제목 링크 `#movie_player a.ytp-title-link`의 제목과 링크 속 영상 ID(지금 영상의 제목인지 확인용, 2026-09-29), `<video>`의 재생 상태, 영상 아래 채널 이름 `ytd-watch-flexy[video-id=지금 영상] ytd-video-owner-renderer ytd-channel-name a`의 글자(친구 목록 표시용, 2026-09-29 결정 80), 시크바 `#movie_player .ytp-progress-bar-container`를 누르고 있는지 여부만(누른 위치·다른 입력은 읽지 않음, 방 기록의 드래그 구분용, 2026-09-29 결정 86))
 - 재생 속도 변경, 화질 변경, YouTube 내부 page-world API 호출
 - 조회수 조작으로 볼 수 있는 자동 재생 반복 (사람이 없는 탭 자동 제어 안 함)
 

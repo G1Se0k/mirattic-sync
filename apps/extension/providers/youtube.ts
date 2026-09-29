@@ -8,6 +8,8 @@ const VIDEO = '#movie_player video';
 const PLAYER = '#movie_player';
 const AD_CLASS = 'ad-showing';
 const TITLE_LINK = '#movie_player a.ytp-title-link';
+/** The seek bar: pressing it starts a drag (pause → moves → play), told apart from a real pause (decision 86). */
+const SEEK_BAR = '#movie_player .ytp-progress-bar-container';
 /** The owner line under the video; the watch page element names the video it shows (`video-id`). */
 const CHANNEL = (id: string) => `ytd-watch-flexy[video-id="${id}"] ytd-video-owner-renderer ytd-channel-name a`;
 
@@ -22,6 +24,38 @@ export function playerVideoId(href: string) {
 
 export class YouTubeAdapter extends PageVideoAdapter {
   readonly provider = 'youtube' as const;
+  private held = false;
+  private readonly unlisten: () => void;
+
+  constructor() {
+    super();
+    // Only whether the bar is pressed: no position, no other input.
+    const down = (e: Event) => {
+      if (e.target instanceof Element && e.target.closest(SEEK_BAR)) this.held = true;
+    };
+    const up = () => {
+      if (!this.held) return;
+      this.held = false;
+      void this.emit(); // let go: said now, even if the drag ended with nothing else changing
+    };
+    document.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    this.unlisten = () => {
+      document.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+    };
+  }
+
+  protected override scrubbing() {
+    return this.held;
+  }
+
+  override destroy() {
+    this.unlisten();
+    super.destroy();
+  }
 
   protected video() {
     return document.querySelector<HTMLVideoElement>(VIDEO);
