@@ -888,6 +888,51 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(request.path("payload").path("id").asString()).isEqualTo(me.id());
 		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), to.formatted(friend.id()))
 				.andExpect(status().isTooManyRequests());
+
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests", me.accessToken(), null)).get(0).asString())
+				.isEqualTo(friend.id()); // still waiting: a reopened panel gets it back
+		// Taken back: the friend is told; not to a stranger; asking again is still throttled.
+		call(HttpMethod.DELETE, "/api/rooms/requests/" + friend.id(), me.accessToken(), null)
+				.andExpect(status().isNoContent());
+		JsonNode cancel = friendWs.nextOfType("watch:cancel");
+		assertThat(cancel.path("userId").asString()).isEqualTo(me.id());
+		call(HttpMethod.DELETE, "/api/rooms/requests/" + friend.id(), me.accessToken(), null)
+				.andExpect(status().isNoContent());
+		assertThat(friendWs.nextOfType("watch:cancel")).isNull(); // nothing open any more: no event
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests", me.accessToken(), null)).size()).isZero();
+		call(HttpMethod.DELETE, "/api/rooms/requests/" + stranger.id(), me.accessToken(), null)
+				.andExpect(status().isNotFound());
+		assertThat(strangerWs.nextOfType("watch:cancel")).isNull();
+		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), to.formatted(friend.id()))
+				.andExpect(status().isTooManyRequests());
+
+		// Answered by an invite: the request is closed.
+		TestUser asker = signup();
+		befriend(asker, friend);
+		Client askerWs = connect(asker);
+		call(HttpMethod.POST, "/api/rooms/requests", asker.accessToken(), to.formatted(friend.id()))
+				.andExpect(status().isAccepted());
+		String roomId = body(createRoom(friend, asker)).path("id").asString();
+		JsonNode answer = askerWs.nextOfType("watch:answer");
+		assertThat(answer.path("roomId").asString()).isEqualTo(roomId);
+		assertThat(answer.path("userId").asString()).isEqualTo(friend.id());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests", asker.accessToken(), null)).size()).isZero();
+		createRoom(friend, asker); // another invite, answering nothing now: no watch:answer
+		assertThat(askerWs.nextOfType("watch:answer")).isNull();
+
+		// Already a member of the friend's room: inviting them again answers too.
+		TestUser member = signup();
+		befriend(member, friend);
+		String theirs = body(createRoom(friend, member)).path("id").asString();
+		Client memberWs = connect(member);
+		call(HttpMethod.POST, "/api/rooms/requests", member.accessToken(), to.formatted(friend.id()))
+				.andExpect(status().isAccepted());
+		call(HttpMethod.POST, "/api/rooms/" + theirs + "/invites", friend.accessToken(), "{\"userIds\":[\"" + me.id() + "\"]}")
+				.andExpect(status().isOk());
+		assertThat(memberWs.nextOfType("watch:answer")).isNull(); // someone else invited: not an answer
+		call(HttpMethod.POST, "/api/rooms/" + theirs + "/invites", friend.accessToken(), "{\"userIds\":[\"" + member.id() + "\"]}")
+				.andExpect(status().isOk());
+		assertThat(memberWs.nextOfType("watch:answer").path("roomId").asString()).isEqualTo(theirs);
 	}
 
 	@Test

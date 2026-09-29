@@ -200,6 +200,10 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     makeHost: (id: string, userId: string) => authed<void>("POST", `/api/rooms/${id}/host`, { userId }),
     /** Asks an online friend to watch together; they get `watch:request`. 409 offline, 429 asked recently. */
     requestWatch: (friendId: string) => authed<void>("POST", "/api/rooms/requests", { friendId }),
+    /** The friends I asked to watch together and still wait for (closed by their invite or my cancel). */
+    openWatchRequests: () => authed<string[]>("GET", "/api/rooms/requests"),
+    /** Takes a watch request back; the friend gets `watch:cancel`. 404 if not a friend. */
+    cancelWatchRequest: (friendId: string) => authed<void>("DELETE", `/api/rooms/requests/${friendId}`),
     rooms: () => authed<RoomView[]>("GET", "/api/rooms"),
     /** Joins by a room code, typed as-is ("abcd-2345"). 404 unknown, 409 full, 429 too many tries. */
     joinRoomByCode: (code: string) => authed<RoomView>("POST", "/api/rooms/join", { code }),

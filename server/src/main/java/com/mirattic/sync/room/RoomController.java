@@ -59,6 +59,13 @@ class RoomController {
 	static final long WATCH_REQUEST_INTERVAL_MS = 30_000;
 	// ponytail: in-memory, pruned on each request (O(pairs asked in the last 30s)); single server, like presence.
 	private final Map<String, Long> lastWatchRequest = new ConcurrentHashMap<>();
+	/**
+	 * "requester>friend" → when a request was sent and not taken back: only such a request can be cancelled, once,
+	 * so repeated cancels send nothing. ponytail: in memory, forgotten after an hour or a restart (the friend's
+	 * banner then stays until they dismiss it).
+	 */
+	private final Map<String, Long> openWatchRequests = new ConcurrentHashMap<>();
+	static final long OPEN_WATCH_REQUEST_MS = 3_600_000;
 
 	private final RoomService rooms;
 	private final SocketHub hub;
@@ -74,7 +81,7 @@ class RoomController {
 	@PostMapping
 	RoomService.RoomView create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateRoom body) {
 		RoomService.RoomView room = rooms.create(jwt.getSubject(), body.content(), body.inviteIds());
-		sendInvites(jwt.getSubject(), room, List.of(jwt.getSubject()));
+		sendInvites(jwt.getSubject(), room, List.of(jwt.getSubject()), body.inviteIds());
 		return room;
 	}
 
@@ -83,7 +90,7 @@ class RoomController {
 	RoomService.RoomView invite(@AuthenticationPrincipal Jwt jwt, @PathVariable String id,
 			@Valid @RequestBody Invite body) {
 		RoomService.Invited invited = rooms.invite(jwt.getSubject(), id, body.userIds());
-		sendInvites(jwt.getSubject(), invited.room(), invited.before());
+		sendInvites(jwt.getSubject(), invited.room(), invited.before(), body.userIds());
 		rooms.announce(id, invited.before());
 		return invited.room();
 	}
@@ -141,17 +148,51 @@ class RoomController {
 		if (!allowed[0]) {
 			throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
 		}
+		openWatchRequests.values().removeIf(at -> now - at >= OPEN_WATCH_REQUEST_MS);
+		openWatchRequests.put(me.id() + ">" + body.friendId(), now);
 		hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now, me));
 	}
 
+	/**
+	 * Takes back my watch request to a friend: they get `watch:cancel` (and drop its banner) — once, and only for a
+	 * request still open, so repeating it sends nothing. Friends only, like the request; the 30 s limit on asking
+	 * again stays, so cancel + ask can't be used to flood.
+	 */
+	@DeleteMapping("/requests/{friendId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void cancelWatchRequest(@AuthenticationPrincipal Jwt jwt, @PathVariable String friendId) {
+		UserSummary me = rooms.requestWatch(jwt.getSubject(), friendId);
+		if (openWatchRequests.remove(me.id() + ">" + friendId) != null) {
+			hub.sendEvent(friendId, new ServerEvent("watch:cancel", null, me.id(), null, System.currentTimeMillis(), me));
+		}
+	}
+
 	/** `room:invite`, once each, to the room's members who aren't in `alreadyIn`. */
-	private void sendInvites(String hostId, RoomService.RoomView room, List<String> alreadyIn) {
+	private void sendInvites(String hostId, RoomService.RoomView room, List<String> alreadyIn, List<String> invitedIds) {
 		ServerEvent invite = new ServerEvent("room:invite", room.id(), hostId, null, System.currentTimeMillis(), room);
 		for (RoomService.MemberView m : room.members()) {
-			if (!alreadyIn.contains(m.user().id())) {
-				hub.sendEvent(m.user().id(), invite);
+			String id = m.user().id();
+			if (!alreadyIn.contains(id)) {
+				hub.sendEvent(id, invite);
+			}
+			// Invited by name (a member already, too): the answer to their open request — closed, and their app
+			// enters the room. Inviting someone else answers nobody.
+			Long askedAt = invitedIds.contains(id) && !id.equals(hostId) ? openWatchRequests.remove(id + ">" + hostId) : null;
+			if (askedAt != null && invite.serverTime() - askedAt < OPEN_WATCH_REQUEST_MS) {
+				hub.sendEvent(id, new ServerEvent("watch:answer", room.id(), hostId, null, invite.serverTime(), null));
 			}
 		}
+	}
+
+	/** The friends I asked to watch together whose answer I still wait for (a reopened panel gets them back). */
+	@GetMapping("/requests")
+	List<String> openWatchRequests(@AuthenticationPrincipal Jwt jwt) {
+		String prefix = jwt.getSubject() + ">";
+		long now = System.currentTimeMillis();
+		return openWatchRequests.entrySet().stream()
+				.filter(e -> e.getKey().startsWith(prefix) && now - e.getValue() < OPEN_WATCH_REQUEST_MS)
+				.map(e -> e.getKey().substring(prefix.length()))
+				.toList();
 	}
 
 	@GetMapping

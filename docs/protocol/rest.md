@@ -60,6 +60,8 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 | POST | `/api/rooms` | `{ content: RoomContent, inviteIds: string[] }` → `RoomView`. 만든 사람이 HOST. 참가 중인 사람이 1–2분 동안 없으면 서버가 닫음(결정 75). 초대는 수락된 친구만(아니면 400), 최대 7명. `youtube` 콘텐츠는 `contentId`가 11자 영상 ID, `netflix`는 1–12자리 숫자, `laftel`은 `작품ID/에피소드ID`(각 1–10자리 숫자)(아니면 400). 초대받은 사람에게 `room:invite` |
 | POST | `/api/rooms/{id}/invites` | `{ userIds }` → `RoomView`. HOST만(403), 친구만(400), 전체 초대 7명까지. 이미 멤버면 무시. 새로 초대된 사람에게 `room:invite`, 기존 멤버에게 `room:update` |
 | POST | `/api/rooms/requests` | `{ friendId }` → 202. 친구에게 같이 보자고 요청 (`watch:request`). 친구가 아니면 404, 오프라인이면 409, 같은 친구에게 30초 안에 다시 보내면 429 |
+| GET | `/api/rooms/requests` | → `string[]`. 내가 보내고 아직 답을 기다리는 합류 요청의 친구 ID (취소하거나 그 친구의 초대가 오면 닫힘, 1시간 뒤 잊음). 다시 연 패널이 취소 버튼·자동 입장을 되살림 |
+| DELETE | `/api/rooms/requests/{friendId}` | → 204. 보낸 합류 요청 취소 (`watch:cancel`). 친구가 아니면 404. 다시 요청할 때의 30초 제한은 그대로 |
 | POST | `/api/rooms/join` | `{ code }` → `RoomView`. 방 코드(대소문자·`-` 무시)를 아는 누구나 MEMBER로 입장, 이미 멤버면 그대로(결정 77). 없는 코드·기존 멤버와 차단 관계 404, 8명 가득 409, 사용자당 분당 10번 초과 429. 새로 들어오면 기존 멤버에게 `room:update` |
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
 | GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt, unread, muted, code }` (`code` = 방 코드 8자, 결정 77) |

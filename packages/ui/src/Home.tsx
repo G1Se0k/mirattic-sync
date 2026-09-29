@@ -46,6 +46,20 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [watchRequests, setWatchRequests] = useState<UserSummary[]>([]);
+  /** Friends I asked to watch together: their invite then opens the room by itself. */
+  const [asked, setAsked] = useState<string[]>([]);
+  /** A request on its way: its cancel waits, or the server wouldn't know the request yet. */
+  const [asking, setAsking] = useState<string | null>(null);
+  /** Requests I cancelled or that were answered since this panel opened: a late listing mustn't bring them back. */
+  const settledAsks = useRef(new Set<string>());
+  // A reopened panel: the requests still out, from the server (only the cancel button; entering is the server's
+  // `watch:answer`).
+  useEffect(() => {
+    api.openWatchRequests().then(
+      (ids) => setAsked((list) => [...new Set([...list, ...ids.filter((id) => !settledAsks.current.has(id))])]),
+      () => {},
+    );
+  }, []);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [reporting, setReporting] = useState<UserSummary | null>(null);
   const listeners = useRef(new Set<(event: ServerEvent) => void>());
@@ -53,8 +67,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const info = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatchingInfo ?? nothing);
   const activeRoom = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.activeRoom ?? nothing);
   // Read by the socket handler, which outlives renders.
-  const current = useRef({ rooms, openRoom });
-  current.current = { rooms, openRoom };
+  const current = useRef({ rooms, openRoom, asked });
+  current.current = { rooms, openRoom, asked };
   // Room lists answer in any order; one started before a count changed locally must not overwrite it.
   const roomsLoad = useRef(latest()).current;
   const refetchRooms = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -139,10 +153,24 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           setWatchRequests((list) => [...list.filter((u) => u.id !== from.id), from]);
           notify(`${from.displayName}님이 같이 보자고 합니다`, "눌러서 같이 보기 방을 만들 수 있습니다.");
         }
+        if (event.type === "watch:cancel") {
+          setWatchRequests((list) => list.filter((u) => u.id !== event.userId));
+        }
+        // The friend I asked answered with an invite (the server says so): in at once, no "입장" to press.
+        if (event.type === "watch:answer" && event.roomId) {
+          const friendId = event.userId;
+          if (friendId) settledAsks.current.add(friendId);
+          setAsked((list) => list.filter((id) => id !== friendId));
+          setNotice(null);
+          setOpenRoom(event.roomId);
+        }
         if (event.type === "room:invite") {
           const room = event.payload as RoomView;
-          const host = room.members.find((m) => m.role === "HOST")?.user.displayName ?? "친구";
-          notify(`${host}님의 같이 보기 초대`, room.content.title);
+          const host = room.members.find((m) => m.role === "HOST");
+          // From the friend I asked: `watch:answer` enters it, no notification needed.
+          if (!host || !current.current.asked.includes(host.user.id)) {
+            notify(`${host?.user.displayName ?? "친구"}님의 같이 보기 초대`, room.content.title);
+          }
         }
         if (event.type === "chat:message" && without([event.payload as ChatMessage], deletedChats.current).length) {
           const m = event.payload as ChatMessage;
@@ -262,12 +290,40 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   async function requestWatch(friend: UserSummary) {
     setError(null);
     setNotice(null);
+    // Waiting before the call: the invite may come back before its answer does.
+    settledAsks.current.delete(friend.id); // asked again: a listing may show it
+    setAsked((list) => [...list.filter((id) => id !== friend.id), friend.id]);
+    setAsking(friend.id);
     try {
       await api.requestWatch(friend.id);
-      setNotice(`${friend.displayName}님에게 같이 보자고 요청했습니다. 초대가 오면 알려드립니다.`);
+      setNotice(`${friend.displayName}님에게 같이 보자고 요청했습니다. 초대가 오면 바로 입장합니다.`);
     } catch (e) {
       const status = e instanceof ApiError ? e.status : 0;
+      if (status > 0) setAsked((list) => list.filter((id) => id !== friend.id)); // refused (429: asked, then took it back)
+      else {
+        // No answer (offline, dropped): it may have gone out — the server's list says.
+        api.openWatchRequests().then(
+          (ids) => setAsked((list) => (ids.includes(friend.id) ? list : list.filter((id) => id !== friend.id))),
+          () => {},
+        );
+      }
       setError(status === 409 ? "친구가 오프라인입니다." : status === 429 ? "방금 요청했습니다. 잠시 후 다시 시도하세요." : "요청하지 못했습니다.");
+    } finally {
+      setAsking(null);
+    }
+  }
+
+  async function cancelWatch(friend: UserSummary) {
+    setError(null);
+    settledAsks.current.add(friend.id);
+    setAsked((list) => list.filter((id) => id !== friend.id)); // not waiting any more, even if the call fails
+    setNotice(`${friend.displayName}님에게 보낸 합류 요청을 취소했습니다.`);
+    try {
+      await api.cancelWatchRequest(friend.id);
+    } catch {
+      setAsked((list) => [...list.filter((id) => id !== friend.id), friend.id]); // still out: cancel again
+      setNotice(null);
+      setError("요청을 취소하지 못했습니다. 다시 시도하세요.");
     }
   }
 
@@ -414,7 +470,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                   {describe(f.presence).map((line, i) => <div key={i} className="muted ellipsis">{line || "\u00a0"}</div>)}
                 </div>
                 <span className="actions">
-                  {f.presence.status === "WATCHING" && (
+                  {asked.includes(f.user.id) ? (
+                    <IconButton icon="close" label="합류 요청 취소" disabled={asking === f.user.id} onClick={() => void cancelWatch(f.user)} />
+                  ) : f.presence.status === "WATCHING" && (
                     <IconButton icon="join" label="합류 요청" onClick={() => void requestWatch(f.user)} />
                   )}
                   <Menu label={`${f.user.displayName} 메뉴`} items={[
