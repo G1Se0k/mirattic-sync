@@ -141,8 +141,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         }
         if (event.type === "chat:message" && without([event.payload as ChatMessage], deletedChats.current).length) {
           const m = event.payload as ChatMessage;
-          // The open room shows it; reactions and my own messages are never unread.
-          if (m.roomId !== current.current.openRoom && m.userId !== me.id && !m.reaction) {
+          // The open room shows it; my own messages are never unread.
+          if (m.roomId !== current.current.openRoom && m.userId !== me.id) {
             const room = current.current.rooms.find((r) => r.id === m.roomId);
             // Known room: count and notify now. A room not listed yet (just invited): once the refetch lists it.
             if (room) {
@@ -381,7 +381,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           </div>
           {adding && (
             <div className="stack">
-              <MyFriendCode me={me} onMeChange={onMeChange} />
+              <MyFriendCode me={me} />
               <AddFriend onSent={() => { setAdding(false); void reload(); }} />
             </div>
           )}

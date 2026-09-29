@@ -430,6 +430,8 @@ type ChatMessage = {
 
 ## 13. Reaction
 
+> 폐기 (2026-09-29, `docs/architecture/plan.md` 결정 78): 리액션은 삭제됨. 아래는 과거 기획 이력.
+
 영상 특정 시점에 반응 가능.
 
 ```text
@@ -559,7 +561,7 @@ Room
 RoomMember
 RoomPlaybackState
 ChatMessage
-Reaction
+Reaction (결정 78로 삭제, 이력)
 Notification
 ```
 
@@ -597,7 +599,7 @@ sync:request
 sync:response
 
 chat:message
-reaction:add
+reaction:add (결정 78로 삭제, 이력)
 ```
 
 공통 envelope:
@@ -784,6 +786,8 @@ Mock player:
 Netflix와 동일하게 진행.
 
 ### Phase 8 — Chat / Reaction Polish
+
+> 리액션은 결정 78로 삭제됨 (이력).
 
 - timestamp message
 - reaction

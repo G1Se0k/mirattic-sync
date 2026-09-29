@@ -47,7 +47,7 @@ it("drops a room list that was requested before a newer load or a local count ch
 });
 
 it("keeps a message whose room a list doesn't show yet, and notifies it once a later list shows it", () => {
-  const first: ChatMessage = { id: "m1", roomId: "new", userId: "friend", text: "hi", reaction: false, createdAt: 0 };
+  const first: ChatMessage = { id: "m1", roomId: "new", userId: "friend", text: "hi", createdAt: 0 };
   const before = settleUnlisted([first], rooms, null); // a list read before the invite
   expect(before.listed).toEqual([]);
   expect(before.waiting).toEqual([first]);

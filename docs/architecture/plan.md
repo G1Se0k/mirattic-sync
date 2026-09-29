@@ -58,7 +58,7 @@
 | 50 | Laftel도 Netflix와 같은 실험 기능: 기본 꺼짐, 선택 권한 `https://laftel.net/*`, 따라가는 탭에만 주입, 설정·방 첫 입장 팝업에서 위험을 보고 켬. 실험 provider는 각각 따로 켜고 끔 (`watch.ts` `EXPERIMENTAL`, ui `EXPERIMENTS`) | 개발자 정책 없음, 허용 여부 불명확 → 보수적 (사용자 확인·결정, `platform-policy/laftel.md`) |
 | 51 | Laftel contentId는 `"<작품 ID>/<에피소드 ID>"` (각 1–10자리 숫자), URL은 `https://laftel.net/player/<contentId>` | 플레이어 URL에 둘 다 필요. 서버·types가 같은 형식을 검증 |
 | 52 | Laftel은 seek함 (`seekable` 기본값) | Netflix M7375 같은 알려진 차단 없음. 실제 플레이어에서 문제가 보이면 `SEEKABLE`에서 끔 |
-| 53 | 리액션은 `chat_messages`의 한 종류 (`reaction = true`, text = 이모지 5개 중 하나). WS `reaction:add`로 보내고 `chat:message`로 받음. 채팅 목록 안에서 연속된 같은 이모지·10초 이내를 "😂 ×4 · 24:32"로 묶어 표시 | 별도 테이블 없이 기록·순서·페이지·방 삭제 정리를 그대로 씀. 영상 위 overlay 없음 (기획서 §13) |
+| 53 | (결정 78로 없어짐) 리액션은 `chat_messages`의 한 종류 (`reaction = true`, text = 이모지 5개 중 하나). WS `reaction:add`로 보내고 `chat:message`로 받음. 채팅 목록 안에서 연속된 같은 이모지·10초 이내를 "😂 ×4 · 24:32"로 묶어 표시 | 별도 테이블 없이 기록·순서·페이지·방 삭제 정리를 그대로 씀. 영상 위 overlay 없음 (기획서 §13) |
 | 54 | `chat:message`는 방에 참가한 연결이 아니라 **모든 멤버의 연결**로 보냄 | 방 밖(친구 목록)에서 읽지 않은 수를 올리고 알림을 띄우기 위해. 멤버는 어차피 기록을 볼 수 있어 공개 범위 변화 없음 |
 | 55 | 읽지 않은 수는 서버 `room_members.last_read_seq`보다 순번(`chat_messages.seq`, AUTO_INCREMENT)이 큰 다른 사람의 메시지 수 (리액션 제외). 메시지 저장과 읽음 기록은 방 행 잠금으로 순서를 정함 (시각 기준은 같은 밀리초를 구별 못 함). `room:join`, `room:leave`, 연결 끊김 때 서버가 기록 (읽음 REST 없음). `RoomView.unread` | leave 처리 안에서 `room:update` 알림 전에 기록하므로 그 알림으로 다시 조회한 목록이 이미 0. 탭을 닫아도 끊김으로 기록 |
 | 56 | 알림 끄기는 멤버별 서버 저장 (`room_members.muted`, `PUT /members/me/muted`). 끄면 채팅 알림만 없고 읽지 않은 수는 흐리게 표시. 채팅 알림은 앱에 포커스가 없고 열린 방이 아닐 때만 (Desktop만, Extension은 알림 권한 없음) | Desktop과 Extension이 같은 설정을 봄 (바꾸면 내 모든 연결에 새 값을 담은 `room:update { muted }`). 보고 있는 방은 알리지 않음 |
@@ -83,6 +83,7 @@
 | 75 | 빈 방은 자동으로 닫힘 (2026-09-29 사용자 요청): 서버가 1분마다 모든 방을 보고, 접속(참가) 중인 연결이 하나도 없는 상태가 연속 두 번이면(1–2분) 방을 닫고 멤버에게 `room:update` (호스트가 나간 것과 같음). 재연결·worker 재시작 같은 짧은 공백은 닫지 않음. (이전에 잘못 이해해 만든 "호스트는 한 방만"은 되돌림) | 아무도 없는 방이 목록에 남지 않게. ponytail: 서버 메모리·전체 스캔(서버 1대) |
 | 76 | Netflix 끝 화면에서 멤버는 "크레딧 보기"를 자동으로 누름 (2026-09-29 사용자 요청): 방을 따라가는 멤버의 Netflix 탭이 방의 그 화를 보고 있을 때 `button[data-uia*="credits"]`가 나타날 때마다 한 번 클릭 (방 영상 ID를 탭에 전달, 같은 사이트 탭에만) → Netflix가 멤버를 혼자 다음 화로 넘기지 않고, 다음 화는 호스트를 따라감(결정 67·73). 호스트·방 밖에서는 누르지 않음 (`MediaProviderAdapter.keepCredits`) | 사용자 요청. 페이지 UI를 누르는 첫 조작 — `platform-policy/netflix.md`에 기록 |
 | 77 | 방 코드 (2026-09-29 사용자 요청): 방마다 친구 코드와 같은 형식의 8자 코드(`rooms.code`, V12, 유일). 코드를 아는 사람은 누구나 `POST /api/rooms/join`으로 MEMBER가 됨 — 친구가 아니어도 됨. 막는 것: 기존 멤버와 차단 관계면 404(방 존재를 숨김), 8명이 차면 409, 사용자당 분당 10번 넘게 시도하면 429(코드 추측 방지). 친구 초대는 그대로 호스트만. 방 생성은 지금 보는 영상으로, 없으면 YouTube/Netflix/Laftel 중 고른 사이트를 열고 그 사이트 영상이 잡히면 만듦. 방 안 "방에 초대하기": 친구 옆 "초대" → 30초 동안 회색 "초대됨"(클라이언트), 아래에 방 코드 | 사용자 요청: "코드를 아는 누구나" |
+| 78 | 리액션 삭제, 방 기록을 채팅에 (2026-09-29 사용자 요청): `chat_messages.reaction` 열과 기존 리액션 삭제(V13), `reaction:add` 없음. 방 기록은 `chat_messages.kind`(`join`/`leave`/`play`/`pause`/`seek`/`content`)가 있는 줄로 저장해 기록·순서·페이지를 같이 씀, 실시간은 `chat:log`(방에 참가 중인 연결에만), 채팅 가운데에 작게 표시. 입장 = 사용자의 첫 연결이 방에 들어옴, 퇴장 = 모든 연결이 빠진 뒤 10초(재연결·서비스 워커 재시작은 기록 안 함, 5초마다 확인, `RoomLog`). 재생/일시정지는 상태가 바뀔 때만, seek는 3초 안에 이어지면 같은 줄을 옮김(바를 끄는 동안 줄이 쌓이지 않게). 호스트가 나가 멤버가 멈추는 것은 퇴장 줄로 충분해 따로 안 남김. 읽지 않은 수·알림·삭제·신고에서 제외. 친구 코드 재발급 버튼도 UI에서 뺌(API는 남음) | 사용자 요청. 서버 기록이라 새로 들어온 멤버·다시 연 패널도 같은 줄을 봄 |
 
 ## 사용자 식별 (UID + Identity)
 
@@ -111,7 +112,7 @@ adapter는 `sourceUserId`/`version`을 알 수 없으므로 로컬 `PlayerSnapsh
 - `RoomMember` — roomId, userId, role(HOST/MEMBER), joinedAt
 - `ChatMessage` — roomId, userId, text, mediaPositionMs?, createdAt
 
-리액션은 `ChatMessage`의 한 종류 (결정 53). 나중: `Notification`.
+방 기록(입퇴장·호스트 재생)은 `ChatMessage`의 한 종류 (`kind`, 결정 78). 리액션은 없어짐. 나중: `Notification`.
 
 ## 알려진 기술 위험
 

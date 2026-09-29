@@ -8,7 +8,7 @@ Core features:
 - friends / presence
 - private watch rooms
 - synchronized playback
-- side chat / reactions
+- side chat / room logs (reactions removed, decision 78)
 - timestamped chat
 
 Initial providers:

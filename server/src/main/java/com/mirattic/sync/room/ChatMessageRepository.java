@@ -17,9 +17,12 @@ interface ChatMessageRepository extends JpaRepository<ChatMessage, String> {
 			order by m.createdAt desc, m.id desc""")
 	List<ChatMessage> findBefore(String roomId, long createdAt, String id, Limit limit);
 
+	/** The room's latest message in insert order. */
+	Optional<ChatMessage> findTopByRoomIdOrderBySeqDesc(String roomId);
+
 	Optional<ChatMessage> findByIdAndRoomId(String id, String roomId);
 
-	long countByRoomIdAndUserIdNotAndReactionFalseAndDeletedFalseAndSeqGreaterThan(String roomId, String userId, long seq);
+	long countByRoomIdAndUserIdNotAndKindIsNullAndDeletedFalseAndSeqGreaterThan(String roomId, String userId, long seq);
 
 	@Query("select coalesce(max(m.seq), 0) from ChatMessage m where m.roomId = :roomId")
 	long lastSeq(String roomId);

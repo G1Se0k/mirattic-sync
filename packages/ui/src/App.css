@@ -121,6 +121,7 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .chat li .author { font-weight: 600; margin-right: 4px; }
 .chat li .tools { visibility: hidden; }
 .chat li:hover .tools { visibility: visible; }
+.chat li.log { align-self: center; text-align: center; font-size: 12px; color: var(--muted); }
 .chat li.fresh { animation: flash 1.6s ease-out; }
 @keyframes flash { from { background: var(--flash); } to { background: transparent; } }
 .chat .deleted { color: var(--muted); text-decoration: line-through; }
@@ -130,9 +131,6 @@ button.stamp { padding: 0 2px; background: none; color: var(--accent); font-weig
 .composer { padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 4px; }
 .composer form { display: flex; gap: 6px; align-items: center; }
 .composer input { flex: 1; }
-.reactions { display: flex; gap: 2px; }
-.reactions button { background: none; padding: 2px 4px; font-size: 15px; border-radius: 6px; }
-.reactions button:hover:not(:disabled) { background: var(--hover); }
 .emoji { font-size: 15px; }
 
 dialog {

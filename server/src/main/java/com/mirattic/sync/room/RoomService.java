@@ -60,8 +60,10 @@ public class RoomService {
 	static final int MAX_INVITES = 7;
 	static final int MAX_CHAT_LENGTH = 1000;
 	static final int CHAT_HISTORY = 100;
-	/** The reactions offered (Mirattic_Sync_PLAN.md §13). */
-	static final Set<String> REACTIONS = Set.of("❤️", "😂", "😮", "😭", "🔥");
+	/** A seek this soon after the host's last seek line moves that line (dragging the seek bar is many seeks). */
+	static final long SEEK_LOG_MERGE_MS = 3_000;
+	/** A "seek" landing this close to where playback would be anyway (e.g. a title update) is no move: no line. */
+	static final long SEEK_LOG_MIN_JUMP_MS = 2_000;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
 	/** Laftel "item/episode", the two ids in its player URL. */
@@ -253,39 +255,75 @@ public class RoomService {
 		return room.playback();
 	}
 
+	/** A playback command's new state, and the chat log line it made (null if none: e.g. play while playing). */
+	public record Applied(PlaybackState state, ChatMessage.View log) {
+	}
+
 	@Transactional
-	public PlaybackState playback(String me, String roomId, Command command, long positionMs, long capturedAt) {
+	public Applied playback(String me, String roomId, Command command, long positionMs, long capturedAt) {
 		Room room = lockAsHost(me, roomId);
+		boolean wasPlaying = room.isPlaying();
 		long now = System.currentTimeMillis();
 		long at = capturedAt > now || capturedAt < now - MAX_CAPTURE_AGE_MS ? now : capturedAt;
+		long expected = room.positionAt(at);
 		boolean playing = switch (command) {
 			case PLAY -> true;
 			case PAUSE -> false;
 			case SEEK -> room.isPlaying();
 		};
 		room.applyPlayback(me, positionMs, playing, at);
-		return room.playback();
+		long landed = room.positionAt(at); // as applied: clamped to the duration
+		ChatMessage.View log = null;
+		if (command == Command.SEEK && Math.abs(landed - expected) >= SEEK_LOG_MIN_JUMP_MS) {
+			ChatMessage last = messages.findTopByRoomIdOrderBySeqDesc(roomId)
+					.filter(m -> "seek".equals(m.view().kind()) && m.view().userId().equals(me)
+							// From its last move: a long drag stays one line.
+							&& System.currentTimeMillis() - (m.view().editedAt() != null ? m.view().editedAt() : m.view().createdAt())
+									< SEEK_LOG_MERGE_MS)
+					.orElse(null);
+			if (last != null) {
+				last.moveTo(landed);
+				log = last.view();
+			} else {
+				log = messages.save(new ChatMessage(roomId, me, "", landed, "seek")).view();
+			}
+		} else if (playing != wasPlaying) {
+			log = messages.save(new ChatMessage(roomId, me, "", landed, playing ? "play" : "pause")).view();
+		}
+		return new Applied(room.playback(), log);
 	}
 
-	/** Any member may chat; the text is stored trimmed. A reaction's text must be one of {@link #REACTIONS}. */
+	/**
+	 * "join" / "leave" line for a user who came into or went out of the room (decision 78), with their name as
+	 * it was then. null if the room is gone.
+	 */
 	@Transactional
-	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs, boolean reaction) {
+	public ChatMessage.View logPresence(String roomId, String userId, String kind) {
+		if (rooms.findForUpdate(roomId).isEmpty()) {
+			return null;
+		}
+		String name = users.findById(userId).map(User::getDisplayName).orElse(null);
+		return name == null ? null : messages.save(new ChatMessage(roomId, userId, name, null, kind)).view();
+	}
+
+	/** Any member may chat; the text is stored trimmed. */
+	@Transactional
+	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs) {
 		// Under the room lock, so a read mark (read(), join()) sees every message inserted before it and none after.
 		rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		requireMember(me, roomId);
 		String trimmed = text == null ? "" : text.strip();
-		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)
-				|| (reaction && !REACTIONS.contains(trimmed))) {
+		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
 		}
-		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, reaction)).view();
+		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null)).view();
 	}
 
 	/** The author, or the room's host (moderation), deletes a message for everyone. */
 	@Transactional
 	public void deleteMessage(String me, String roomId, String messageId) {
 		RoomMember self = requireMember(me, roomId);
-		ChatMessage message = messages.findByIdAndRoomId(messageId, roomId).filter(m -> !m.isDeleted())
+		ChatMessage message = messages.findByIdAndRoomId(messageId, roomId).filter(m -> !m.isDeleted() && !m.isLog())
 				.orElseThrow(RoomService::notFound);
 		if (!message.view().userId().equals(me) && self.getRole() != RoomMember.Role.HOST) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "author or host only");
@@ -355,7 +393,7 @@ public class RoomService {
 	/** A message to report: someone else's, in a room I'm in (404 otherwise, like any room lookup). */
 	@Transactional(readOnly = true)
 	public ChatMessage.View reportable(String me, String messageId) {
-		ChatMessage.View m = messages.findById(messageId).filter(x -> !x.isDeleted()).map(ChatMessage::view)
+		ChatMessage.View m = messages.findById(messageId).filter(x -> !x.isDeleted() && !x.isLog()).map(ChatMessage::view)
 				.orElseThrow(RoomService::notFound);
 		requireMember(me, m.roomId());
 		if (m.userId().equals(me)) {
@@ -389,13 +427,16 @@ public class RoomService {
 
 	/**
 	 * The host moved on to another content (e.g. the next video): the room restarts paused at 0 on it.
-	 * @return the new playback state, or null if it is the same video with new metadata (playback unchanged)
+	 * @return the new playback state and its "content" log line, or null if it is the same video with new metadata
 	 */
 	@Transactional
-	public PlaybackState changeContent(String me, String roomId, RoomContent content) {
+	public Applied changeContent(String me, String roomId, RoomContent content) {
 		requireKnownId(content);
 		Room room = lockAsHost(me, roomId);
-		return room.changeContent(me, content, System.currentTimeMillis()) ? room.playback() : null;
+		if (!room.changeContent(me, content, System.currentTimeMillis())) {
+			return null;
+		}
+		return new Applied(room.playback(), messages.save(new ChatMessage(roomId, me, content.title(), null, "content")).view());
 	}
 
 	/**
@@ -456,7 +497,7 @@ public class RoomService {
 				.toList();
 		RoomMember self = list.stream().filter(m -> m.getUserId().equals(viewer)).findFirst().orElse(null);
 		long unread = self == null ? 0
-				: messages.countByRoomIdAndUserIdNotAndReactionFalseAndDeletedFalseAndSeqGreaterThan(room.getId(), viewer,
+				: messages.countByRoomIdAndUserIdNotAndKindIsNullAndDeletedFalseAndSeqGreaterThan(room.getId(), viewer,
 						self.getLastReadSeq());
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), unread,
 				self != null && self.isMuted(), room.getCode());

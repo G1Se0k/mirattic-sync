@@ -113,21 +113,26 @@ export type FriendRequestView = { id: string; user: UserSummary; createdAt: numb
 
 export type FriendRequests = { incoming: FriendRequestView[]; outgoing: FriendRequestView[] };
 
-/** A chat line, or a reaction (`reaction`: `text` is one of `REACTIONS`), both sent as `chat:message`. */
+/**
+ * A room log line (decision 78), shown centered: someone came in / went out (`text` = their name then), or the
+ * host played / paused / moved / changed the video (`text` = its title). Sent as `chat:log`.
+ */
+export type ChatLogKind = "join" | "leave" | "play" | "pause" | "seek" | "content";
+
+/** A chat line someone wrote (`chat:message`), or a room log (`kind`, `chat:log`). */
 export type ChatMessage = {
   id: string;
   roomId: string;
   userId: string;
   text: string;
   mediaPositionMs?: number;
-  reaction: boolean;
+  kind?: ChatLogKind | null;
+  /** A seek line moved to a later seek: of two copies of one id, the larger `editedAt` is the current one. */
+  editedAt?: number | null;
   createdAt: number;
   /** Deleted for everyone: `text` is empty, shown as a placeholder. */
   deleted?: boolean;
 };
-
-/** The reactions offered (`reaction:add`); the server accepts only these. */
-export const REACTIONS = ["❤️", "😂", "😮", "😭", "🔥"] as const;
 
 /** `pause:request` (member → host): at most one per member and room every 30 seconds. */
 export const PAUSE_REQUEST_COOLDOWN_MS = 30_000;

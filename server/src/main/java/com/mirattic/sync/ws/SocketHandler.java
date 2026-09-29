@@ -55,18 +55,20 @@ class SocketHandler extends TextWebSocketHandler {
 	private final SocketHub hub;
 	private final PresenceService presence;
 	private final RoomService rooms;
+	private final RoomLog roomLog;
 	private final UserRepository users;
 	private final JsonMapper json;
 	private final Validator validator;
 	/** "user|room" → when its last pause request went out. ponytail: in memory, single instance; expired ones pruned past 10k. */
 	private final Map<String, Long> pauseRequests = new ConcurrentHashMap<>();
 
-	SocketHandler(SocketHub hub, PresenceService presence, RoomService rooms, UserRepository users, JsonMapper json,
+	SocketHandler(SocketHub hub, PresenceService presence, RoomService rooms, RoomLog roomLog, UserRepository users, JsonMapper json,
 			Validator validator) {
 		this.hub = hub;
 		this.users = users;
 		this.presence = presence;
 		this.rooms = rooms;
+		this.roomLog = roomLog;
 		this.json = json;
 		this.validator = validator;
 	}
@@ -125,7 +127,7 @@ class SocketHandler extends TextWebSocketHandler {
 			case "sync:request" -> hub.send(out(session), new ServerEvent("sync:response", null, null, null,
 					System.currentTimeMillis(), Map.of("reqId", reqId == null ? "" : reqId)));
 			case "room:join", "room:leave", "playback:play", "playback:pause", "playback:seek",
-					"playback:content-change", "chat:message", "reaction:add", "pause:request", "room:read" -> {
+					"playback:content-change", "chat:message", "pause:request", "room:read" -> {
 				if (roomId == null) {
 					error(session, reqId, "bad_payload");
 					return;
@@ -150,6 +152,7 @@ class SocketHandler extends TextWebSocketHandler {
 			case "room:join" -> {
 				PlaybackState state = hub.joinRoom(roomId, out(session), () -> rooms.join(me, roomId));
 				joined(session).add(roomId);
+				roomLog.joined(roomId, me);
 				rooms.read(me, roomId); // outside joinRoom: never wait on the room row lock inside the hub's entry lock
 				hub.send(out(session), playbackEvent(roomId, state));
 				rooms.announce(roomId, rooms.memberIds(roomId));
@@ -196,20 +199,19 @@ class SocketHandler extends TextWebSocketHandler {
 				String text = reason.isString() ? reason.asString().strip() : "";
 				hub.sendEvent(host, new ServerEvent("pause:request", roomId, me, null, now, Map.of("reason", text)));
 			}
-			case "chat:message", "reaction:add" -> {
+			case "chat:message" -> {
 				if (!withinBudget(session, CHAT_WINDOW, MAX_CHAT_PER_SECOND)) {
 					error(session, reqId, "rate_limited");
 					return;
 				}
-				boolean reaction = type.equals("reaction:add");
-				JsonNode text = payload.path(reaction ? "emoji" : "text");
+				JsonNode text = payload.path("text");
 				JsonNode position = payload.path("mediaPositionMs");
 				if (!text.isString() || !(position.isMissingNode() || position.isNull() || position.canConvertToLong())) {
 					error(session, reqId, "bad_payload");
 					return;
 				}
 				ChatMessage.View message = rooms.chat(me, roomId, text.asString(),
-						position.canConvertToLong() ? position.asLong() : null, reaction);
+						position.canConvertToLong() ? position.asLong() : null);
 				// To every member, live in the room or not: the others count it as unread (and may be notified).
 				ServerEvent event = new ServerEvent("chat:message", roomId, me, null, message.createdAt(), message);
 				rooms.memberIds(roomId).forEach(id -> hub.sendEvent(id, event));
@@ -223,9 +225,10 @@ class SocketHandler extends TextWebSocketHandler {
 				if (content == null) {
 					return;
 				}
-				PlaybackState state = rooms.changeContent(me, roomId, content);
-				if (state != null) {
-					hub.sendToRoom(roomId, playbackEvent(roomId, state));
+				RoomService.Applied changed = rooms.changeContent(me, roomId, content);
+				if (changed != null) {
+					hub.sendToRoom(roomId, playbackEvent(roomId, changed.state()));
+					roomLog.post(roomId, changed.log());
 				}
 				rooms.announce(roomId, rooms.memberIds(roomId)); // members refetch the room's new content
 			}
@@ -242,9 +245,10 @@ class SocketHandler extends TextWebSocketHandler {
 				}
 				RoomService.Command command = RoomService.Command.valueOf(
 						type.substring("playback:".length()).toUpperCase(Locale.ROOT));
-				PlaybackState state = rooms.playback(me, roomId, command, position.asLong(), capturedAt.asLong());
+				RoomService.Applied applied = rooms.playback(me, roomId, command, position.asLong(), capturedAt.asLong());
 				// Delivery order across threads isn't guaranteed; clients drop versions they've passed.
-				hub.sendToRoom(roomId, playbackEvent(roomId, state));
+				hub.sendToRoom(roomId, playbackEvent(roomId, applied.state()));
+				roomLog.post(roomId, applied.log());
 			}
 		}
 	}

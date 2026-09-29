@@ -23,7 +23,7 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/api/me` | `Me` `{ id(UID), email?, providers[], displayName, friendCode, presenceVisibility, positionVisibility }` |
-| POST | `/api/me/friend-code` | 친구 코드 재발급 (이전 코드는 즉시 무효) → `Me` |
+| POST | `/api/me/friend-code` | 친구 코드 재발급 (이전 코드는 즉시 무효) → `Me`. UI에서는 뺐음 (2026-09-29 사용자 요청) |
 | PUT | `/api/me/privacy` | `{ presenceVisibility, positionVisibility }` → `Me` |
 | DELETE | `/api/me` | `{ password }` → 204. 계정과 데이터 삭제 (Phase 9). 비밀번호가 틀리면 **403** (401이면 클라이언트가 refresh 후 재시도하므로). IP당 분당 제한은 `/api/auth/**`와 같음 (429). 삭제 후: 호스트인 방은 닫히고 나머지 방에서는 빠짐 (멤버들에게 `room:update`, 남은 방에는 `chat:delete { userId }`), 친구·요청 상대에게 `friend:update`, 내 WebSocket 연결은 모두 닫힘, 기존 access token은 즉시 401 |
 
@@ -56,12 +56,12 @@ ID는 UUID 문자열, 시간은 epoch ms.
 | POST | `/api/rooms/join` | `{ code }` → `RoomView`. 방 코드(대소문자·`-` 무시)를 아는 누구나 MEMBER로 입장, 이미 멤버면 그대로(결정 77). 없는 코드·기존 멤버와 차단 관계 404, 8명 가득 409, 사용자당 분당 10번 초과 429. 새로 들어오면 기존 멤버에게 `room:update` |
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
 | GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt, unread, muted, code }` (`code` = 방 코드 8자, 결정 77) |
-| GET | `/api/rooms/{id}/messages?before=` | 채팅 100개 `ChatMessage[]`, 오래된 순: 최근 것, 또는 메시지 ID `before`보다 앞 (`createdAt`, `id` 순). 멤버가 아니거나 `before`가 이 방 메시지가 아니면 404 |
-| DELETE | `/api/rooms/{id}/messages/{messageId}` | 204. 보낸 사람 또는 방 호스트만 (아니면 403). 멤버가 아니거나 이 방 메시지가 아니거나 이미 삭제됐으면 404. 소프트 삭제(결정 71): `text` ""·`mediaPositionMs` 없음·`deleted: true`로 기록에 남음, 읽지 않은 수에서 제외. 모든 멤버의 연결에 `chat:delete { id }` |
+| GET | `/api/rooms/{id}/messages?before=` | 채팅 100개 `ChatMessage[]`(방 기록 `kind` 줄 포함, 결정 78), 오래된 순: 최근 것, 또는 메시지 ID `before`보다 앞 (`createdAt`, `id` 순). 멤버가 아니거나 `before`가 이 방 메시지가 아니면 404 |
+| DELETE | `/api/rooms/{id}/messages/{messageId}` | 204. 보낸 사람 또는 방 호스트만 (아니면 403). 멤버가 아니거나 이 방 메시지가 아니거나 이미 삭제됐거나 방 기록(`kind`)이면 404. 소프트 삭제(결정 71): `text` ""·`mediaPositionMs` 없음·`deleted: true`로 기록에 남음, 읽지 않은 수에서 제외. 모든 멤버의 연결에 `chat:delete { id }` |
 | PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204. 이 방의 내 채팅 알림 끄기/켜기. 저장 후 **내 모든 연결에만** `room:update { muted }` (다른 앱이 조회를 기다리지 않고 새 설정으로 알림). 멤버가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/me` | 나가기 / 초대 거절. HOST가 나가면 방 삭제. 모든 멤버에게 `room:update` |
 
-`RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만), series?([A-Za-z0-9_-] 1–128자) }`. `series`가 같으면 같은 묶음(YouTube 재생목록, Laftel 작품, Netflix의 이어 본 화들)이라 멤버가 호스트의 다음 영상으로 묻지 않고 따라감 (결정 67). `unread`(다른 사람의 리액션이 아닌 메시지 중 내가 마지막으로 방을 연 뒤의 수)와 `muted`는 요청한 사람 기준 (초대 이벤트·초대 응답의 `RoomView`에서는 0 / false). 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
+`RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만), series?([A-Za-z0-9_-] 1–128자) }`. `series`가 같으면 같은 묶음(YouTube 재생목록, Laftel 작품, Netflix의 이어 본 화들)이라 멤버가 호스트의 다음 영상으로 묻지 않고 따라감 (결정 67). `unread`(다른 사람이 쓴 메시지 중 내가 마지막으로 방을 연 뒤의 수, 방 기록 `kind` 줄과 삭제된 메시지 제외)와 `muted`는 요청한 사람 기준 (초대 이벤트·초대 응답의 `RoomView`에서는 0 / false). 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
 
 ## Reports (Phase 9)
 

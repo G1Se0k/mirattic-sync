@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.mirattic.sync.IntegrationTest;
 import com.mirattic.sync.presence.MediaProvider;
+import com.mirattic.sync.ws.RoomLog;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -382,11 +383,11 @@ class RoomFlowTest extends IntegrationTest {
 				.andExpect(status().isNotFound());
 
 		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", friend.accessToken(), null));
-		assertThat(history.findValuesAsString("text")).containsExactly("look at this", "no position");
+		assertThat(written(history)).containsExactly("look at this", "no position");
 	}
 
 	@Test
-	void reactionsAndMessagesReachMembersOutsideTheRoomAndCountAsUnreadUntilSeen() throws Exception {
+	void messagesReachMembersOutsideTheRoomAndCountAsUnreadUntilSeen() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
 		befriend(host, friend);
@@ -397,18 +398,12 @@ class RoomFlowTest extends IntegrationTest {
 		hostWs.nextOfType("playback:update");
 
 		hostWs.send(event("chat:message", roomId, "{\"text\":\"hello\"}"));
-		assertThat(friendWs.nextOfType("chat:message").path("payload").path("reaction").asBoolean()).isFalse();
-		hostWs.send(event("reaction:add", roomId, "{\"emoji\":\"🔥\",\"mediaPositionMs\":1000}"));
-		JsonNode reaction = friendWs.nextOfType("chat:message").path("payload");
-		assertThat(reaction.path("reaction").asBoolean()).isTrue();
-		assertThat(reaction.path("text").asString()).isEqualTo("🔥");
-		assertThat(reaction.path("mediaPositionMs").asLong()).isEqualTo(1000);
-		for (String bad : new String[] {"{\"emoji\":\"👍\"}", "{\"emoji\":1}", "{\"text\":\"🔥\"}"}) {
-			hostWs.send(event("reaction:add", roomId, bad));
-			assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
-		}
+		assertThat(friendWs.nextOfType("chat:message").path("payload").hasNonNull("kind")).isFalse();
+		// Reactions are gone (decision 78).
+		hostWs.send(event("reaction:add", roomId, "{\"emoji\":\"🔥\"}"));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("unknown_type");
 
-		// Reactions and my own messages don't count.
+		// My own messages and the room's logs (the host's join) don't count.
 		assertThat(myRoom(friend).path("unread").asLong()).isEqualTo(1);
 		assertThat(myRoom(host).path("unread").asLong()).isZero();
 
@@ -432,6 +427,107 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(myRoom(friend).path("unread").asLong()).isZero();
 	}
 
+	@Autowired
+	RoomLog roomLog;
+
+	@Test
+	void joinsLeavesAndTheHostsPlaybackAreLoggedInTheChat() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", roomId, "{}"));
+		JsonNode joined = hostWs.nextOfType("chat:log").path("payload");
+		assertThat(joined.path("kind").asString()).isEqualTo("join");
+		assertThat(joined.path("userId").asString()).isEqualTo(host.id());
+		assertThat(joined.path("text").asString()).isEqualTo("Tester");
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		assertThat(hostWs.nextOfType("chat:log").path("userId").asString()).isEqualTo(friend.id());
+		friendWs.nextOfType("chat:log"); // their own join
+		// A second connection of someone already in the room is no new join.
+		Client friendWs2 = connect(friend);
+		friendWs2.send(event("room:join", roomId, "{}"));
+		friendWs2.nextOfType("playback:update");
+
+		long now = System.currentTimeMillis();
+		String command = "{\"positionMs\":%d,\"capturedAt\":%d}";
+		hostWs.send(event("playback:play", roomId, command.formatted(1000, now)));
+		JsonNode play = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(play.path("kind").asString()).isEqualTo("play");
+		assertThat(play.path("mediaPositionMs").asLong()).isEqualTo(1000);
+		hostWs.send(event("playback:play", roomId, command.formatted(2000, now))); // already playing: no line
+		hostWs.send(event("playback:seek", roomId, command.formatted(60_000, now)));
+		JsonNode seek = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(seek.path("kind").asString()).isEqualTo("seek");
+		hostWs.send(event("playback:seek", roomId, command.formatted(90_000, now))); // dragging: the same line moves
+		JsonNode moved = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(moved.path("id").asString()).isEqualTo(seek.path("id").asString());
+		assertThat(moved.path("mediaPositionMs").asLong()).isEqualTo(90_000);
+		assertThat(moved.path("editedAt").asLong()).isPositive();
+		hostWs.send(event("playback:pause", roomId, command.formatted(91_000, now)));
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
+		// A "seek" to where it already is (e.g. the tab's title changed) is no move: no line.
+		hostWs.send(event("playback:seek", roomId, command.formatted(91_500, System.currentTimeMillis())));
+		// Past the end: logged where it lands (the 10 min duration); a second one lands there again, no line.
+		hostWs.send(event("playback:seek", roomId, command.formatted(900_000, System.currentTimeMillis())));
+		JsonNode end = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(end.path("kind").asString()).isEqualTo("seek");
+		assertThat(end.path("mediaPositionMs").asLong()).isEqualTo(600_000);
+		hostWs.send(event("playback:seek", roomId, command.formatted(950_000, System.currentTimeMillis())));
+		hostWs.send(event("playback:content-change", roomId,
+				"{\"provider\":\"youtube\",\"contentId\":\"abcdefghijk\",\"title\":\"Next one\"}"));
+		JsonNode content = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(content.path("kind").asString()).isEqualTo("content");
+		assertThat(content.path("text").asString()).isEqualTo("Next one");
+
+		// Leaving: only once the last connection is gone for the grace period (0 here, two sweeps).
+		friendWs.session().close();
+		roomLog.sweep();
+		roomLog.sweep();
+		Thread.sleep(300); // let the first close land
+		roomLog.sweep();
+		roomLog.sweep();
+		assertThat(loggedKinds(host, roomId)).doesNotContain("leave"); // still there with the other connection
+		friendWs2.session().close();
+		for (int i = 0; i < 100 && !loggedKinds(host, roomId).contains("leave"); i++) { // the close lands asynchronously
+			roomLog.sweep();
+			Thread.sleep(20);
+		}
+		JsonNode left;
+		do { // the host also got every line above
+			left = hostWs.nextOfType("chat:log").path("payload");
+		} while (!left.path("kind").asString().equals("leave"));
+		assertThat(left.path("kind").asString()).isEqualTo("leave");
+		assertThat(left.path("userId").asString()).isEqualTo(friend.id());
+
+		// Logs are in the history, can't be deleted or reported, and are never unread.
+		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
+		List<String> kinds = new ArrayList<>();
+		history.forEach(m -> kinds.add(m.path("kind").asString()));
+		assertThat(kinds).containsExactly("join", "join", "play", "seek", "pause", "seek", "content", "leave");
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/messages/" + play.path("id").asString(), host.accessToken(), null)
+				.andExpect(status().isNotFound());
+		assertThat(myRoom(friend).path("unread").asLong()).isZero();
+	}
+
+	private List<String> loggedKinds(TestUser user, String roomId) throws Exception {
+		return body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", user.accessToken(), null))
+				.findValuesAsString("kind");
+	}
+
+	/** Texts of the messages people wrote (not the room's logs). */
+	private static List<String> written(JsonNode history) {
+		List<String> texts = new ArrayList<>();
+		history.forEach(m -> {
+			if (!m.hasNonNull("kind")) {
+				texts.add(m.path("text").asString());
+			}
+		});
+		return texts;
+	}
+
 	@Test
 	void aMessageRightAfterAReadMarkIsUnreadEvenInTheSameMillisecond() throws Exception {
 		TestUser host = signup();
@@ -440,7 +536,7 @@ class RoomFlowTest extends IntegrationTest {
 		String roomId = body(createRoom(host, friend)).path("id").asString();
 		for (int i = 0; i < 200; i++) {
 			roomService.read(friend.id(), roomId);
-			chatMessages.save(new ChatMessage(roomId, host.id(), "m" + i, null, false));
+			chatMessages.save(new ChatMessage(roomId, host.id(), "m" + i, null, null));
 			assertThat(roomService.mine(friend.id()).get(0).unread()).as("message %d", i).isEqualTo(1);
 		}
 	}
@@ -481,9 +577,9 @@ class RoomFlowTest extends IntegrationTest {
 		String otherRoom = body(createRoom(friend, host)).path("id").asString(); // one room per host
 		// Saved in a burst: many share a millisecond, which the page boundary must not split badly.
 		for (int i = 0; i < 150; i++) {
-			chatMessages.save(new ChatMessage(roomId, host.id(), "m" + i, null, false));
+			chatMessages.save(new ChatMessage(roomId, host.id(), "m" + i, null, null));
 		}
-		String elsewhere = chatMessages.save(new ChatMessage(otherRoom, host.id(), "x", null, false)).view().id();
+		String elsewhere = chatMessages.save(new ChatMessage(otherRoom, host.id(), "x", null, null)).view().id();
 		String messages = "/api/rooms/" + roomId + "/messages";
 
 		JsonNode latest = body(call(HttpMethod.GET, messages, friend.accessToken(), null));

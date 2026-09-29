@@ -159,7 +159,6 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** Deletes my account and all its data. 403 wrong password. Sign out locally afterwards. */
     deleteAccount: (password: string) => authed<void>("DELETE", "/api/me", { password }),
     /** Invalidates the current friend code and returns the updated profile. */
-    regenerateFriendCode: () => authed<Me>("POST", "/api/me/friend-code"),
 
     friends: () => authed<FriendView[]>("GET", "/api/friends"),
     friendRequests: () => authed<FriendRequests>("GET", "/api/friends/requests"),

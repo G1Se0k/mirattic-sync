@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import type { Socket, SocketStatus } from "@mirattic/client";
-import { REACTIONS, type ChatDeleted, type ChatMessage, type RoomMemberView, type ServerEvent } from "@mirattic/types";
+import type { ChatDeleted, ChatMessage, RoomMemberView, ServerEvent } from "@mirattic/types";
 import { api } from "./session";
 import { clock } from "./format";
 import { IconButton } from "./Icons";
@@ -54,7 +54,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
       subscribe((event) => {
         if (event.roomId !== roomId) return;
         setMessages((list) => receive(list, deleted.current, event));
-        if (event.type === "chat:message") {
+        if (event.type === "chat:message" || event.type === "chat:log") {
           const id = (event.payload as ChatMessage).id;
           setFresh((ids) => new Set(ids).add(id));
           setTimeout(() => setFresh((ids) => new Set([...ids].filter((x) => x !== id))), FLASH_MS);
@@ -107,10 +107,6 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     if (socket.send({ type: "chat:message", roomId, payload: { text: trimmed, mediaPositionMs: await position() } })) setText("");
   }
 
-  async function react(emoji: string) {
-    socket.send({ type: "reaction:add", roomId, payload: { emoji, mediaPositionMs: await position() } });
-  }
-
   async function remove(m: ChatMessage) {
     if (!confirm(m.userId === meId ? "이 메시지를 삭제할까요? 모두에게 \"삭제된 메시지입니다\"로 보입니다." : "호스트 권한으로 이 메시지를 삭제할까요?")) return;
     setFailed(null);
@@ -143,11 +139,10 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
           </li>
         )}
         {messages.length === 0 && <li className="muted">아직 메시지가 없습니다.</li>}
-        {group(messages).map((item) =>
-          "userIds" in item ? (
-            <li key={item.id} className={fresh.has(item.id) ? "fresh" : undefined} title={item.userIds.map(name).join(", ")}>
-              <span className="emoji">{item.emoji}</span>
-              {item.userIds.length > 1 && <span className="muted"> ×{item.userIds.length}</span>} {timestamp(item.positionMs)}
+        {messages.map((item) =>
+          item.kind ? (
+            <li key={item.id} className={`log${fresh.has(item.id) ? " fresh" : ""}`}>
+              {logText(item)} {item.kind !== "join" && item.kind !== "leave" && timestamp(item.mediaPositionMs)}
             </li>
           ) : (
             <li key={item.id} className={`row${fresh.has(item.id) ? " fresh" : ""}`}>
@@ -176,13 +171,6 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
       )}
       <div className="composer">
         {failed && <p className="error" role="alert">{failed}</p>}
-        <div className="reactions">
-          {REACTIONS.map((emoji) => (
-            <button key={emoji} title="지금 위치에 리액션" disabled={status !== "open"} onClick={() => void react(emoji)}>
-              {emoji}
-            </button>
-          ))}
-        </div>
         <form onSubmit={send}>
           <input placeholder="메시지" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
           <IconButton icon="send" label="보내기" type="submit" tone="primary" disabled={status !== "open"} />
@@ -195,9 +183,13 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
 /** Oldest first; id breaks ties, as the server pages. */
 const order = (x: ChatMessage, y: ChatMessage) => x.createdAt - y.createdAt || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
 
-/** Union by id, oldest first; `b` wins for an id in both. */
+/** Union by id, oldest first; `b` wins for an id in both, unless `a`'s copy was edited later (a moved seek line). */
 export function merge(a: ChatMessage[], b: ChatMessage[]) {
-  const byId = new Map([...a, ...b].map((m) => [m.id, m]));
+  const byId = new Map(a.map((m) => [m.id, m]));
+  for (const m of b) {
+    const had = byId.get(m.id);
+    if (!had || (m.editedAt ?? 0) >= (had.editedAt ?? 0)) byId.set(m.id, m);
+  }
   return [...byId.values()].sort(order);
 }
 
@@ -221,7 +213,8 @@ export function reconcile(page: ChatMessage[], shown: ChatMessage[]) {
  * was overtaken by its deletion must not come back when it arrives.
  */
 export function receive(list: ChatMessage[], deleted: ChatDeleted[], event: ServerEvent) {
-  if (event.type === "chat:message") return tombstone(merge(list, [event.payload as ChatMessage]), deleted);
+  // A log line may come again with the same id (a seek moved on): the newer one replaces it.
+  if (event.type === "chat:message" || event.type === "chat:log") return tombstone(merge(list, [event.payload as ChatMessage]), deleted);
   if (event.type !== "chat:delete") return list;
   deleted.push(event.payload as ChatDeleted);
   return tombstone(list, [event.payload as ChatDeleted]);
@@ -244,28 +237,15 @@ export function tombstone(messages: ChatMessage[], deleted: ChatDeleted[]) {
     .map((m) => (deleted.some((d) => d.id === m.id) && !m.deleted ? { ...m, text: "", mediaPositionMs: undefined, deleted: true } : m));
 }
 
-export type ReactionGroup = { id: string; emoji: string; positionMs?: number; sentAt: number; userIds: string[] };
-
-/**
- * The same emoji joins a run ("😂 ×4 · 24:32") when sent within this much of the run's first reaction and
- * at a video position within this much of it (the line shows one timestamp).
- */
-const REACTION_RUN_MS = 10_000;
-
-/** Messages as shown: back-to-back reactions with the same emoji, sent together at about the same moment, become one line. */
-export function group(messages: ChatMessage[]): (ChatMessage | ReactionGroup)[] {
-  const out: (ChatMessage | ReactionGroup)[] = [];
-  for (const m of messages) {
-    if (m.reaction && m.deleted) continue;
-    if (!m.reaction) {
-      out.push(m);
-      continue;
-    }
-    const run = out[out.length - 1];
-    const near = (a?: number, b?: number) => (a === undefined || b === undefined ? a === b : Math.abs(a - b) <= REACTION_RUN_MS);
-    if (run && "userIds" in run && run.emoji === m.text && m.createdAt - run.sentAt <= REACTION_RUN_MS && near(run.positionMs, m.mediaPositionMs)) {
-      run.userIds.push(m.userId);
-    } else out.push({ id: m.id, emoji: m.text, positionMs: m.mediaPositionMs, sentAt: m.createdAt, userIds: [m.userId] });
+/** A room log line as shown (decision 78). */
+export function logText(m: ChatMessage) {
+  switch (m.kind) {
+    case "join": return `${m.text}님이 들어왔습니다`;
+    case "leave": return `${m.text}님이 나갔습니다`;
+    case "play": return "호스트가 재생했습니다";
+    case "pause": return "호스트가 일시정지했습니다";
+    case "seek": return "호스트가 위치를 옮겼습니다";
+    case "content": return `호스트가 영상을 바꿨습니다: ${m.text}`;
+    default: return "";
   }
-  return out;
 }
