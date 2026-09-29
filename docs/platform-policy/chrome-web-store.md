@@ -39,8 +39,8 @@
 - → WebSocket은 background가 아니라 side panel 페이지가 가짐 (`plan.md` 결정 29)
 
 ## 확장 ID 고정
-- manifest `key`에 dev용 공개키를 넣어 ID `kphihploboaigagpahhdhjiaglnfmpii` 고정 → 서버 `ALLOWED_ORIGINS` 기본값에 포함
-- 스토어 등록 시 대시보드의 공개키로 교체하고 서버 운영 설정도 바꿔야 함
+- manifest `key`에 스토어 항목의 공개키를 넣어 ID `ffoifpjldcgdiipbhljkofgifmefgohk` 고정 (2026-09-29, 이전 dev ID `kphihploboaigagpahhdhjiaglnfmpii` 대체) → 서버 `ALLOWED_ORIGINS`·`AUTH_EXTENSION_REDIRECTS` 기본값에 포함
+- 스토어 업로드는 `key`를 거부함 ("key 입력란은 매니페스트에 허용되지 않습니다") → 업로드용 zip은 manifest.json에서 `key`를 뺀 것 사용. 압축해제 설치용은 `key` 유지
 
 ## 불확실한 항목
 - side panel에서 `confirm()`/`alert()` 동작: Playwright(Chromium 탭으로 연 side panel 페이지)에서는 동작 확인. 실제 side panel 컨테이너에서는 미확인

@@ -29,7 +29,7 @@ pnpm --filter @mirattic/desktop tauri dev
 # 브라우저에서 두 사용자로 테스트: pnpm --filter @mirattic/desktop dev → http://localhost:1420 탭 두 개
 
 # Extension: 빌드 후 chrome://extensions → "압축해제된 확장 프로그램 로드" → apps/extension/.output/chrome-mv3
-# 툴바 아이콘 → side panel에서 로그인. ID는 manifest key로 kphihploboaigagpahhdhjiaglnfmpii 고정
+# 툴바 아이콘 → side panel에서 로그인. ID는 manifest key로 ffoifpjldcgdiipbhljkofgifmefgohk 고정
 pnpm --filter @mirattic/extension dev
 
 # Backend

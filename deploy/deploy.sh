@@ -14,7 +14,7 @@ if [ ! -f .env ]; then
     echo "DB_PASSWORD=$(openssl rand -hex 24)"
     echo "MYSQL_ROOT_PASSWORD=$(openssl rand -hex 24)"
     echo "JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')"
-    echo "ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost,chrome-extension://kphihploboaigagpahhdhjiaglnfmpii"
+    echo "ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost,chrome-extension://ffoifpjldcgdiipbhljkofgifmefgohk"
   } > .env
 fi
 

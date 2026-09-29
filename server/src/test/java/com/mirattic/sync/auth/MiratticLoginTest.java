@@ -21,7 +21,7 @@ import tools.jackson.databind.JsonNode;
 
 class MiratticLoginTest extends IntegrationTest {
 
-	private static final String EXTENSION = "https://kphihploboaigagpahhdhjiaglnfmpii.chromiumapp.org/";
+	private static final String EXTENSION = "https://ffoifpjldcgdiipbhljkofgifmefgohk.chromiumapp.org/";
 	private static final String CALLBACK = "https://sync.test/auth/callback";
 
 	/** The extension's side of one sign-in: what launchWebAuthFlow ends on, plus its verifier. */
