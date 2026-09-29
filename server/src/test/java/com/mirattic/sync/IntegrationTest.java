@@ -105,8 +105,10 @@ public abstract class IntegrationTest {
 				authTime);
 		MockHttpServletResponse cb = mvc.perform(get("/auth/callback").param("code", code)
 				.param("state", param(authorize, "state")).cookie(start.getCookie("sync_login"))).andReturn().getResponse();
-		assertThat(cb.getRedirectedUrl()).startsWith(EXTENSION + "?handoff=").doesNotContain("eyJ"); // no token in a URL
-		return new Handoff(param(cb.getRedirectedUrl(), "handoff"), verifier);
+		assertThat(cb.getRedirectedUrl()).startsWith(EXTENSION + "?handoff=");
+		String handoff = param(cb.getRedirectedUrl(), "handoff");
+		assertThat(handoff).doesNotContain("."); // no token in a URL: a JWT always has dots, the random code never
+		return new Handoff(handoff, verifier);
 	}
 
 	protected MockHttpServletResponse start(String verifier, boolean reauth) throws Exception {
