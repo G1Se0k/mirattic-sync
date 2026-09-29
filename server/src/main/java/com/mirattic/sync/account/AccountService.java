@@ -5,6 +5,7 @@ import com.mirattic.sync.room.RoomService;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,11 +35,20 @@ class AccountService {
 	 */
 	@Transactional
 	public Deleted delete(String me) {
+		return deleteIfExists(me).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+	}
+
+	/** As {@link #delete}, empty when there is no profile (checked under the lock, so concurrent calls agree). */
+	@Transactional
+	public Optional<Deleted> deleteIfExists(String me) {
 		// Locked first: a room or invite made for me meanwhile waits and then fails, instead of being left behind.
-		User user = users.findForUpdate(me).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+		User user = users.findForUpdate(me).orElse(null);
+		if (user == null) {
+			return Optional.empty();
+		}
 		List<String> contacts = friendships.contactIds(me);
 		List<RoomService.Departure> left = rooms.leaveAll(me);
 		users.delete(user);
-		return new Deleted(left, contacts);
+		return Optional.of(new Deleted(left, contacts));
 	}
 }

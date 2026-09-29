@@ -28,8 +28,8 @@ public class TokenService {
 		OAuth2TokenValidator<Jwt> accountExists = jwt -> users.existsById(jwt.getSubject())
 				? OAuth2TokenValidatorResult.success()
 				: OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "account deleted", null));
-		// Access tokens only: Auth's ID token (same key, iss and aud) has no `scope` claim.
-		OAuth2TokenValidator<Jwt> accessToken = jwt -> jwt.hasClaim("scope")
+		// Access tokens only: Auth's ID token (same key, iss and aud) has no `scope` claim, a deletion order a `purpose`.
+		OAuth2TokenValidator<Jwt> accessToken = jwt -> jwt.hasClaim("scope") && !jwt.hasClaim("purpose")
 				? OAuth2TokenValidatorResult.success()
 				: OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "not an access token", null));
 		return auth.decoder(new DelegatingOAuth2TokenValidator<>(accessToken, accountExists));

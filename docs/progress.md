@@ -10,7 +10,9 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 ### Mirattic 계정 탈퇴 연동 (2026-09-29, Auth Phase 5)
 - `POST /api/internal/account-deletion`: Auth 계정 화면에서 탈퇴하면 Auth 가 보내는 삭제 명령(Auth 서명 JWT, aud `mirattic-sync`, purpose `account_deletion`, 60초). 기존 `DELETE /api/me` 와 같은 삭제·알림(방 나가기/닫기, `chat:delete`, `friend:update`, 소켓 종료). 프로필이 없으면 204 (여러 번 와도 같다)
 - purpose 없는 JWT(access token, ID token)와 다른 aud 는 401. 명령에는 scope 가 없어 API 토큰으로 쓰이지 않음. 이 경로는 access token 해석기에서 제외(SecurityConfig)
-- 검증: Codex 한도 소진 → Claude 직접(통과 아님). 서버 63 테스트(`SafetyFlowTest` 2개 추가)
+- 명령 검사: purpose `account_deletion`, scope 없음, iat·exp 필수, 수명(exp−iat) 1분 이하, 지금이 iat−5초 ~ exp+5초 안(공용 디코더의 60초 허용보다 좁게). API 토큰 검사는 purpose 가 있으면 거부(두 토큰 종류가 서로 쓰이지 않음). 프로필 확인은 삭제 트랜잭션의 행 잠금 안에서(`deleteIfExists`) → 같은 명령이 동시에 와도 모두 204
+- 검증: 처음엔 Codex 한도 소진으로 Claude 직접(통과 아님) → 한도 초기화 뒤 Codex Sol 1차 FAIL(60초 수명 미검사 · 동시 재전송 401 · scope+purpose 토큰이 양쪽에 통과) → 수정 → 재검증 1 FAIL(디코더 기본 60초 skew로 만료 뒤 1분 더 통과, 미래 iat) → 수정 → 재검증 2 **PASS** (2026-09-29, 발견 사항 0건, 검토 범위 complete)
+- 테스트: 서버 64 (`SafetyFlowTest`: 수명 초과·scope 포함·만료 10초 뒤·미래 iat 명령 401, scope+purpose 토큰으로 `/api/me` 401, 같은 명령 4개 동시 모두 204. 수정을 되돌리면 실패 확인)
 
 ### 메인 페이지 (2026-09-29)
 - `https://sync.mirattic.com/` 소개 페이지(`server/src/main/resources/static/index.html`, 이미지 `static/landing/`): 앱과 같은 색·글꼴·워드마크, 로고 모노그램, 실제 제품 캡처(Big Buck Bunny), 웹 스토어 설치 버튼(`chromewebstore.google.com/detail/ffoifpjldcgdiipbhljkofgifmefgohk`), 쓰는 법 3단계, 개인정보 요약, 상표 고지. 라이트/다크, 모바일(390px) 가로 스크롤 없음 확인

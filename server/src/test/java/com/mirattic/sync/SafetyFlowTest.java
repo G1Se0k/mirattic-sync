@@ -227,11 +227,49 @@ class SafetyFlowTest extends IntegrationTest {
 		deletionOrder(order(u.id(), "mirattic-flow", "account_deletion")).andExpect(status().isUnauthorized());
 		deletionOrder("not-a-jwt").andExpect(status().isUnauthorized());
 		deletionOrder(null).andExpect(status().isUnauthorized());
+		// Longer than Auth's one minute, or also carrying a scope: not a deletion order.
+		deletionOrder(AuthStub.sign(java.util.Map.of("sub", u.id(), "aud", AuthStub.CLIENT_ID, "purpose",
+				"account_deletion"))).andExpect(status().isUnauthorized());
+		String scoped = AuthStub.sign(java.util.Map.of("sub", u.id(), "aud", AuthStub.CLIENT_ID, "purpose",
+				"account_deletion", "scope", java.util.List.of("openid"), "exp", new java.util.Date(
+						System.currentTimeMillis() + 60_000)));
+		deletionOrder(scoped).andExpect(status().isUnauthorized());
+		// A one-minute order used 10 s after it expired (inside the decoder's usual 60 s skew), or issued in the future.
+		long now = System.currentTimeMillis();
+		deletionOrder(AuthStub.sign(java.util.Map.of("sub", u.id(), "aud", AuthStub.CLIENT_ID, "purpose",
+				"account_deletion", "iat", new java.util.Date(now - 70_000), "exp", new java.util.Date(now - 10_000))))
+				.andExpect(status().isUnauthorized());
+		deletionOrder(AuthStub.sign(java.util.Map.of("sub", u.id(), "aud", AuthStub.CLIENT_ID, "purpose",
+				"account_deletion", "iat", new java.util.Date(now + 30_000), "exp", new java.util.Date(now + 60_000))))
+				.andExpect(status().isUnauthorized());
+		// ...and a deletion order is never an API token.
+		call(HttpMethod.GET, "/api/me", scoped, null).andExpect(status().isUnauthorized());
 		call(HttpMethod.GET, "/api/me", u.accessToken(), null).andExpect(status().isOk());
 	}
 
+	@Test
+	void concurrentCopiesOfADeletionOrderAllGet204() throws Exception {
+		TestUser u = signup();
+		String order = order(u.id(), AuthStub.CLIENT_ID, "account_deletion");
+		var pool = java.util.concurrent.Executors.newFixedThreadPool(4);
+		try {
+			var results = new java.util.ArrayList<java.util.concurrent.Future<Integer>>();
+			for (int i = 0; i < 4; i++) {
+				results.add(pool.submit(() -> deletionOrder(order).andReturn().getResponse().getStatus()));
+			}
+			for (var r : results) {
+				assertThat(r.get()).isEqualTo(204);
+			}
+		} finally {
+			pool.shutdown();
+		}
+		assertThat(jdbc.queryForObject("select count(*) from users where id = ?", Long.class, u.id())).isZero();
+	}
+
+	/** As Auth signs one: one minute. */
 	private static String order(String uid, String audience, String purpose) {
-		return AuthStub.sign(java.util.Map.of("sub", uid, "aud", audience, "purpose", purpose));
+		return AuthStub.sign(java.util.Map.of("sub", uid, "aud", audience, "purpose", purpose, "exp",
+				new java.util.Date(System.currentTimeMillis() + 60_000)));
 	}
 
 	private ResultActions deletionOrder(String token) throws Exception {
