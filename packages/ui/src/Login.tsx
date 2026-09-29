@@ -16,7 +16,10 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
     } catch (err) {
       const status = err instanceof ApiError ? err.status : -1;
       // 0: the window was closed; nothing to report.
-      if (status !== 0) setError(status === 429 ? "요청이 너무 많습니다. 잠시 후 다시 시도하세요." : "로그인하지 못했습니다. 다시 시도하세요.");
+      if (status === 0) return;
+      setError(status === 429 ? "요청이 너무 많습니다. 잠시 후 다시 시도하세요."
+        : status === 502 ? "로그인 창을 열지 못했습니다. 인터넷 연결을 확인하거나 확장 프로그램을 최신 버전으로 업데이트하세요."
+        : "로그인하지 못했습니다. 다시 시도하세요.");
     } finally {
       setBusy(false);
     }

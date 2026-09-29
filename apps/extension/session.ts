@@ -34,8 +34,11 @@ export const authorize: Authorize = async () => {
   let landed: string | undefined;
   try {
     landed = await browser.identity.launchWebAuthFlow({ url, interactive: true });
-  } catch {
-    throw new ApiError(0, 'cancelled'); // window closed, or the server could not be reached
+  } catch (e) {
+    // Closing the window is the only silent failure. Anything else (e.g. /auth/start refused this extension's ID:
+    // Chrome then opens no window at all) must show, or the button looks dead.
+    const message = String((e as Error)?.message ?? e);
+    throw new ApiError(/did not approve/i.test(message) ? 0 : 502, message);
   }
   const params = new URL(landed ?? 'about:blank').searchParams;
   const code = params.get('handoff');
