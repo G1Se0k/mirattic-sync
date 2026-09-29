@@ -7,6 +7,11 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### 방 입장 · 일시정지 기록 · 사이트 선택 (2026-09-29, 결정 83)
+- 멤버가 방에 들어가면 방 영상을 새 탭으로 엶(보고 있으면 안 엶, 워커 복구 시 안 엶), 일시정지 기록 붙잡기 1초(3~3.5초 → 약 1.8초), "어디서 볼까요?" 창은 영상 인식 시 닫힘
+- 검증: Codex Sol 리뷰 4회 → 중복 탭(스냅샷 늦음 · 대기 중 방 영상 변경/호스트 전환 · 다른 탭에 이미 열림 · 사이트 비교 누락 · Laftel 끝 슬래시) 수정, 지적 2(1초 넘게 멈춘 드래그는 줄이 나뉨)는 의도된 절충으로 기록. JS 70 · 서버 62 테스트, typecheck. 로컬 Auth·Sync와 Playwright E2E: 입장 시 새 탭, 일시정지 줄 1.8초, 영상 인식 시 창 닫힘
+- 알려진 문제: 개발 모드 빌드(StrictMode)에서는 방 화면이 "불러오는 중"에 멈춤 — `Home.tsx`의 `useMemo`가 `platform.room()`을 두 번 불러 핸들이 어긋남. 배포 빌드는 정상
+
 ### Mirattic Auth 이전 (2026-09-29, 사용자 승인)
 - **기존 Sync 인증 제거 + 재인증 계정 삭제 (결정 82, 사용자 요청)**: Sync 자체 가입·로그인·refresh token·비밀번호·JWT secret 제거, V15에서 `refresh_tokens`·`user_identities` 삭제(배포 전 수동 백업 `mirattic-20260929-1358.sql.gz`). API는 Auth access token만. `/api/me` 이메일은 Auth UserInfo에서 매번 읽음(`providers` 필드 제거). 계정 삭제: 확인 → Auth 재로그인 창(`reauth=true` → `prompt=login`) → 같은 UID·`auth_time` 5분 이내 handoff로 `DELETE /api/me`, 그 재인증 로그인은 바로 폐기. Sync 프로필과 데이터만 지우고 Mirattic 계정은 남음. 확장 1.0.2. 기존 가져오기(작업 6)는 운영에 실제 계정이 없어 생략(사용자 확인)
 - 검증: Codex 사용량 소진 → Claude 직접. 서버 55 · JS 68 테스트, typecheck, build, diff --check 통과. 실제 Auth(로컬)와 E2E: 로그인 → `/api/me`(이메일 Auth에서) → 기존 로그인 404 → 62초 대기 후 재인증이 비밀번호를 다시 요구 → 다시 로그인하면 원래 요청 이어짐 → 삭제 204 → `/api/me`·refresh 401

@@ -112,8 +112,12 @@ public class MiratticAuth {
 		try {
 			t = post("/oauth2/token", body, TokenResponse.class);
 		} catch (HttpClientErrorException.BadRequest e) {
-			// invalid_grant: expired, revoked, rotated away. Only this means "signed out"; anything else (e.g. a
-			// wrong client secret → 401 invalid_client) must not make every client drop its token.
+			// invalid_grant: expired, revoked, rotated away. Only this means "signed out"; anything else (another
+			// 400 such as invalid_request, or a wrong client secret → 401) must not make every client drop its token.
+			if (!invalidGrant(e)) {
+				log.warn("Mirattic Auth refused the refresh: {}", e.getResponseBodyAsString());
+				throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "auth server refused the request");
+			}
 			throw new InvalidRefreshToken();
 		} catch (RestClientException e) {
 			log.warn("Mirattic Auth refresh failed: {}", e.getClass().getSimpleName());
@@ -149,6 +153,15 @@ public class MiratticAuth {
 			post("/oauth2/revoke", body, Void.class);
 		} catch (RestClientException e) {
 			log.warn("Mirattic Auth revoke failed: {}", e.getClass().getSimpleName());
+		}
+	}
+
+	private static boolean invalidGrant(HttpClientErrorException e) {
+		try {
+			Map<?, ?> body = e.getResponseBodyAs(Map.class);
+			return body != null && "invalid_grant".equals(body.get("error"));
+		} catch (RuntimeException unreadable) {
+			return false;
 		}
 	}
 

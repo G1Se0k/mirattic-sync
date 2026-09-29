@@ -42,6 +42,8 @@ public final class AuthStub {
 	private static final Map<String, Login> CODES = new ConcurrentHashMap<>();
 	private static final Map<String, String> REFRESH = new ConcurrentHashMap<>(); // token → sub
 	public static final Set<String> REVOKED = ConcurrentHashMap.newKeySet();
+	/** Sending this refresh token makes the stub answer 400 invalid_request (not invalid_grant). */
+	public static final String INVALID_REQUEST = "force-invalid-request";
 
 	static {
 		try {
@@ -137,6 +139,10 @@ public final class AuthStub {
 			name = login.name();
 			authTime = login.authTime();
 		} else {
+			if (INVALID_REQUEST.equals(f.get("refresh_token"))) {
+				send(ex, 400, "{\"error\":\"invalid_request\"}");
+				return;
+			}
 			sub = REFRESH.remove(String.valueOf(f.get("refresh_token")));
 			if (sub == null) {
 				send(ex, 400, "{\"error\":\"invalid_grant\"}");

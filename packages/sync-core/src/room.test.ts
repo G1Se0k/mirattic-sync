@@ -160,3 +160,64 @@ it("asks a member before following the host to another video, unless told to alw
   expect(other.state.switched).toBeNull();
   other.dispose();
 });
+
+it("opens the room's video in a new tab when a member enters without it, never on a restore or for the host", async () => {
+  const content = { provider: "youtube" as const, contentId: "aaaaaaaaaaa", title: "A" };
+  const enter = async (host: string, openOnEnter: boolean, playing: string) => {
+    const opened: [string, boolean | undefined][] = [];
+    const player = new MockMediaProvider({ contentId: playing, title: playing, durationMs: 600_000 });
+    const sync = new RoomSync({
+      roomId: "r1", meId: "me", loadRoom: async () => ({ ...room(host), content }), isGone: () => false,
+      send: () => true, adapter: () => player, nowWatching: () => null, open: (url, newTab) => opened.push([url, newTab]),
+      openOnEnter, onChange: () => {},
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    sync.dispose();
+    return opened;
+  };
+  const opened = await enter("host", true, "other");
+  expect(opened).toHaveLength(1);
+  expect(opened[0][0]).toContain("aaaaaaaaaaa");
+  expect(opened[0][1]).toBe(true); // a new tab: the video the member was on stays
+  expect(await enter("host", true, "aaaaaaaaaaa")).toEqual([]); // already open
+  expect(await enter("host", false, "other")).toEqual([]); // restored after a worker restart
+  expect(await enter("me", true, "other")).toEqual([]); // the host
+
+  // No snapshot yet (the tab still connecting): asked again after a moment, opened only if still not there.
+  const late = async (connectsTo: string | null, watching: string | null = null) => {
+    const opened: string[] = [];
+    let snapshot: string | null = null;
+    const player = new MockMediaProvider({ contentId: "x", title: "x", durationMs: 600_000 });
+    (player as { getSnapshot(): Promise<unknown> }).getSnapshot = async () => (snapshot === null ? null : { ...(await MockMediaProvider.prototype.getSnapshot.call(player))!, contentId: snapshot });
+    const sync = new RoomSync({
+      roomId: "r1", meId: "me", loadRoom: async () => ({ ...room("host"), content }), isGone: () => false,
+      send: () => true, adapter: () => player, open: (url) => opened.push(url), openOnEnter: true, onChange: () => {},
+      nowWatching: () => (watching ? { ...content, contentId: watching } : null),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    snapshot = connectsTo;
+    await vi.advanceTimersByTimeAsync(2_000);
+    sync.dispose();
+    return opened;
+  };
+  expect(await late("aaaaaaaaaaa")).toEqual([]); // it was the room's video, just late
+  expect(await late(null)).toHaveLength(1); // still nothing: opened
+  expect(await late(null, "aaaaaaaaaaa")).toEqual([]); // the browser already shows it
+
+  // While waiting, the room moved to another video: the old one isn't opened.
+  const movedOpened: string[] = [];
+  let now: RoomView["content"] = content;
+  const idle = new MockMediaProvider({ contentId: "x", title: "x", durationMs: 600_000 });
+  (idle as { getSnapshot(): Promise<unknown> }).getSnapshot = async () => null;
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => ({ ...room("host"), content: now }), isGone: () => false,
+    send: () => true, adapter: (p) => (p === "youtube" ? idle : undefined), open: (url) => movedOpened.push(url),
+    openOnEnter: true, onChange: () => {}, nowWatching: () => null,
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  now = { provider: "netflix", contentId: "81234567", title: "N" }; // no player for it here
+  sync.handle({ type: "room:update", roomId: "r1", serverTime: Date.now(), payload: null } as ServerEvent);
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(movedOpened).toEqual([]);
+  sync.dispose();
+});

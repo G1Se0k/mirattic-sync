@@ -58,7 +58,7 @@ public class RoomLog {
 	}
 
 	RoomLog(RoomService rooms, SocketHub hub, @Value("${app.room-log-grace-ms:10000}") long graceMs,
-			@Value("${app.room-log-pause-hold-ms:3000}") long pauseHoldMs) {
+			@Value("${app.room-log-pause-hold-ms:1000}") long pauseHoldMs) {
 		this.rooms = rooms;
 		this.hub = hub;
 		this.graceMs = graceMs;
@@ -176,7 +176,7 @@ public class RoomLog {
 		return true;
 	}
 
-	@Scheduled(fixedDelayString = "${app.room-log-hold-sweep-ms:500}")
+	@Scheduled(fixedDelayString = "${app.room-log-hold-sweep-ms:200}")
 	public void flushHeld() {
 		flushHeld(System.currentTimeMillis());
 	}

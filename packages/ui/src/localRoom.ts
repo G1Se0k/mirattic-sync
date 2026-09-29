@@ -19,7 +19,7 @@ export function localRoom(
     send: (e) => socket.send(e),
     adapter: (p) => platform.adapter?.(p),
     nowWatching: () => platform.nowWatching?.() ?? null,
-    open: (url) => platform.open(url),
+    open: (url, newTab) => platform.open(url, newTab),
     onChange: () => listeners.forEach((l) => l()),
   });
   const off = subscribe((e) => sync.handle(e));

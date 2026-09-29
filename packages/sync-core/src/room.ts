@@ -43,6 +43,9 @@ export type RoomSyncState = {
   pauseRequest: PauseRequest | null;
 };
 
+/** Entering a room with no snapshot yet: how long a tab still connecting gets before the video is opened. */
+const ENTER_RECHECK_MS = 1500;
+
 export type RoomSyncDeps = {
   roomId: string;
   meId: string;
@@ -53,7 +56,9 @@ export type RoomSyncDeps = {
   /** The player for a provider here, if any; the same object for the same provider. */
   adapter(provider: MediaProvider): MediaProviderAdapter | undefined;
   nowWatching(): RoomContent | null;
-  open(url: string): void;
+  open(url: string, newTab?: boolean): void;
+  /** Entered by the user now (not restored): a member without the room's video open gets it in a new tab. */
+  openOnEnter?: boolean;
   /** The user's setting: false = follow the host to any video without asking (decision 81). Default: ask. */
   askOnSwitch?(): boolean;
 
@@ -163,22 +168,49 @@ export class RoomSync {
 
   /**
    * A member whose host moved to another video: the next one of the same series (playlist, show) opens by
-   * itself, anything else is asked. Not on entering the room, nor if that video is already open.
+   * itself, anything else is asked. On entering the room (`openOnEnter`), it opens in a new tab, so the video
+   * the member was on stays. Never if that video is already open.
    */
   private memberFollows(content: RoomContent, sameVideo: boolean) {
     const before = this.shown;
     this.shown = content;
-    if (!before || sameVideo || before.provider === content.provider && before.contentId === content.contentId) return;
+    const entering = !before && !!this.deps.openOnEnter;
+    if (!before && !entering || sameVideo || before?.provider === content.provider && before.contentId === content.contentId) return;
     if (this.isHost) return;
     const player = this.deps.adapter(content.provider);
     const url = openUrl(content);
     if (!player || !url) return;
     const mine = ++this.switchCheck; // the room may move on again before the tab answers
+    if (!before) return this.openOnEnter(content, url, player, mine, 0);
     void player.getSnapshot().then((s) => {
       if (mine !== this.switchCheck || this.disposed || s?.contentId === content.contentId) return;
       // The same series, the setting, or "이 방에서 항상 허용" (decision 81): opened without asking.
       if (sameSeries(before, content) || this.followAlways || this.deps.askOnSwitch?.() === false) this.deps.open(url);
       else this.set({ switched: content });
+    });
+  }
+
+  /**
+   * Entering: open the room's video unless it is already what this browser shows. No snapshot yet may just be
+   * a tab not connected yet, so that is asked once more after a moment.
+   */
+  private openOnEnter(content: RoomContent, url: string, player: MediaProviderAdapter, mine: number, tries: number) {
+    // The snapshot is this provider's player; what the browser shows can be any provider.
+    const watchingIt = () => {
+      const w = this.deps.nowWatching();
+      return w?.provider === content.provider && w.contentId === content.contentId;
+    };
+    // Still this room video, and still a member (a wait may see the room move on or me become the host).
+    const stillFollowing = () => {
+      const now = this.state.room?.content;
+      return mine === this.switchCheck && !this.disposed && !this.isHost
+        && now?.provider === content.provider && now.contentId === content.contentId;
+    };
+    if (watchingIt()) return;
+    void player.getSnapshot().then((s) => {
+      if (!stillFollowing() || s?.contentId === content.contentId || watchingIt()) return;
+      if (s === null && tries === 0) return this.later(() => this.openOnEnter(content, url, player, mine, 1), ENTER_RECHECK_MS);
+      this.deps.open(url, true);
     });
   }
 

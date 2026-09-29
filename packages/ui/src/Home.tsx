@@ -245,6 +245,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       creating.current = false;
     }
   }
+  // A video opened while "어디서 볼까요?" is up answers it: the dialog goes.
+  useEffect(() => {
+    if (watching) setChoosing(false);
+  }, [watching]);
   // Entering any room drops the wait: it must not later make a room and pull me out of this one.
   useEffect(() => {
     if (openRoom) setPending(null);

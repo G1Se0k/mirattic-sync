@@ -111,7 +111,8 @@ export default defineBackground(() => {
     else readTimer = setTimeout(send, delayMs);
   }
 
-  function openRoom(roomId: string) {
+  /** `entering`: the user opened it now, not the worker restoring it after a restart. */
+  function openRoom(roomId: string, entering = false) {
     if (!meId || room?.state.roomId === roomId) return;
     room?.dispose();
     const sync: RoomSync = new RoomSync({
@@ -123,9 +124,10 @@ export default defineBackground(() => {
       adapter: (provider) => platform?.adapter?.(provider),
       nowWatching: () => platform?.nowWatching?.() ?? null,
       askOnSwitch: () => platform?.preferences?.askOnSwitch() ?? true,
-      open: (url) => {
+      openOnEnter: entering,
+      open: (url, newTab) => {
         console.info('[mirattic] following the host to', url); // who moved the tab, when a user reports it
-        platform?.open(url);
+        platform?.open(url, newTab);
       },
       onChange: (state) => {
         broadcast({ kind: 'room', state });
@@ -209,7 +211,7 @@ export default defineBackground(() => {
           socket?.send(m.event);
           break;
         case 'room:open':
-          openRoom(m.roomId);
+          openRoom(m.roomId, true);
           viewers.set(port, m.roomId);
           if (room) post(port, { kind: 'room', state: room.state });
           markRead();

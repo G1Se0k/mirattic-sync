@@ -71,6 +71,12 @@ class MiratticLoginTest extends IntegrationTest {
 	}
 
 	@Test
+	void anotherAuthErrorIsNotASignOut() throws Exception {
+		call(HttpMethod.POST, "/api/auth/refresh", null, refreshBody(AuthStub.INVALID_REQUEST))
+				.andExpect(status().isBadGateway());
+	}
+
+	@Test
 	void onlyAuthAccessTokensForThisClientAreAccepted() throws Exception {
 		String uid = signup().id();
 		call(HttpMethod.GET, "/api/me", AuthStub.accessToken(uid), null).andExpect(status().isOk());

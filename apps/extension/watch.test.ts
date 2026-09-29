@@ -87,7 +87,7 @@ vi.mock('wxt/browser', () => ({
   },
 }));
 
-const { watch } = await import('./watch');
+const { watch, samePage } = await import('./watch');
 
 const YT = (id: number, active = false): Tab => ({ id, url: `https://www.youtube.com/watch?v=${'a'.repeat(10)}${id}`, active, windowId: 1 });
 const NF = (id: number, active = false): Tab => ({ id, url: `https://www.netflix.com/watch/8123456${id}`, active, windowId: 1 });
@@ -258,4 +258,13 @@ describe('watch: which tab the side panel follows', () => {
     const restarted = await watch(); // storage.session survives; the panel's dismissal of this arrival holds
     expect(restarted.offSite?.()).toEqual(arrival);
   });
+});
+
+it("tells the same video page apart from another one", () => {
+  const same = (a: string, b: string) => samePage(new URL(a), new URL(b));
+  expect(same("https://www.youtube.com/watch?v=aqz-KE-bpKQ&t=70s", "https://www.youtube.com/watch?v=aqz-KE-bpKQ")).toBe(true);
+  expect(same("https://www.youtube.com/watch?v=aaaaaaaaaaa", "https://www.youtube.com/watch?v=aqz-KE-bpKQ")).toBe(false);
+  expect(same("https://www.netflix.com/watch/81234567?trackId=1", "https://www.netflix.com/watch/81234567")).toBe(true);
+  expect(same("https://www.netflix.com/watch/81234568", "https://www.netflix.com/watch/81234567")).toBe(false);
+  expect(same("https://laftel.net/player/40123/40456/", "https://laftel.net/player/40123/40456")).toBe(true);
 });

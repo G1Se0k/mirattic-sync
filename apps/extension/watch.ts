@@ -20,6 +20,12 @@ type Experimental = keyof typeof EXPERIMENTAL;
 const EXPERIMENTS = Object.keys(EXPERIMENTAL) as Experimental[];
 const isExperimental = (p: MediaProvider): p is Experimental => p in EXPERIMENTAL;
 
+/** The same video page: origin and path, and for YouTube's /watch the `v` too (other parameters are position, list). */
+export const samePage = (a: URL, b: URL) => {
+  const path = (u: URL) => u.pathname.replace(/\/$/, ''); // Laftel's player path works with or without it
+  return a.origin === b.origin && path(a) === path(b) && a.searchParams.get('v') === b.searchParams.get('v');
+};
+
 const OFF_SITE_KEY = 'mirattic.offSite';
 const PRESENCE_DELAY_MS = 300; // the server drops presence updates closer than 250ms
 
@@ -166,6 +172,13 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     adapter.connect(id, provider);
   };
 
+  /** A tab of this window on the same video page as `url` (YouTube: the same `v`). */
+  const tabShowing = async (url: string) => {
+    const want = new URL(url);
+    const tabs = await browser.tabs.query({ windowId, url: [`${want.origin}/*`] });
+    return tabs.find((t) => t.url && samePage(new URL(t.url), want));
+  };
+
   /** The active video tab of this window, else any, except one being closed. */
   const pick = async (closing?: number) => {
     const mine = ++choosing;
@@ -293,8 +306,12 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     },
     open: (url, newTab) => {
       // Reuse the synced tab so the room keeps following it; the user asked for this navigation. A new tab
-      // (the room's "open" button) is followed once it loads, being the window's active video tab.
-      const opened = tabId !== null && !newTab ? browser.tabs.update(tabId, { url, active: true }) : Promise.reject();
+      // (the room's "open" button, entering a room) is followed once it loads, being the window's active video
+      // tab — unless a tab of this window already has that video: that one is brought forward instead.
+      const opened = tabId !== null && !newTab
+        ? browser.tabs.update(tabId, { url, active: true })
+        : (newTab ? tabShowing(url) : Promise.resolve(undefined)).then((tab) =>
+            tab?.id !== undefined ? browser.tabs.update(tab.id, { active: true }) : Promise.reject());
       opened.catch(() => browser.tabs.create({ url, windowId }));
     },
   };
