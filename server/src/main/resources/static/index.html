@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mirattic Sync</title>
+<meta name="description" content="친구와 같은 영상을 같은 순간에. 재생·일시정지·넘기기를 방 안 모두에게 맞춰 주는 Chrome 확장프로그램.">
+<meta property="og:title" content="Mirattic Sync">
+<meta property="og:description" content="친구와 같은 영상을 같은 순간에 보는 Chrome 확장프로그램.">
+<meta property="og:image" content="https://sync.mirattic.com/landing/1-watch-together.jpg">
+<link rel="icon" href="/landing/logo-64.png">
+<!-- The app's own palette and type (packages/ui/src/App.css), so the site reads like the product. -->
+<style>
+  :root {
+    --fg: #1c1c1e; --bg: #f7f7f5; --surface: #ffffff; --muted: #6f6f75; --line: #e6e5e1;
+    --strong: #1c1c1e; --on-strong: #ffffff; --shade: rgba(28, 28, 30, 0.08);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #ececea; --bg: #171717; --surface: #202020; --muted: #9b9b98; --line: #2e2e2d;
+      --strong: #ececea; --on-strong: #171717; --shade: rgba(0, 0, 0, 0.4);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; word-break: keep-all;
+  }
+  a { color: inherit; }
+  img { display: block; max-width: 100%; height: auto; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header .wrap { display: flex; align-items: center; gap: 10px; height: 68px; }
+  .mark { width: 28px; height: 28px; }
+  .wordmark { font-weight: 700; font-size: 17px; letter-spacing: -0.02em; }
+  .wordmark span { color: var(--muted); font-weight: 500; }
+  header .install-small { margin-left: auto; font-size: 14px; font-weight: 600; text-decoration: none; }
+  header .install-small:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+  .hero { display: grid; grid-template-columns: 5fr 7fr; gap: 56px; align-items: center; padding-top: 56px; padding-bottom: 88px; }
+  h1 { margin: 0; font-size: clamp(36px, 5.2vw, 58px); line-height: 1.16; letter-spacing: -0.035em; font-weight: 700; }
+  .lead { margin: 22px 0 0; font-size: 18px; color: var(--muted); max-width: 30em; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 34px; }
+  .button {
+    display: inline-flex; align-items: center; gap: 10px; padding: 14px 22px; border-radius: 10px;
+    background: var(--strong); color: var(--on-strong); font-weight: 600; font-size: 16px; text-decoration: none;
+    transition: transform 0.12s ease;
+  }
+  .button:hover { transform: translateY(-1px); }
+  .button img { width: 22px; height: 22px; }
+  .note { font-size: 14px; color: var(--muted); }
+  .providers { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 44px; font-size: 14px; color: var(--muted); }
+  .providers span { display: inline-flex; align-items: center; gap: 7px; }
+  .providers img { width: 18px; height: 18px; border-radius: 4px; }
+  .shot { border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 24px 60px -24px var(--shade); overflow: hidden; background: var(--surface); }
+
+  section { padding: 88px 0; border-top: 1px solid var(--line); }
+  .label { font-size: 14px; font-weight: 600; color: var(--muted); margin: 0 0 14px; }
+  h2 { margin: 0; font-size: clamp(26px, 3.2vw, 36px); line-height: 1.25; letter-spacing: -0.03em; }
+
+  .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: start; margin-top: 44px; }
+  ol { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  ol li { counter-increment: step; display: grid; grid-template-columns: 44px 1fr; padding: 20px 0; border-bottom: 1px solid var(--line); }
+  ol li:first-child { padding-top: 0; }
+  ol li::before { content: counter(step, decimal-leading-zero); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; padding-top: 3px; }
+  ol b { display: block; font-size: 17px; margin-bottom: 4px; }
+  ol p { margin: 0; color: var(--muted); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  .pair figure { margin: 0; }
+  figcaption { margin-top: 10px; font-size: 13px; color: var(--muted); }
+
+  .privacy { display: grid; grid-template-columns: 5fr 7fr; gap: 56px; }
+  .privacy ul { margin: 0; padding: 0; list-style: none; }
+  .privacy li { padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .privacy li:first-child { padding-top: 0; }
+
+  .closing { text-align: center; padding: 104px 0; }
+  .closing .big-mark { width: 96px; height: 96px; margin: 0 auto 28px; }
+  .closing p { color: var(--muted); margin: 14px 0 32px; }
+
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 13px; color: var(--muted); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  footer .fine { flex-basis: 100%; }
+
+  @media (max-width: 860px) {
+    .hero, .steps, .privacy { grid-template-columns: 1fr; gap: 40px; }
+    .hero { padding-top: 32px; padding-bottom: 64px; }
+    section { padding: 64px 0; }
+  }
+  @media (max-width: 520px) {
+    .wrap { padding: 0 16px; }
+    header .install-small { display: none; }
+    .pair { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <img class="mark" src="/landing/logo-64.png" alt="" width="28" height="28">
+    <span class="wordmark">Mirattic <span>Sync</span></span>
+    <a class="install-small" href="https://chromewebstore.google.com/detail/ffoifpjldcgdiipbhljkofgifmefgohk">설치하기</a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <h1>친구랑 같은 영상을<br>같은 초에 보세요.</h1>
+      <p class="lead">방장이 재생하면 모두 재생되고, 멈추면 모두 멈춥니다. 영상은 각자 브라우저에서 그대로 보고, 대화는 옆 패널에서 나눕니다.</p>
+      <div class="actions">
+        <a class="button" href="https://chromewebstore.google.com/detail/ffoifpjldcgdiipbhljkofgifmefgohk">
+          <img src="/landing/logo-64.png" alt="" width="22" height="22">Chrome 웹 스토어에서 설치
+        </a>
+        <span class="note">무료 · Chrome 확장프로그램</span>
+      </div>
+      <div class="providers">
+        <span><img src="/landing/youtube.png" alt="" width="18" height="18">YouTube</span>
+        <span><img src="/landing/netflix.png" alt="" width="18" height="18">Netflix <small>(실험)</small></span>
+        <span><img src="/landing/laftel.png" alt="" width="18" height="18">라프텔 <small>(실험)</small></span>
+      </div>
+    </div>
+    <div class="shot">
+      <img src="/landing/1-watch-together.jpg" width="1280" height="800"
+        alt="YouTube 영상 옆 사이드 패널에서 두 사람이 같은 장면을 보며 채팅하는 화면">
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <p class="label">쓰는 법</p>
+      <h2>설치하고, 방 만들고, 누르면 끝.</h2>
+      <div class="steps">
+        <ol>
+          <li><div><b>확장프로그램 설치</b><p>툴바 아이콘을 누르면 사이드 패널이 열립니다. Mirattic 계정으로 로그인하세요.</p></div></li>
+          <li><div><b>영상 열고 방 만들기</b><p>보고 싶은 영상을 연 채로 방을 만들고, 친구를 초대하거나 방 코드를 보내세요.</p></div></li>
+          <li><div><b>같이 보기</b><p>방장이 재생·일시정지·넘기기를 하면 모두의 화면이 따라갑니다. 누가 언제 멈췄는지는 채팅에 남습니다.</p></div></li>
+        </ol>
+        <div class="pair">
+          <figure>
+            <div class="shot"><img src="/landing/panel-friends.jpg" width="400" height="400" alt="친구가 지금 보는 영상이 보이는 친구 목록" loading="lazy"></div>
+            <figcaption>친구가 지금 뭘 보는지 보이고, 바로 합류를 요청할 수 있어요.</figcaption>
+          </figure>
+          <figure>
+            <div class="shot"><img src="/landing/panel-invite.jpg" width="400" height="560" alt="친구 초대와 방 코드가 있는 초대 창" loading="lazy"></div>
+            <figcaption>초대장을 보내거나, 방 코드를 알려주세요.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap privacy">
+      <div>
+        <p class="label">개인정보</p>
+        <h2>영상은 보내지 않습니다.</h2>
+      </div>
+      <ul>
+        <li>영상과 소리 자체는 녹화하거나 중계하지 않습니다. 같이 보기 위해 서버로 보내는 건 재생 상태(재생 중인지, 몇 초인지), 보고 있는 영상의 제목과 주소, 방 채팅과 기록입니다.</li>
+        <li>YouTube·Netflix·라프텔 비밀번호와 쿠키는 읽지 않습니다. 영상은 각자 자기 계정으로 봅니다.</li>
+        <li>친구에게 무엇을 보는지 보여줄지는 직접 정합니다. 계정·친구 목록·신고처럼 서버가 다루는 다른 정보까지 모두 <a href="/privacy.html">개인정보처리방침</a>에 적어 두었습니다.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="wrap">
+      <img class="big-mark" src="/landing/logo.png" alt="" width="96" height="96">
+      <h2>오늘 볼 영상, 같이 보세요.</h2>
+      <p>설치는 1분이면 됩니다.</p>
+      <a class="button" href="https://chromewebstore.google.com/detail/ffoifpjldcgdiipbhljkofgifmefgohk">Chrome 웹 스토어에서 설치</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Mirattic Sync</span>
+    <a href="/privacy.html">개인정보처리방침</a>
+    <a href="mailto:jangisuk94@gmail.com">문의</a>
+    <span class="fine">YouTube, Netflix, 라프텔은 각 회사의 상표이며, Mirattic Sync는 이들과 제휴하거나 승인받은 서비스가 아닙니다.</span>
+  </div>
+</footer>
+</body>
+</html>

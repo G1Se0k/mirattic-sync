@@ -45,3 +45,4 @@
 ## 불확실한 항목
 - side panel에서 `confirm()`/`alert()` 동작: Playwright(Chromium 탭으로 연 side panel 페이지)에서는 동작 확인. 실제 side panel 컨테이너에서는 미확인
 - "눈에 띄는 공개"의 구체적 문구·화면 요건은 심사 기준이 공개돼 있지 않음 → 보수적으로 처음 사용 시 별도 동의 화면
+- 홈페이지: https://sync.mirattic.com/ (스토어 "웹사이트" 칸에 사용 가능, 2026-09-29)

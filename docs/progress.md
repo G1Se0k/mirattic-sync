@@ -7,6 +7,11 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### 메인 페이지 (2026-09-29)
+- `https://sync.mirattic.com/` 소개 페이지(`server/src/main/resources/static/index.html`, 이미지 `static/landing/`): 앱과 같은 색·글꼴·워드마크, 로고 모노그램, 실제 제품 캡처(Big Buck Bunny), 웹 스토어 설치 버튼(`chromewebstore.google.com/detail/ffoifpjldcgdiipbhljkofgifmefgohk`), 쓰는 법 3단계, 개인정보 요약, 상표 고지. 라이트/다크, 모바일(390px) 가로 스크롤 없음 확인
+- 보안: `/`, `/index.html`, `/landing/**` 공개. 서버 61 테스트(메인·이미지 공개 확인 추가)
+- Codex Sol: 첫 검증 FAIL(개인정보 요약이 "재생 상태뿐") → 재검증 1 FAIL(목록을 한정하는 표현) → 재검증 2 PASS
+
 ### 일시정지 기록 즉시 (2026-09-29, 결정 86)
 - YouTube 시크바를 누르고 있는지(`scrubbing`)를 호스트 명령에 실어, 진짜 일시정지는 바로 기록하고 드래그는 "이동" 한 줄로
 - Codex Sol: 첫 검증 FAIL(드래그 중 움직일 때마다 30초 상한이 다시 시작) → 시작 시각 기준으로 수정 → 재검증 1회 PASS (검토 범위 complete)
