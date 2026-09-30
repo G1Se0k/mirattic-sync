@@ -16,3 +16,6 @@ build/
 # Provider logo originals (kept locally; the app uses packages/ui/src/assets)
 packages/ui/assets-source/
 output/
+
+# Chrome Web Store listing images, kept locally (not in the repo)
+docs/store-assets/
