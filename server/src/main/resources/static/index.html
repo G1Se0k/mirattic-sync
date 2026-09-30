@@ -9,17 +9,19 @@
 <meta property="og:description" content="친구와 같은 영상을 같은 순간에 보는 Chrome 확장프로그램.">
 <meta property="og:image" content="https://sync.mirattic.com/landing/1-watch-together.jpg">
 <link rel="icon" href="/landing/logo-64.png">
-<!-- The app's own palette and type (packages/ui/src/App.css), so the site reads like the product. -->
+<!-- Tokens from Mirattic/DESIGN .md (primary #2563eb, 12px radius, rounded buttons, elevated cards); dark values are ours. Shared with mirattic.com. -->
 <style>
   :root {
-    --fg: #1c1c1e; --bg: #f7f7f5; --surface: #ffffff; --muted: #6f6f75; --line: #e6e5e1;
-    --strong: #1c1c1e; --on-strong: #ffffff; --shade: rgba(28, 28, 30, 0.08);
+    --fg: #191f28; --bg: #ffffff; --surface: #ffffff; --muted: #4e5968; --line: #e5e8eb;
+    --strong: #2563eb; --strong-hover: #1d4ed8; --on-strong: #ffffff; --weak-bg: #e8f3ff; --weak-fg: #1b64da;
+    --shade: rgba(0, 23, 51, 0.14); --tint: #e8f3ff; --radius: 12px;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --fg: #ececea; --bg: #171717; --surface: #202020; --muted: #9b9b98; --line: #2e2e2d;
-      --strong: #ececea; --on-strong: #171717; --shade: rgba(0, 0, 0, 0.4);
+      --fg: #f2f4f6; --bg: #101318; --surface: #1a1e25; --muted: #b0b8c1; --line: #2c323b;
+      --strong: #2563eb; --strong-hover: #1d4ed8; --on-strong: #ffffff; --weak-bg: #172a4d; --weak-fg: #9cc2ff;
+      --shade: rgba(0, 0, 0, 0.6); --tint: #172a4d;
       color-scheme: dark;
     }
   }
@@ -37,7 +39,7 @@
   .mark { width: 28px; height: 28px; }
   .wordmark { font-weight: 700; font-size: 17px; letter-spacing: -0.02em; }
   .wordmark span { color: var(--muted); font-weight: 500; }
-  header .install-small { margin-left: auto; font-size: 14px; font-weight: 600; text-decoration: none; }
+  header .install-small { margin-left: auto; font-size: 14px; font-weight: 600; text-decoration: none; color: var(--weak-fg); }
   header .install-small:hover { text-decoration: underline; text-underline-offset: 4px; }
 
   .hero { display: grid; grid-template-columns: 5fr 7fr; gap: 56px; align-items: center; padding-top: 56px; padding-bottom: 88px; }
@@ -45,17 +47,19 @@
   .lead { margin: 22px 0 0; font-size: 18px; color: var(--muted); max-width: 30em; }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 34px; }
   .button {
-    display: inline-flex; align-items: center; gap: 10px; padding: 14px 22px; border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 12px 22px; border-radius: var(--radius);
     background: var(--strong); color: var(--on-strong); font-weight: 600; font-size: 16px; text-decoration: none;
-    transition: transform 0.12s ease;
+    transition: background-color 0.12s ease, transform 0.12s ease;
   }
-  .button:hover { transform: translateY(-1px); }
+  .button:hover { background: var(--strong-hover); }
+  .button:active { transform: scale(0.98); }
+  .button:focus-visible, a:focus-visible { outline: 2px solid var(--strong); outline-offset: 2px; border-radius: var(--radius); }
   .button img { width: 22px; height: 22px; }
   .note { font-size: 14px; color: var(--muted); }
   .providers { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 44px; font-size: 14px; color: var(--muted); }
   .providers span { display: inline-flex; align-items: center; gap: 7px; }
   .providers img { width: 18px; height: 18px; border-radius: 4px; }
-  .shot { border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 24px 60px -24px var(--shade); overflow: hidden; background: var(--surface); }
+  .shot { border-radius: var(--radius); border: 1px solid var(--line); box-shadow: 0 24px 60px -24px var(--shade); overflow: hidden; background: var(--surface); }
 
   section { padding: 88px 0; border-top: 1px solid var(--line); }
   .label { font-size: 14px; font-weight: 600; color: var(--muted); margin: 0 0 14px; }
@@ -95,11 +99,6 @@
     header .install-small { display: none; }
     .pair { grid-template-columns: 1fr; }
   }
-  /* Store-review notice: remove with the <dialog> and script at the end of <body> once the listing is live. */
-  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--fg); padding: 28px; max-width: min(360px, calc(100vw - 32px)); text-align: center; }
-  dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
-  dialog p { margin: 0 0 22px; }
-  dialog .button { border: 0; cursor: pointer; font: inherit; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -190,16 +189,5 @@
     <span class="fine">YouTube, Netflix, 라프텔은 각 회사의 상표이며, Mirattic Sync는 이들과 제휴하거나 승인받은 서비스가 아닙니다.</span>
   </div>
 </footer>
-<dialog id="review">
-  <p>Chrome 웹 스토어 심사 중입니다.<br>승인되면 바로 설치할 수 있어요.</p>
-  <form method="dialog"><button class="button">확인</button></form>
-</dialog>
-<script>
-  document.querySelectorAll('a[href^="https://chromewebstore.google.com/"]').forEach(a => ['click', 'auxclick'].forEach(t => a.addEventListener(t, e => {
-    if (e.button > 1) return; // leave the right-click menu alone
-    e.preventDefault();
-    document.getElementById('review').showModal();
-  })));
-</script>
 </body>
 </html>
