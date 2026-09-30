@@ -1014,9 +1014,14 @@ class RoomFlowTest extends IntegrationTest {
 		friendWs.send(event("room:join", roomId, "{}"));
 		friendWs.nextOfType("playback:update");
 		Client second = connect(me);
-		// Whatever the first still sends before its close lands counts for nothing.
-		first.send("{\"type\":\"chat:message\",\"roomId\":\"%s\",\"payload\":{\"text\":\"late\"}}".formatted(roomId));
+		// Told once the server switched (the switch can land a moment after the client's handshake): whatever the
+		// first sends from then on, before its close lands, counts for nothing.
 		assertThat(first.nextOfType("session:replaced")).isNotNull();
+		try {
+			first.send("{\"type\":\"chat:message\",\"roomId\":\"%s\",\"payload\":{\"text\":\"late\"}}".formatted(roomId));
+		} catch (IllegalStateException | java.io.IOException closedAlready) {
+			// the close landed first: nothing sent either
+		}
 		assertThat(friendWs.nextOfType("chat:message")).isNull();
 		for (int i = 0; i < 100 && first.session().isOpen(); i++) {
 			Thread.sleep(20);
