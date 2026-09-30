@@ -95,6 +95,11 @@
     header .install-small { display: none; }
     .pair { grid-template-columns: 1fr; }
   }
+  /* Store-review notice: remove with the <dialog> and script at the end of <body> once the listing is live. */
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--fg); padding: 28px; max-width: min(360px, calc(100vw - 32px)); text-align: center; }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+  dialog p { margin: 0 0 22px; }
+  dialog .button { border: 0; cursor: pointer; font: inherit; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -185,5 +190,16 @@
     <span class="fine">YouTube, Netflix, 라프텔은 각 회사의 상표이며, Mirattic Sync는 이들과 제휴하거나 승인받은 서비스가 아닙니다.</span>
   </div>
 </footer>
+<dialog id="review">
+  <p>Chrome 웹 스토어 심사 중입니다.<br>승인되면 바로 설치할 수 있어요.</p>
+  <form method="dialog"><button class="button">확인</button></form>
+</dialog>
+<script>
+  document.querySelectorAll('a[href^="https://chromewebstore.google.com/"]').forEach(a => ['click', 'auxclick'].forEach(t => a.addEventListener(t, e => {
+    if (e.button > 1) return; // leave the right-click menu alone
+    e.preventDefault();
+    document.getElementById('review').showModal();
+  })));
+</script>
 </body>
 </html>
