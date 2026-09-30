@@ -205,9 +205,13 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** Host only (decision 79): makes another member the host. */
     makeHost: (id: string, userId: string) => authed<void>("POST", `/api/rooms/${id}/host`, { userId }),
     /** Asks an online friend to watch together; they get `watch:request`. 409 offline, 429 asked recently. */
-    requestWatch: (friendId: string) => authed<void>("POST", "/api/rooms/requests", { friendId }),
+    requestWatch: (friendId: string) =>
+      authed<{ askedAt?: number } | undefined>("POST", "/api/rooms/requests", { friendId }), // older servers: no body
     /** The friends I asked to watch together and still wait for (closed by their invite or my cancel). */
     openWatchRequests: () => authed<string[]>("GET", "/api/rooms/requests"),
+    /** The same, each with its time left (decision 87). */
+    outgoingWatchRequests: () =>
+      authed<{ friendId: string; expiresInMs: number; askedAt?: number }[]>("GET", "/api/rooms/requests/outgoing"),
     /** Takes a watch request back; the friend gets `watch:cancel`. 404 if not a friend. */
     cancelWatchRequest: (friendId: string) => authed<void>("DELETE", `/api/rooms/requests/${friendId}`),
     /** Friends' watch requests to me still open (a panel opened after the `watch:request` shows them). */

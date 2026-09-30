@@ -62,11 +62,12 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 | GET | `/api/rooms/invitations` | → `RoomView[]`. 나를 초대한 방들(최신순). 수락·거절 전까지, 초대 후 30초 동안만(결정 87, 다시 초대하면 새로 30초). 각각 `expiresInMs`(남은 시간). 30초가 지난 초대의 수락은 404 |
 | POST | `/api/rooms/{id}/invitation` | → `RoomView`. 초대 수락 → 멤버가 됨, 기존 멤버에게 `room:update`. 초대가 없으면(취소·방 닫힘·차단) 404, 방이 가득 차면 409(초대는 남음) |
 | DELETE | `/api/rooms/{id}/invitation` | → 204. 초대 거절 |
-| POST | `/api/rooms/requests` | `{ friendId }` → 202. 친구에게 같이 보자고 요청 (`watch:request`). 친구가 아니면 404, 오프라인이면 409, 같은 친구에게 30초 안에 다시 보내면 429 |
+| POST | `/api/rooms/requests` | `{ friendId }` → 202 `{ askedAt }`(이 요청의 식별, `watch:decline`에 같은 값). 친구에게 같이 보자고 요청 (`watch:request`). 친구가 아니면 404, 오프라인이면 409, 같은 친구에게 30초 안에 다시 보내면 429 |
 | GET | `/api/rooms/requests` | → `string[]`. 내가 보내고 아직 답을 기다리는 합류 요청의 친구 ID (취소하거나 그 친구의 초대가 오면 닫힘, 30초 뒤 만료, 결정 87). 다시 연 패널이 취소 버튼·자동 입장을 되살림 |
 | DELETE | `/api/rooms/requests/{friendId}` | → 204. 보낸 합류 요청 취소 (`watch:cancel`). 친구가 아니면 404. 다시 요청할 때의 30초 제한은 그대로 |
+| GET | `/api/rooms/requests/outgoing` | → `{ friendId, expiresInMs }[]`. `GET /api/rooms/requests`와 같은 목록에 남은 시간 (다시 연 패널의 요청 안내 바) |
 | GET | `/api/rooms/requests/incoming` | → `(UserSummary & { expiresInMs })[]`. 친구가 나에게 보내 아직 열린 합류 요청과 남은 시간 (응답·취소·무시되면 닫힘, 30초 뒤 만료(결정 87), 그 뒤의 초대는 응답이 아님, 친구가 아니게 되면 제외). 패널이 닫힌 동안 온 요청도 다시 연 패널이 보여 줌 |
-| DELETE | `/api/rooms/requests/incoming/{friendId}` | → 204. 받은 합류 요청 무시: 다시 나오지 않고 이후의 초대는 그 응답으로 치지 않음. 요청한 사람에게는 알리지 않음 |
+| DELETE | `/api/rooms/requests/incoming/{friendId}` | → 204. 받은 합류 요청 무시: 다시 나오지 않고 이후의 초대는 그 응답으로 치지 않음. 요청한 사람에게 `watch:decline`(열린 요청이 있을 때 한 번) |
 | POST | `/api/rooms/join` | `{ code }` → `RoomView`. 방 코드(대소문자·`-` 무시)를 아는 누구나 MEMBER로 입장, 이미 멤버면 그대로(결정 77). 없는 코드·기존 멤버와 차단 관계 404, 8명 가득 409, 사용자당 분당 10번 초과 429. 새로 들어오면 기존 멤버에게 `room:update` |
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
 | GET | `/api/rooms/{id}` | `RoomView` `{ id, content, members: [{ user, role, present }], createdAt, unread, muted, code }` (`code` = 방 코드 8자, 결정 77) |

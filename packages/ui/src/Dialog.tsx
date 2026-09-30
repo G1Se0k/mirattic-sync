@@ -37,11 +37,19 @@ export function Dialog({ title, children, onClose, alert }: {
  * Time left, as a bar along the dialog's bottom edge that empties by `until` (epoch ms) out of `total` ms. Read
  * once when it mounts (a CSS animation from there): key it by what it times, so a new one starts over.
  */
-export function TimeBar({ until, total }: { until: number; total: number }) {
+export function TimeBar({ until, total, inline, danger }: {
+  until: number;
+  total: number;
+  /** Under a line of text rather than along a dialog's edge. */
+  inline?: boolean;
+  /** Red (something failed, shown for a moment). */
+  danger?: boolean;
+}) {
   const [left] = useState(() => Math.max(0, Math.min(total, until - Date.now())));
   const style = { animationDuration: `${left}ms`, "--from": `${(left / total) * 100}%` } as CSSProperties;
   return (
-    <div className="timebar" role="progressbar" aria-label="남은 시간" aria-valuemin={0} aria-valuemax={total}>
+    <div className={`timebar${inline ? " inline" : ""}${danger ? " danger" : ""}`} role="progressbar" aria-label="남은 시간"
+      aria-valuemin={0} aria-valuemax={total}>
       <i style={style} />
     </div>
   );

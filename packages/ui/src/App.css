@@ -163,6 +163,8 @@ dialog {
 .timebar { height: 3px; margin: 4px -16px -16px; overflow: hidden; border-radius: 0 0 11px 11px; background: var(--line); }
 .timebar > i { display: block; height: 100%; background: var(--accent); animation: timebar linear forwards; }
 @keyframes timebar { from { width: var(--from); } to { width: 0; } }
+.timebar.inline { margin: 6px 0 0; border-radius: 2px; }
+.timebar.danger > i { background: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .timebar > i { animation-timing-function: steps(30); } }
 dialog h2 { margin-top: 0; font-size: 14px; color: var(--fg); text-transform: none; letter-spacing: 0; }
 dialog .row { justify-content: flex-end; }

@@ -197,7 +197,7 @@ class RoomController {
 
 	@PostMapping("/requests")
 	@ResponseStatus(HttpStatus.ACCEPTED)
-	void requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body) {
+	Asked requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body) {
 		UserSummary me = rooms.requestWatch(jwt.getSubject(), body.friendId());
 		if (!hub.isOnline(body.friendId())) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "friend is offline");
@@ -217,6 +217,14 @@ class RoomController {
 		openWatchRequests.put(me.id() + ">" + body.friendId(), now);
 		hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now,
 				new IncomingRequest(me.id(), me.displayName(), OPEN_WATCH_REQUEST_MS)));
+		return new Asked(now);
+	}
+
+	/**
+	 * Which request this is (when it was made): a `watch:decline` names the request it declines, so a late one for
+	 * an earlier request can't clear a newer one.
+	 */
+	record Asked(long askedAt) {
 	}
 
 	/**
@@ -292,6 +300,22 @@ class RoomController {
 				.toList();
 	}
 
+	/** My watch requests still waiting, each with its time left (a reopened panel shows how long). */
+	@GetMapping("/requests/outgoing")
+	List<OutgoingRequest> outgoingWatchRequests(@AuthenticationPrincipal Jwt jwt) {
+		String prefix = jwt.getSubject() + ">";
+		long now = System.currentTimeMillis();
+		return openWatchRequests.entrySet().stream()
+				.filter(e -> e.getKey().startsWith(prefix) && now - e.getValue() < OPEN_WATCH_REQUEST_MS)
+				.map(e -> new OutgoingRequest(e.getKey().substring(prefix.length()), OPEN_WATCH_REQUEST_MS - (now - e.getValue()),
+						e.getValue()))
+				.toList();
+	}
+
+	/** A watch request of mine to a friend, with its time left. */
+	record OutgoingRequest(String friendId, long expiresInMs, long askedAt) {
+	}
+
 	/**
 	 * Friends' watch requests to me still open (not answered, cancelled or dismissed, still in time), with the
 	 * time left: a panel opened after the `watch:request` shows them again.
@@ -313,13 +337,20 @@ class RoomController {
 
 	/**
 	 * Dismisses a friend's watch request to me ("무시"): it no longer comes back, and a later invite doesn't count
-	 * as its answer. The requester isn't told (as before); they may ask again after the 30 s limit.
+	 * as its answer. The requester is told (`watch:decline`, userId = me); they may ask again after the 30 s limit.
 	 */
 	@DeleteMapping("/requests/incoming/{friendId}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void dismissWatchRequest(@AuthenticationPrincipal Jwt jwt, @PathVariable String friendId) {
+		Long removed;
 		synchronized (answerLock) {
-			openWatchRequests.remove(friendId + ">" + jwt.getSubject());
+			removed = openWatchRequests.remove(friendId + ">" + jwt.getSubject());
+		}
+		// The requester's panel shows it was declined: once (a second dismissal sends nothing), and only while it
+		// still counted (an expired one just goes).
+		if (removed != null && System.currentTimeMillis() - removed < OPEN_WATCH_REQUEST_MS) {
+			hub.sendEvent(friendId, new ServerEvent("watch:decline", null, jwt.getSubject(), null, System.currentTimeMillis(),
+					new Asked(removed)));
 		}
 	}
 

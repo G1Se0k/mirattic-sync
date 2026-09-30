@@ -43,6 +43,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * A join request of mine the friend declined: "요청이 거절되었습니다" with a red bar until `until`. (The waiting
+   * line is worked out from `asked` as it renders, so it follows every change to it.)
+   */
+  const [declined, setDeclined] = useState<{ friendId: string; until: number } | null>(null);
   const [watchRequests, setWatchRequests] = useState<UserSummary[]>([]);
   /** Rooms inviting me (decision 85): shown as banners until I accept or decline. */
   const [invitations, setInvitations] = useState<RoomView[]>([]);
@@ -70,15 +75,38 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   /** Friends I asked to watch together: their invite then opens the room by itself. */
   const [asked, setAsked] = useState<string[]>([]);
   /** A request on its way: its cancel waits, or the server wouldn't know the request yet. */
-  const [asking, setAsking] = useState<string | null>(null);
+  const [asking, setAsking] = useState<string[]>([]);
+  /**
+   * Which request to each friend is mine now (the server's `askedAt`): a `watch:decline` naming another (earlier)
+   * one is stale. A decline arriving while that friend's request call is still out waits for its answer.
+   */
+  const askedAt = useRef(new Map<string, number>());
+  const pendingDeclines = useRef(new Map<string, number | undefined>());
+  /** Friends whose request call is out, known at once (the events come outside renders). */
+  const inFlight = useRef(new Set<string>());
+  /** The friend dismissed my request `at` (if named): unless a newer one of mine is out, no longer waiting. */
+  const decline = (friendId: string, at: number | undefined) => {
+    const mine = askedAt.current.get(friendId);
+    if (at !== undefined && mine !== undefined && at !== mine) return; // an earlier request's
+    settledAsks.current.add(friendId);
+    setAsked((list) => list.filter((id) => id !== friendId));
+    const until = Date.now() + DECLINED_SHOWN_MS;
+    setDeclined({ friendId, until });
+    setTimeout(() => setDeclined((d) => (d?.until === until ? null : d)), DECLINED_SHOWN_MS);
+  };
   /** Requests I cancelled or that were answered since this panel opened: a late listing mustn't bring them back. */
   const settledAsks = useRef(new Set<string>());
   // A reopened panel: the requests still out, from the server (only the cancel button; entering is the server's
   // `watch:answer`).
   useEffect(() => {
-    api.openWatchRequests().then(
-      (ids) => {
-        ids.forEach((id) => deadlines.current.has(`a:${id}`) || expireIn(`a:${id}`)); // at most 30 s left
+    // With their time left; a server without it yet: the ids only (then at most 30 s left).
+    api.outgoingWatchRequests().catch(() =>
+      api.openWatchRequests().then((ids) => ids.map((friendId) => ({ friendId, expiresInMs: undefined as number | undefined, askedAt: undefined as number | undefined }))),
+    ).then(
+      (outgoing) => {
+        const ids = outgoing.map((r) => r.friendId);
+        outgoing.forEach((r) => r.askedAt === undefined || askedAt.current.has(r.friendId) || askedAt.current.set(r.friendId, r.askedAt));
+        outgoing.forEach((r) => deadlines.current.has(`a:${r.friendId}`) || expireIn(`a:${r.friendId}`, r.expiresInMs));
         setAsked((list) => [...new Set([...list, ...ids.filter((id) => !settledAsks.current.has(id))])]);
       },
       () => {},
@@ -152,14 +180,17 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       ]);
       // Only the newest load, and not one started before I answered an invitation: it would bring it back.
       if (invites === invitationLoads.current) {
-        inv.forEach((room) => deadlines.current.set(`i:${room.id}`, invAt + (room.expiresInMs ?? INCOMING_MS)));
+        // The server's time left; else what the alert over the video counted (a server not sending it yet).
+        inv.forEach((room) => deadlines.current.set(`i:${room.id}`, room.expiresInMs !== undefined
+          ? invAt + room.expiresInMs : platform.alertUntil?.("invite", room.id) ?? invAt + INCOMING_MS));
         setInvitations(inv);
       }
       // Likewise the newest for watch requests, with what came, was cancelled, answered or dismissed meanwhile.
       if (wr && asks === requestLoads.current) {
         // A request that came, went or was answered meanwhile keeps the deadline its event set.
         const changed = new Set(requestChanges.current.filter((c) => c.n > since).map((c) => c.user.id));
-        wr.forEach((u) => changed.has(u.id) || deadlines.current.set(`r:${u.id}`, wrAt + (u.expiresInMs ?? INCOMING_MS)));
+        wr.forEach((u) => changed.has(u.id) || deadlines.current.set(`r:${u.id}`, u.expiresInMs !== undefined
+          ? wrAt + u.expiresInMs : platform.alertUntil?.("request", u.id) ?? wrAt + INCOMING_MS));
         const open = wr.filter((u) => !dismissing.current.has(u.id));
         setWatchRequests(applyRequestChanges(open, requestChanges.current.filter((c) => c.n > since)));
       }
@@ -206,6 +237,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           setAsked((list) => list.filter((id) => id !== friendId));
           setNotice(null);
           setOpenRoom(event.roomId);
+        }
+        // The friend I asked dismissed it: no longer waiting, and told so for a moment.
+        if (event.type === "watch:decline" && event.userId) {
+          const declinedAt = (event.payload as { askedAt?: number } | null)?.askedAt;
+          if (inFlight.current.has(event.userId)) pendingDeclines.current.set(event.userId, declinedAt);
+          else decline(event.userId, declinedAt);
         }
         if (event.type === "chat:message" && without([event.payload as ChatMessage], deletedChats.current).length) {
           const m = event.payload as ChatMessage;
@@ -324,10 +361,15 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     settledAsks.current.delete(friend.id); // asked again: a listing may show it
     expireIn(`a:${friend.id}`); // counts 30 s: its cancel button goes then
     setAsked((list) => [...list.filter((id) => id !== friend.id), friend.id]);
-    setAsking(friend.id);
+    setAsking((list) => [...list, friend.id]);
+    inFlight.current.add(friend.id);
+    pendingDeclines.current.delete(friend.id);
+    askedAt.current.delete(friend.id);
     try {
-      await api.requestWatch(friend.id);
-      setNotice(`${friend.displayName}님에게 같이 보자고 요청했습니다. 초대가 오면 바로 입장합니다.`);
+      const at = (await api.requestWatch(friend.id))?.askedAt;
+      if (at !== undefined) askedAt.current.set(friend.id, at);
+      // A decline that came while the call was out: this request's (same askedAt, or unnamed), or an earlier one's.
+      if (pendingDeclines.current.has(friend.id)) decline(friend.id, pendingDeclines.current.get(friend.id));
     } catch (e) {
       const status = e instanceof ApiError ? e.status : 0;
       if (status > 0) setAsked((list) => list.filter((id) => id !== friend.id)); // refused (429: asked, then took it back)
@@ -340,7 +382,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       }
       setError(status === 409 ? "친구가 오프라인입니다." : status === 429 ? "방금 요청했습니다. 잠시 후 다시 시도하세요." : "요청하지 못했습니다.");
     } finally {
-      setAsking(null);
+      inFlight.current.delete(friend.id);
+      pendingDeclines.current.delete(friend.id);
+      setAsking((list) => list.filter((id) => id !== friend.id));
     }
   }
 
@@ -414,6 +458,23 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     return () => clearInterval(t);
   }, [counting]);
 
+  // My join request (or its decline), at the top of the list or the room.
+  // First a decline (for its moment), else a request of mine still in time and already sent.
+  const waitingFor = asked.find((id) => !asking.includes(id) && live(`a:${id}`));
+  const nameOf = (id: string) => friends.find((f) => f.user.id === id)?.user.displayName ?? "친구";
+  const askLine = declined && declined.until > now ? (
+    <div className="ask-status" role="status">
+      <p className="error">요청이 거절되었습니다.</p>
+      <TimeBar key={`d:${declined.friendId}:${declined.until}`} until={declined.until} total={DECLINED_SHOWN_MS} inline danger />
+    </div>
+  ) : waitingFor ? (
+    <div className="ask-status" role="status">
+      <p className="muted">{nameOf(waitingFor)}님에게 같이 보자고 요청했습니다. 초대가 오면 바로 입장합니다.</p>
+      <TimeBar key={`a:${waitingFor}:${deadlines.current.get(`a:${waitingFor}`)}`} until={deadlines.current.get(`a:${waitingFor}`)!}
+        total={INCOMING_MS} inline />
+    </div>
+  ) : null;
+
   // One at a time, like the room's pause request: invitations first, then watch requests; only those in time.
   const invited = invitations.find((r) => live(`i:${r.id}`));
   const invitingHost = invited?.members.find((m) => m.role === "HOST")?.user;
@@ -457,6 +518,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     return (
       <div className="room-page">
         {error && <div className="banner"><p className="error grow" role="alert">{error}</p></div>}
+        {askLine && <div className="banner"><div className="grow">{askLine}</div></div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
         <Room key={openRoom} roomId={openRoom} me={me} handle={handle} socket={socket} status={status} subscribe={subscribe}
           onClose={closeRoom}
@@ -488,6 +550,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       {incoming}
       <main className="container">
         {error && <p className="error" role="alert">{error}</p>}
+        {askLine}
         {notice && <p className="muted">{notice}</p>}
         <div className="card">
           {watching ? (
@@ -574,7 +637,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 </div>
                 <span className="actions">
                   {asked.includes(f.user.id) && live(`a:${f.user.id}`) ? (
-                    <IconButton icon="close" label="합류 요청 취소" disabled={asking === f.user.id} onClick={() => void cancelWatch(f.user)} />
+                    <IconButton icon="close" label="합류 요청 취소" disabled={asking.includes(f.user.id)} onClick={() => void cancelWatch(f.user)} />
                   ) : f.presence.status === "WATCHING" && (
                     <IconButton icon="join" label="합류 요청" onClick={() => void requestWatch(f.user)} />
                   )}
@@ -777,6 +840,8 @@ export function applyRequestChanges(list: UserSummary[], changes: RequestChange[
 
 const ROOMS_REFETCH_MS = 500;
 const MAX_DELETED = 100;
+/** How long "요청이 거절되었습니다" shows. */
+const DECLINED_SHOWN_MS = 5_000;
 
 const noSubscribe = () => () => {};
 const nothing = () => null;

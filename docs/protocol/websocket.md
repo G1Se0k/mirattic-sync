@@ -62,6 +62,7 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `watch:request` | S→C | `UserSummary` + `expiresInMs` (30000) | 친구가 같이 보자고 요청함 (30초 동안 유효, 결정 87) (`POST /api/rooms/requests`). `userId` = 요청한 사람. 받은 사람은 초대(`POST /api/rooms` 또는 `/api/rooms/{id}/invites`)로 응답 |
 | `watch:cancel` | S→C | `UserSummary` | 친구가 합류 요청을 취소함 (`DELETE /api/rooms/requests/{friendId}`). `userId` = 요청했던 사람. 받은 사람은 그 요청 배너를 지움 |
 | `session:replaced` | S→C | 없음 | 같은 계정의 다른 기기가 연결함 (결정 89). 곧 close code 4001로 닫힘 |
+| `watch:decline` | S→C | `{ askedAt }` (거절한 요청) | 내가 합류 요청한 친구가 무시함 (`DELETE /api/rooms/requests/incoming/{id}`, 영상 없는 페이지로 가서 자동 무시 포함). `userId` = 친구. 요청 패널에 "요청이 거절되었습니다" 5초 |
 | `watch:answer` | S→C | 없음 | 내가 합류 요청한 친구가 초대로 응답함 (이미 멤버가 됨, `room:invite`는 오지 않음). `roomId` = 그 방, `userId` = 친구. 받은 앱은 그 방으로 바로 입장. 서버에 열린 요청이 있을 때만 (다른 초대에는 없음) |
 | `room:update` | S→C | 없음, 또는 `{ muted }` | 참가 / 나감 / 방 닫힘 시 모든 멤버에게. 클라이언트는 `GET /api/rooms/{id}`로 다시 조회 (404면 닫힘). 채팅 알림 설정을 바꾸면 그 사용자의 연결에만 `{ muted }`를 담아 보냄 → 조회 응답 전에 바로 적용 |
 | `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt, scrubbing? }` | HOST만 (`not_host`). `scrubbing`(결정 86): 호스트가 시크바를 누르고 있는지 — 페이지가 알 수 있을 때만(YouTube). `false`인 일시정지는 방 기록에 바로, `true`는 드래그가 끝날 때까지 붙잡음, 없으면 1초 붙잡음. `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회 |

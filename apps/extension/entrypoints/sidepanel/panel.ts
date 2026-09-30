@@ -24,7 +24,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
   const replies = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void }>();
   let nextId = 0;
   let shared: Shared = {
-    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, experiments: { netflix: false, laftel: false }, activeRoom: null,
+    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, experiments: { netflix: false, laftel: false }, activeRoom: null, alertsUntil: {},
   };
   let status: SocketStatus = 'closed';
   let socketHandlers: { onEvent(event: ServerEvent): void; onStatus(status: SocketStatus): void } | null = null;
@@ -128,6 +128,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
       setAskOnSwitch: (ask) => browser.storage.local.set({ [ASK_ON_SWITCH_KEY]: ask }),
     },
     activeRoom: () => shared.activeRoom,
+    alertUntil: (kind, target) => shared.alertsUntil[`${kind}:${target}`],
     subscribe: (onChange) => {
       subscribers.add(onChange);
       return () => void subscribers.delete(onChange);

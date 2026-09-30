@@ -47,6 +47,8 @@ export type Platform = {
   connect(handlers: { onEvent(event: ServerEvent): void; onStatus(status: SocketStatus): void }): Socket;
   /** The room's live side, run in the background (it keeps going when the panel closes). */
   room(roomId: string): RoomHandle;
+  /** When an invitation or watch request alerted before the panel opened runs out (epoch ms), if known. */
+  alertUntil?(kind: "invite" | "request", target: string): number | undefined;
   /** The room the app is still in (the extension keeps it when the panel closes). */
   activeRoom?(): string | null;
   /** Provider control the user turns on at their own risk (Netflix, Laftel). Absent = not offered in this app. */

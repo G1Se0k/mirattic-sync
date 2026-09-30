@@ -66,6 +66,7 @@ export default defineBackground(() => {
       laftel: platform?.experimental?.enabled('laftel') ?? false,
     },
     activeRoom: room && !room.state.closed ? room.state.roomId : null,
+    alertsUntil: Object.fromEntries([...alertUntil].filter(([, until]) => until > Date.now())),
   });
   const pushShared = () => broadcast({ kind: 'shared', shared: shared() });
 
@@ -76,19 +77,39 @@ export default defineBackground(() => {
    * A panel opening clears them all. Chat never alerts here. `alerts`: the ones still counting, newest first.
    */
   let alerts: Alert[] = [];
+  let alertIds = Date.now() * 1000; // rising across worker restarts too: a page never mistakes a new alert for an old one
   let publishing = Promise.resolve();
+  /**
+   * When each alert runs out, kept past the panel opening (which clears the alerts): the panel counts the same
+   * time down, even from a server that doesn't send the time left.
+   */
+  const alertUntil = new Map<string, number>();
   /** Invitations waiting for their channel lookup, by room: only the latest lookup shows, if not settled meanwhile. */
   const pendingInvites = new Map<string, object>();
 
   /** `ms`: how long it counts (decision 87: 30 s): the toast shows that long, the badge counts it that long. */
   function alert(kind: AlertKind, target: string, ms: number, title: string, body = '', meta?: string) {
-    if (!meId || ports.size) return; // signed out: nothing; a panel open: it shows it
-    const toast = { type: TOAST, kind, target, ms, title, meta, body, panelOpen: false } as const;
+    if (!meId || ports.size) return; // signed out: nothing; a panel open: it shows it (recordEnd ran)
+    const toast = { type: TOAST, kind, target, ms, title, meta, body, panelOpen: false, alertId: ++alertIds } as const;
     const entry: Alert = { kind, target, title, toast, until: Date.now() + ms };
+    for (const [key, until] of alertUntil) if (until <= Date.now()) alertUntil.delete(key);
+    alertUntil.set(`${kind}:${target}`, entry.until);
     alerts = [entry, ...alerts.filter((a) => a.kind !== kind || a.target !== target)];
     toastOverVideo(toast, entry);
     publishAlerts();
     setTimeout(() => dropAlerts((a) => a === entry), ms);
+  }
+
+  /**
+   * A new invitation or watch request counts from now (the server's time left): its end is saved as it arrives —
+   * before the panel hears of it, before any lookup — replacing an earlier one's.
+   */
+  function recordEnd(event: ServerEvent) {
+    const payload = event.payload as (RoomView | IncomingRequest) & { expiresInMs?: number };
+    const key = event.type === 'room:invite' ? `invite:${payload.id}` : event.type === 'watch:request' ? `request:${payload.id}` : null;
+    if (!key) return;
+    alertUntil.set(key, Date.now() + (payload.expiresInMs ?? INCOMING_MS));
+    if (ports.size) pushShared();
   }
 
   /**
@@ -133,9 +154,10 @@ export default defineBackground(() => {
     for (const { kind, target } of settled) toTabs({ type: TOAST_DISMISS, kind, target });
   }
 
-  /** Still counting: only then do its buttons do anything. */
-  const active = (kind: AlertKind, target: string) =>
-    alerts.some((a) => a.kind === kind && a.target === target && a.until > Date.now());
+  /** Still counting, and (if named) the same alert — not an earlier one for the same friend or room. */
+  const active = (kind: AlertKind, target: string, alertId?: number) =>
+    alerts.some((a) => a.kind === kind && a.target === target && a.until > Date.now()
+      && (alertId === undefined || a.toast.alertId === alertId));
 
   /**
    * Badge and tooltip follow `alerts` as it is when each step runs, one step at a time: a clear queued after an
@@ -277,6 +299,7 @@ export default defineBackground(() => {
       },
       onEvent: (event) => {
         room?.handle(event);
+        recordEnd(event); // before the panel hears of it (it reloads on it)
         broadcast({ kind: 'event', event });
         alertFor(event);
         if (event.type === 'chat:message' && event.roomId === room?.state.roomId) markRead(500);
@@ -435,6 +458,7 @@ export default defineBackground(() => {
 
   function signOut() {
     session++;
+    alertUntil.clear(); // another account may sign in next (shared with the panel by closeRoom below)
     void markReplaced(false); // the next sign-in connects
     clearAlerts();
     closeRoom();
@@ -473,7 +497,7 @@ export default defineBackground(() => {
       }
       return;
     }
-    if (m?.type !== TOAST_ANSWER || !active(m.kind, m.target)) return; // settled meanwhile: nothing to do
+    if (m?.type !== TOAST_ANSWER || !active(m.kind, m.target, m.alertId)) return; // settled or replaced meanwhile
     // First, while the click may still count as the user's gesture; entering a room shows in it.
     if (m.accept && m.kind !== 'pause') void browser.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
     void answerAlert(m);

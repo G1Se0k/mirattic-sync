@@ -1077,11 +1077,17 @@ class RoomFlowTest extends IntegrationTest {
 		call(HttpMethod.POST, "/api/rooms/requests", asker.accessToken(), "{\"friendId\":\"" + host.id() + "\"}")
 				.andExpect(status().isAccepted());
 		assertThat(hostWs.nextOfType("watch:request").path("payload").path("expiresInMs").asLong()).isEqualTo(30_000);
+		JsonNode outgoing = body(call(HttpMethod.GET, "/api/rooms/requests/outgoing", asker.accessToken(), null));
+		assertThat(outgoing.get(0).path("friendId").asString()).isEqualTo(host.id());
+		assertThat(outgoing.get(0).path("expiresInMs").asLong()).isBetween(1L, 30_000L);
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null)).get(0)
 				.path("expiresInMs").asLong()).isBetween(1L, 30_000L);
 		roomController.openWatchRequests.replaceAll((k, at) -> at - 31_000);
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null)).size()).isZero();
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests", asker.accessToken(), null)).size()).isZero();
+		call(HttpMethod.DELETE, "/api/rooms/requests/incoming/" + asker.id(), host.accessToken(), null)
+				.andExpect(status().isNoContent());
+		assertThat(askerWs.nextOfType("watch:decline")).isNull(); // already over: not "declined"
 		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + asker.id() + "\"]}")
 				.andExpect(status().isOk());
 		assertThat(askerWs.nextOfType("room:invite")).isNotNull(); // too late to answer it: a plain invitation
@@ -1095,8 +1101,10 @@ class RoomFlowTest extends IntegrationTest {
 		befriend(host, me);
 		connect(host);
 		inviteToNewRoom(host, me); // an invitation I ignore
-		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), "{\"friendId\":\"" + host.id() + "\"}")
-				.andExpect(status().isAccepted());
+		long askedAt = body(call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), "{\"friendId\":\"" + host.id() + "\"}")
+				.andExpect(status().isAccepted())).path("askedAt").asLong();
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/outgoing", me.accessToken(), null)).get(0).path("askedAt")
+				.asLong()).isEqualTo(askedAt);
 
 		// A panel opened after the watch:request still shows it.
 		JsonNode incoming = body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null));
@@ -1104,9 +1112,16 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(incoming.get(0).path("id").asString()).isEqualTo(me.id());
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", me.accessToken(), null)).size()).isZero();
 
-		// Dismissed: gone, and a later invite is not its answer.
+		// Dismissed: gone, the requester is told (once), and a later invite is not its answer.
+		Client meWs = connect(me);
 		call(HttpMethod.DELETE, "/api/rooms/requests/incoming/" + me.id(), host.accessToken(), null)
 				.andExpect(status().isNoContent());
+		JsonNode decline = meWs.nextOfType("watch:decline");
+		assertThat(decline.path("userId").asString()).isEqualTo(host.id());
+		assertThat(decline.path("payload").path("askedAt").asLong()).isEqualTo(askedAt); // which request
+		call(HttpMethod.DELETE, "/api/rooms/requests/incoming/" + me.id(), host.accessToken(), null)
+				.andExpect(status().isNoContent());
+		assertThat(meWs.nextOfType("watch:decline")).isNull();
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null)).size()).isZero();
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests", me.accessToken(), null)).size()).isZero();
 

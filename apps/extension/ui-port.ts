@@ -42,6 +42,8 @@ export type Shared = {
   askOnSwitch: boolean;
   experiments: { netflix: boolean; laftel: boolean };
   activeRoom: string | null;
+  /** When alerts shown before a panel opened run out ("invite:<room>", "request:<friend>"; epoch ms). */
+  alertsUntil: Record<string, number>;
 };
 
 export type ToPanel =
