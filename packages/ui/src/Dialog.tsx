@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 /**
  * Every popup looks the same (the "방 만들기" one): centered over a dimmed screen, a title, the content, and the
@@ -29,6 +29,20 @@ export function Dialog({ title, children, onClose, alert }: {
         <h2>{title}</h2>
         {children}
       </dialog>
+    </div>
+  );
+}
+
+/**
+ * Time left, as a bar along the dialog's bottom edge that empties by `until` (epoch ms) out of `total` ms. Read
+ * once when it mounts (a CSS animation from there): key it by what it times, so a new one starts over.
+ */
+export function TimeBar({ until, total }: { until: number; total: number }) {
+  const [left] = useState(() => Math.max(0, Math.min(total, until - Date.now())));
+  const style = { animationDuration: `${left}ms`, "--from": `${(left / total) * 100}%` } as CSSProperties;
+  return (
+    <div className="timebar" role="progressbar" aria-label="남은 시간" aria-valuemin={0} aria-valuemax={total}>
+      <i style={style} />
     </div>
   );
 }

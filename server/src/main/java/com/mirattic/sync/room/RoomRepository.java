@@ -22,6 +22,6 @@ interface RoomRepository extends JpaRepository<Room, String> {
 	Optional<Room> findByCodeForUpdate(String code);
 
 	/** The rooms inviting this user (decision 85). */
-	@Query("select r from Room r join r.invited u where u = :userId")
+	@Query("select r from Room r join r.invited i where key(i) = :userId")
 	List<Room> findInviting(String userId);
 }

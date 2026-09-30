@@ -8,12 +8,11 @@ import type {
   FriendView,
   Me,
   PresenceView,
-  RoomContent,
   RoomView,
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
-import { episodeLabel, type WatchingInfo } from "@mirattic/types";
+import { episodeLabel, INCOMING_MS, roomToInvite, type IncomingRequest, type WatchingInfo } from "@mirattic/types";
 import { api, platform, SOCKET_URL } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
@@ -23,7 +22,7 @@ import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, ProviderIcon } from "./Icons";
 import { ExperimentControl, isExperiment, useExperiment } from "./Experimental";
-import { Actions, Dialog, useAsk } from "./Dialog";
+import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
 
@@ -49,13 +48,22 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   /** Rooms inviting me (decision 85): shown as banners until I accept or decline. */
   const [invitations, setInvitations] = useState<RoomView[]>([]);
   const invitationLoads = useRef(0);
+  /**
+   * When each invitation ("i:" room) and watch request ("r:" friend) stops counting, and each request I sent
+   * ("a:" friend), on this device's clock (decision 87: 30 s, the server sends the time left). Past it: not shown.
+   */
+  const deadlines = useRef(new Map<string, number>());
+  const [now, setNow] = useState(Date.now);
+  const expireIn = (key: string, ms = INCOMING_MS) => deadlines.current.set(key, Date.now() + ms);
+  const live = (key: string) => (deadlines.current.get(key) ?? 0) > now;
   /** Every change to the watch requests here, numbered: replayed over a list read before it. */
   const requestChanges = useRef<RequestChange[]>([]);
   const requestSeq = useRef(0);
   /** Dismissals the server hasn't confirmed yet: a list read meanwhile may still have them open. */
   const dismissing = useRef(new Set<string>());
   const requestLoads = useRef(0);
-  const changeRequest = (user: UserSummary, open: boolean) => {
+  const changeRequest = (user: IncomingRequest, open: boolean) => {
+    if (open && user.expiresInMs !== undefined) expireIn(`r:${user.id}`, user.expiresInMs);
     const n = ++requestSeq.current;
     requestChanges.current = [...requestChanges.current, { n, user, open }].slice(-MAX_REQUEST_CHANGES);
     setWatchRequests((list) => applyRequestChanges(list, [{ n: 0, user, open }]));
@@ -70,7 +78,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   // `watch:answer`).
   useEffect(() => {
     api.openWatchRequests().then(
-      (ids) => setAsked((list) => [...new Set([...list, ...ids.filter((id) => !settledAsks.current.has(id))])]),
+      (ids) => {
+        ids.forEach((id) => deadlines.current.has(`a:${id}`) || expireIn(`a:${id}`)); // at most 30 s left
+        setAsked((list) => [...new Set([...list, ...ids.filter((id) => !settledAsks.current.has(id))])]);
+      },
       () => {},
     );
   }, []);
@@ -80,6 +91,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const watching = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatching ?? nothing);
   const info = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatchingInfo ?? nothing);
   const activeRoom = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.activeRoom ?? nothing);
+  // The extension entered another room without this screen (an answer on the alert over the video): show it.
+  const lastActive = useRef(activeRoom);
+  useEffect(() => {
+    if (activeRoom && activeRoom !== lastActive.current) setOpenRoom(activeRoom);
+    lastActive.current = activeRoom;
+  }, [activeRoom]);
   // Read by the socket handler, which outlives renders.
   const current = useRef({ rooms, openRoom, asked });
   current.current = { rooms, openRoom, asked };
@@ -138,14 +155,22 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       const invites = ++invitationLoads.current;
       const asks = ++requestLoads.current;
       const since = requestSeq.current;
-      const [f, r, b, rs, inv, wr] = await Promise.all([
-        api.friends(), api.friendRequests(), api.blocked(), api.rooms(), api.invitations(),
-        api.incomingWatchRequests().catch(() => null), // a server without it yet: the live events only
+      // Timed lists keep when they arrived: their time left counts from then, not from the slowest request.
+      const arrived = <T,>(p: Promise<T>) => p.then((v) => [v, Date.now()] as const);
+      const [f, r, b, rs, [inv, invAt], [wr, wrAt]] = await Promise.all([
+        api.friends(), api.friendRequests(), api.blocked(), api.rooms(), arrived(api.invitations()),
+        arrived(api.incomingWatchRequests().catch(() => null)), // a server without it yet: the live events only
       ]);
       // Only the newest load, and not one started before I answered an invitation: it would bring it back.
-      if (invites === invitationLoads.current) setInvitations(inv);
+      if (invites === invitationLoads.current) {
+        inv.forEach((room) => deadlines.current.set(`i:${room.id}`, invAt + (room.expiresInMs ?? INCOMING_MS)));
+        setInvitations(inv);
+      }
       // Likewise the newest for watch requests, with what came, was cancelled, answered or dismissed meanwhile.
       if (wr && asks === requestLoads.current) {
+        // A request that came, went or was answered meanwhile keeps the deadline its event set.
+        const changed = new Set(requestChanges.current.filter((c) => c.n > since).map((c) => c.user.id));
+        wr.forEach((u) => changed.has(u.id) || deadlines.current.set(`r:${u.id}`, wrAt + (u.expiresInMs ?? INCOMING_MS)));
         const open = wr.filter((u) => !dismissing.current.has(u.id));
         setWatchRequests(applyRequestChanges(open, requestChanges.current.filter((c) => c.n > since)));
       }
@@ -176,7 +201,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           void reload();
         }
         if (event.type === "watch:request") {
-          const from = event.payload as UserSummary;
+          const from = event.payload as IncomingRequest;
+          expireIn(`r:${from.id}`, from.expiresInMs);
           changeRequest(from, true);
           notify(`${from.displayName}님이 같이 보자고 합니다`, "눌러서 같이 보기 방을 만들 수 있습니다.");
         }
@@ -196,7 +222,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           const room = event.payload as RoomView;
           const host = room.members.find((m) => m.role === "HOST");
           // From the friend I asked: `watch:answer` enters it, no notification needed.
-          if (!host || !current.current.asked.includes(host.user.id)) {
+          // Not from a friend I asked (still in time: after 30 s it is a plain invitation).
+          const askedHost = host && current.current.asked.includes(host.user.id) && (deadlines.current.get(`a:${host.user.id}`) ?? 0) > Date.now();
+          if (!askedHost) {
             notify(`${host?.user.displayName ?? "친구"}님의 같이 보기 초대`, room.content.title);
           }
         }
@@ -320,6 +348,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     setNotice(null);
     // Waiting before the call: the invite may come back before its answer does.
     settledAsks.current.delete(friend.id); // asked again: a listing may show it
+    expireIn(`a:${friend.id}`); // counts 30 s: its cancel button goes then
     setAsked((list) => [...list.filter((id) => id !== friend.id), friend.id]);
     setAsking(friend.id);
     try {
@@ -408,10 +437,18 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     ).finally(() => dismissing.current.delete(friend.id));
   }
 
-  // One at a time, like the room's pause request: invitations first, then watch requests.
-  const invited = invitations[0];
+  // Ticks while anything here runs out (the dialogs' seconds, the cancel buttons).
+  const counting = invitations.length + watchRequests.length + asked.length > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  // One at a time, like the room's pause request: invitations first, then watch requests; only those in time.
+  const invited = invitations.find((r) => live(`i:${r.id}`));
   const invitingHost = invited?.members.find((m) => m.role === "HOST")?.user;
-  const requester = !invited ? watchRequests[0] : undefined;
+  const requester = !invited ? watchRequests.find((u) => live(`r:${u.id}`)) : undefined;
   const incoming = invited ? (
     <Dialog alert title={`${invitingHost?.displayName ?? "친구"}님이 같이 보기에 초대했습니다`} onClose={() => void answerInvitation(invited, false)}>
       <p>{invited.content.title}</p>
@@ -419,6 +456,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <button className="link" onClick={() => void answerInvitation(invited, false)}>거절</button>
         <button onClick={() => void answerInvitation(invited, true)}>입장</button>
       </Actions>
+      <TimeBar key={`i:${invited.id}:${deadlines.current.get(`i:${invited.id}`)}`} until={deadlines.current.get(`i:${invited.id}`)!} total={INCOMING_MS} />
     </Dialog>
   ) : requester ? (
     <Dialog alert title={`${requester.displayName}님이 같이 보자고 합니다`} onClose={() => dismissWatchRequest(requester)}>
@@ -427,6 +465,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <button className="link" onClick={() => dismissWatchRequest(requester)}>무시</button>
         <button onClick={() => void watchTogether(requester)}>같이 보기</button>
       </Actions>
+      <TimeBar key={`r:${requester.id}:${deadlines.current.get(`r:${requester.id}`)}`} until={deadlines.current.get(`r:${requester.id}`)!} total={INCOMING_MS} />
     </Dialog>
   ) : null;
 
@@ -550,7 +589,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                   {describe(f.presence).map((line, i) => <div key={i} className="muted ellipsis">{line || "\u00a0"}</div>)}
                 </div>
                 <span className="actions">
-                  {asked.includes(f.user.id) ? (
+                  {asked.includes(f.user.id) && live(`a:${f.user.id}`) ? (
                     <IconButton icon="close" label="합류 요청 취소" disabled={asking === f.user.id} onClick={() => void cancelWatch(f.user)} />
                   ) : f.presence.status === "WATCHING" && (
                     <IconButton icon="join" label="합류 요청" onClick={() => void requestWatch(f.user)} />
@@ -740,10 +779,6 @@ function AddFriend({ onSent }: { onSent: () => void }) {
   );
 }
 
-/**
- * The room I host to invite a friend into: the one showing what I watch now (the open one first). When I
- * watch nothing the app can see (desktop), any room I host. undefined = start a new room.
- */
 export type RequestChange = { n: number; user: UserSummary; open: boolean };
 /** Changes kept to replay over a list load in flight. ponytail: more during one load drops the oldest. */
 const MAX_REQUEST_CHANGES = 100;
@@ -754,16 +789,6 @@ export function applyRequestChanges(list: UserSummary[], changes: RequestChange[
     (acc, c) => [...acc.filter((u) => u.id !== c.user.id), ...(c.open ? [c.user] : [])],
     list,
   );
-}
-
-export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string | null, watching: RoomContent | null) {
-  return [...rooms]
-    .sort((a, b) => Number(b.id === openRoom) - Number(a.id === openRoom))
-    .find(
-      (r) =>
-        r.members.some((m) => m.user.id === meId && m.role === "HOST") &&
-        (!watching || (r.content.provider === watching.provider && r.content.contentId === watching.contentId)),
-    );
 }
 
 /** Only when the user isn't looking at the app: otherwise the screen already shows it. */

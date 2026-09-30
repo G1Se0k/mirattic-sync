@@ -10,8 +10,11 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.MapKeyColumn;
 import jakarta.persistence.Table;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -41,11 +44,15 @@ public class Room {
 	@CollectionTable(name = "room_bans", joinColumns = @JoinColumn(name = "room_id"))
 	@Column(name = "user_id")
 	private Set<String> banned = new HashSet<>();
-	/** Invited by the host, not answered yet (decision 85): accepting makes them a member. */
+	/**
+	 * Invited by the host, not answered yet (decision 85): accepting makes them a member. Value: when (epoch ms);
+	 * an invitation counts for `RoomService.INVITATION_MS` (decision 87).
+	 */
 	@ElementCollection
 	@CollectionTable(name = "room_invitations", joinColumns = @JoinColumn(name = "room_id"))
-	@Column(name = "user_id")
-	private Set<String> invited = new HashSet<>();
+	@MapKeyColumn(name = "user_id")
+	@Column(name = "invited_at")
+	private Map<String, Long> invited = new HashMap<>();
 
 	protected Room() {
 	}
@@ -73,10 +80,13 @@ public class Room {
 	void ban(String userId) { banned.add(userId); }
 	void unban(String userId) { banned.remove(userId); }
 
-	void invite(String userId) { invited.add(userId); }
-	Set<String> invitedIds() { return Set.copyOf(invited); }
+	/** Invites anew: an earlier invitation's time starts over. */
+	void invite(String userId, long at) { invited.put(userId, at); }
+	Set<String> invitedIds() { return Set.copyOf(invited.keySet()); }
+	/** When they were invited, or null. */
+	Long invitedAt(String userId) { return invited.get(userId); }
 	/** @return whether they were invited (and now aren't). */
-	boolean uninvite(String userId) { return invited.remove(userId); }
+	boolean uninvite(String userId) { return invited.remove(userId) != null; }
 
 	RoomContent content() {
 		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl, series);

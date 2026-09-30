@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -1007,13 +1008,56 @@ class RoomFlowTest extends IntegrationTest {
 		}
 	}
 
+	@Autowired
+	private JdbcTemplate jdbc;
+	@Autowired
+	private RoomController roomController;
+
+	@Test
+	void invitationsAndWatchRequestsCountForThirtySeconds() throws Exception {
+		TestUser host = signup();
+		TestUser me = signup();
+		befriend(host, me);
+		Client meWs = connect(me);
+		Client hostWs = connect(host);
+		String roomId = body(inviteToNewRoom(host, me)).path("id").asString();
+		assertThat(meWs.nextOfType("room:invite").path("payload").path("expiresInMs").asLong()).isEqualTo(30_000);
+		long left = body(call(HttpMethod.GET, "/api/rooms/invitations", me.accessToken(), null)).get(0).path("expiresInMs").asLong();
+		assertThat(left).isBetween(1L, 30_000L);
+
+		// 31 s later: not listed, and accepting it is refused; inviting again starts it over.
+		jdbc.update("UPDATE room_invitations SET invited_at = invited_at - 31000 WHERE room_id = ?", roomId);
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/invitations", me.accessToken(), null)).size()).isZero();
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invitation", me.accessToken(), null).andExpect(status().isNotFound());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + me.id() + "\"]}")
+				.andExpect(status().isOk());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invitation", me.accessToken(), null).andExpect(status().isOk());
+
+		// A watch request: 30 s left, listed; 31 s later neither listed nor answered by an invite.
+		TestUser asker = signup();
+		befriend(asker, host);
+		Client askerWs = connect(asker);
+		call(HttpMethod.POST, "/api/rooms/requests", asker.accessToken(), "{\"friendId\":\"" + host.id() + "\"}")
+				.andExpect(status().isAccepted());
+		assertThat(hostWs.nextOfType("watch:request").path("payload").path("expiresInMs").asLong()).isEqualTo(30_000);
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null)).get(0)
+				.path("expiresInMs").asLong()).isBetween(1L, 30_000L);
+		roomController.openWatchRequests.replaceAll((k, at) -> at - 31_000);
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null)).size()).isZero();
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests", asker.accessToken(), null)).size()).isZero();
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + asker.id() + "\"]}")
+				.andExpect(status().isOk());
+		assertThat(askerWs.nextOfType("room:invite")).isNotNull(); // too late to answer it: a plain invitation
+		assertThat(askerWs.nextOfType("watch:answer")).isNull();
+	}
+
 	@Test
 	void openWatchRequestsToMeAreListedUntilDismissed() throws Exception {
 		TestUser host = signup();
 		TestUser me = signup();
 		befriend(host, me);
 		connect(host);
-		createRoom(host, me); // an invitation I ignore
+		inviteToNewRoom(host, me); // an invitation I ignore
 		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), "{\"friendId\":\"" + host.id() + "\"}")
 				.andExpect(status().isAccepted());
 

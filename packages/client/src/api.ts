@@ -9,6 +9,7 @@ import type {
   ReportTarget,
   RoomView,
   UserSummary,
+  IncomingRequest,
   Visibility,
 } from "@mirattic/types";
 
@@ -210,7 +211,7 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** Takes a watch request back; the friend gets `watch:cancel`. 404 if not a friend. */
     cancelWatchRequest: (friendId: string) => authed<void>("DELETE", `/api/rooms/requests/${friendId}`),
     /** Friends' watch requests to me still open (a panel opened after the `watch:request` shows them). */
-    incomingWatchRequests: () => authed<UserSummary[]>("GET", "/api/rooms/requests/incoming"),
+    incomingWatchRequests: () => authed<IncomingRequest[]>("GET", "/api/rooms/requests/incoming"),
     /** Dismisses a friend's watch request to me: it doesn't come back. The friend isn't told. */
     dismissWatchRequest: (friendId: string) => authed<void>("DELETE", `/api/rooms/requests/incoming/${friendId}`),
     rooms: () => authed<RoomView[]>("GET", "/api/rooms"),

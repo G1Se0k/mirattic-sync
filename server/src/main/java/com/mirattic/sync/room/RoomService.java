@@ -37,8 +37,12 @@ public class RoomService {
 	}
 
 	/** `unread` and `muted` are the viewer's own (0 / false in a view sent to someone else). */
+	/** `expiresInMs`: an invitation's time left (in invitation lists and `room:invite`), else absent. */
 	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, long unread,
-			boolean muted, String code) {
+			boolean muted, String code, Long expiresInMs) {
+		RoomView expiring(long ms) {
+			return new RoomView(id, content, members, createdAt, unread, muted, code, ms);
+		}
 	}
 
 	/** A member removed from a room because of a block, and who to tell (before the removal). */
@@ -58,6 +62,8 @@ public class RoomService {
 	}
 
 	static final int MAX_INVITES = 7;
+	/** An invitation counts this long (decision 87); inviting again starts it over. */
+	static final long INVITATION_MS = 30_000;
 	static final int MAX_CHAT_LENGTH = 1000;
 	static final int CHAT_HISTORY = 100;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
@@ -112,7 +118,7 @@ public class RoomService {
 			if (joinIds.contains(id)) {
 				members.save(new RoomMember(room.getId(), id, RoomMember.Role.MEMBER));
 			} else {
-				room.invite(id);
+				room.invite(id, System.currentTimeMillis());
 			}
 		}
 		return view(room, members.findByRoomId(room.getId()), me);
@@ -147,7 +153,7 @@ public class RoomService {
 				members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER));
 				room.uninvite(id); // an earlier invitation to it is answered too
 			} else {
-				room.invite(id);
+				room.invite(id, System.currentTimeMillis());
 			}
 		}
 		return new Invited(view(rooms.findById(roomId).orElseThrow(RoomService::notFound), members.findByRoomId(roomId),
@@ -190,24 +196,28 @@ public class RoomService {
 		return others.isEmpty() || friendships.lockFriendships(me, others).size() == others.size();
 	}
 
-	/** The rooms inviting me, newest first (decision 85). */
+	/** The rooms inviting me, newest invitation first (decision 85), still in time (decision 87), with the time left. */
 	@Transactional(readOnly = true)
 	public List<RoomView> invitations(String me) {
+		long now = System.currentTimeMillis();
+		// ponytail: expired rows stay until answered, re-invited or the room goes; a sweep if they ever pile up.
 		return rooms.findInviting(me).stream()
-				.sorted(java.util.Comparator.comparingLong(Room::getCreatedAt).reversed())
-				.map(r -> view(r, members.findByRoomId(r.getId()), null))
+				.filter(r -> now - r.invitedAt(me) < INVITATION_MS)
+				.sorted(java.util.Comparator.comparingLong((Room r) -> r.invitedAt(me)).reversed())
+				.map(r -> view(r, members.findByRoomId(r.getId()), null).expiring(INVITATION_MS - (now - r.invitedAt(me))))
 				.toList();
 	}
 
 	/**
-	 * Accepting an invitation: I become a member (the members before, to tell). 404 without one, or when I and a
-	 * member block each other; 409 when the room is full (the invitation stays).
+	 * Accepting an invitation: I become a member (the members before, to tell). 404 without one (or one older than
+	 * `INVITATION_MS`), or when I and a member block each other; 409 when the room is full (the invitation stays).
 	 */
 	@Transactional
 	public Invited accept(String me, String roomId) {
 		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		// Kicked since (after coming in by the code): only a new invite from the host lets them back (it unbans).
-		if (!room.uninvite(me) || room.isBanned(me)) {
+		Long invitedAt = room.invitedAt(me);
+		if (!room.uninvite(me) || System.currentTimeMillis() - invitedAt >= INVITATION_MS || room.isBanned(me)) {
 			throw notFound();
 		}
 		List<String> before = memberIds(roomId);
@@ -623,7 +633,7 @@ public class RoomService {
 				: messages.countByRoomIdAndUserIdNotAndKindIsNullAndDeletedFalseAndSeqGreaterThan(room.getId(), viewer,
 						self.getLastReadSeq());
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), unread,
-				self != null && self.isMuted(), room.getCode());
+				self != null && self.isMuted(), room.getCode(), null);
 	}
 
 	private static ResponseStatusException notFound() {

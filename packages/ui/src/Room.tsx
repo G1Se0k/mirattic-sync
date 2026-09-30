@@ -8,7 +8,7 @@ import { Chat } from "./Chat";
 import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
 import { Avatar, IconButton } from "./Icons";
-import { Actions, Dialog, useAsk } from "./Dialog";
+import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 
 /** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
 const invitedAt = new Map<string, number>();
@@ -172,20 +172,14 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
 
 /** A member asks the host to pause; it closes by itself (sync-core) 30 s after it came, counted down here. */
 function PauseRequest({ request, handle }: { request: NonNullable<RoomSyncState["pauseRequest"]>; handle: RoomHandle }) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const left = Math.max(0, Math.ceil((request.at + PAUSE_REQUEST_SHOWN_MS - now) / 1000));
   return (
     <Dialog alert title={`${request.name}님이 일시정지를 요청했습니다`} onClose={() => handle.dismissPauseRequest()}>
       {request.reason && <p>{request.reason}</p>}
-      <p className="muted">{left}초 후에 자동으로 닫힙니다.</p>
       <Actions>
         <button className="link" onClick={() => handle.dismissPauseRequest()}>닫기</button>
         <button onClick={() => handle.pauseAll()}>모두 일시정지</button>
       </Actions>
+      <TimeBar key={request.at} until={request.at + PAUSE_REQUEST_SHOWN_MS} total={PAUSE_REQUEST_SHOWN_MS} />
     </Dialog>
   );
 }

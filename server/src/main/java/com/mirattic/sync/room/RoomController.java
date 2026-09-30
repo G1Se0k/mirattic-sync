@@ -64,11 +64,15 @@ class RoomController {
 	private final Map<String, Long> lastWatchRequest = new ConcurrentHashMap<>();
 	/**
 	 * "requester>friend" → when a request was sent and not taken back: only such a request can be cancelled, once,
-	 * so repeated cancels send nothing. ponytail: in memory, forgotten after an hour or a restart (the friend's
-	 * banner then stays until they dismiss it).
+	 * so repeated cancels send nothing. A request counts for `OPEN_WATCH_REQUEST_MS` (decision 87): listed and
+	 * answerable by an invite until then. ponytail: in memory, forgotten on a restart.
 	 */
-	private final Map<String, Long> openWatchRequests = new ConcurrentHashMap<>();
-	static final long OPEN_WATCH_REQUEST_MS = 3_600_000;
+	final Map<String, Long> openWatchRequests = new ConcurrentHashMap<>(); // package: tests age requests
+	static final long OPEN_WATCH_REQUEST_MS = 30_000;
+
+	/** A friend's watch request to me, with its time left (decision 87). */
+	record IncomingRequest(String id, String displayName, long expiresInMs) {
+	}
 	/**
 	 * Orders answering a watch request (an invite, through its room write) against cancelling it.
 	 * ponytail: one lock for every create/invite on this instance; per-pair locks if invites ever get busy.
@@ -211,7 +215,8 @@ class RoomController {
 		}
 		openWatchRequests.values().removeIf(at -> now - at >= OPEN_WATCH_REQUEST_MS);
 		openWatchRequests.put(me.id() + ">" + body.friendId(), now);
-		hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now, me));
+		hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now,
+				new IncomingRequest(me.id(), me.displayName(), OPEN_WATCH_REQUEST_MS)));
 	}
 
 	/**
@@ -270,7 +275,8 @@ class RoomController {
 			if (answered.contains(id)) {
 				hub.sendEvent(id, new ServerEvent("watch:answer", room.id(), hostId, null, now, null));
 			} else if (!alreadyIn.contains(id)) {
-				hub.sendEvent(id, new ServerEvent("room:invite", room.id(), hostId, null, now, room));
+				hub.sendEvent(id, new ServerEvent("room:invite", room.id(), hostId, null, now,
+						room.expiring(RoomService.INVITATION_MS)));
 			}
 		}
 	}
@@ -287,18 +293,22 @@ class RoomController {
 	}
 
 	/**
-	 * Friends' watch requests to me still open (not answered, cancelled or dismissed, under the hour): a panel
-	 * opened after the `watch:request` shows their banners again.
+	 * Friends' watch requests to me still open (not answered, cancelled or dismissed, still in time), with the
+	 * time left: a panel opened after the `watch:request` shows them again.
 	 */
 	@GetMapping("/requests/incoming")
-	List<UserSummary> incomingWatchRequests(@AuthenticationPrincipal Jwt jwt) {
+	List<IncomingRequest> incomingWatchRequests(@AuthenticationPrincipal Jwt jwt) {
 		String suffix = ">" + jwt.getSubject();
 		long now = System.currentTimeMillis();
-		List<String> from = openWatchRequests.entrySet().stream()
-				.filter(e -> e.getKey().endsWith(suffix) && now - e.getValue() < OPEN_WATCH_REQUEST_MS)
-				.map(e -> e.getKey().substring(0, e.getKey().length() - suffix.length()))
+		Map<String, Long> askedAt = new HashMap<>();
+		openWatchRequests.forEach((key, at) -> {
+			if (key.endsWith(suffix) && now - at < OPEN_WATCH_REQUEST_MS) {
+				askedAt.put(key.substring(0, key.length() - suffix.length()), at);
+			}
+		});
+		return rooms.friendsAmong(jwt.getSubject(), List.copyOf(askedAt.keySet())).stream()
+				.map(u -> new IncomingRequest(u.id(), u.displayName(), OPEN_WATCH_REQUEST_MS - (now - askedAt.get(u.id()))))
 				.toList();
-		return rooms.friendsAmong(jwt.getSubject(), from);
 	}
 
 	/**

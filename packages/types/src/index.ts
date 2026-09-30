@@ -212,7 +212,16 @@ export type RoomView = {
   muted: boolean;
   /** Join code (decision 77); absent for rooms made before codes. */
   code?: string;
+  /** An invitation's time left (invitation lists and `room:invite`, decision 87). */
+  expiresInMs?: number;
 };
+
+/** A friend's watch request to me (`watch:request`, incoming list), with its time left (decision 87). */
+export type IncomingRequest = UserSummary & { expiresInMs?: number };
+export const PROVIDER_NAMES: Record<MediaProvider, string> = { youtube: "YouTube", netflix: "Netflix", laftel: "Laftel", mock: "Mock" };
+
+/** How long an invitation or a watch request counts (decision 87): the server's, assumed when not sent. */
+export const INCOMING_MS = 30_000;
 
 /**
  * Payload of host `playback:play|pause|seek`. `capturedAt` is the host's estimate of *server* time
@@ -247,4 +256,18 @@ export function contentTitle(p: Pick<MediaPresence, "title" | "season" | "episod
 export function episodeLabel(p: Pick<MediaPresence, "season" | "episode">) {
   if (p.episode === undefined) return "";
   return p.season !== undefined && p.season > 1 ? `시즌 ${p.season} ${p.episode}화` : `${p.episode}화`;
+}
+
+/**
+ * The room I host to invite a friend into: the one showing what I watch now (the open one first). When I
+ * watch nothing the app can see (desktop), any room I host. undefined = start a new room.
+ */
+export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string | null, watching: RoomContent | null) {
+  return [...rooms]
+    .sort((a, b) => Number(b.id === openRoom) - Number(a.id === openRoom))
+    .find(
+      (r) =>
+        r.members.some((m) => m.user.id === meId && m.role === "HOST") &&
+        (!watching || (r.content.provider === watching.provider && r.content.contentId === watching.contentId)),
+    );
 }

@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { ChatMessage, RoomContent, RoomView } from "@mirattic/types";
-import { applyRequestChanges, describe as lines, roomToInvite, settleUnlisted } from "./Home";
+import { roomToInvite } from "@mirattic/types";
+import { applyRequestChanges, describe as lines, settleUnlisted } from "./Home";
 import { latest } from "./format";
 
 const content = (provider: RoomContent["provider"], contentId: string): RoomContent => ({ provider, contentId, title: contentId });
