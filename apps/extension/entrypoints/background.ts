@@ -21,6 +21,9 @@ import { ROOM_ACTIONS, UI_PORT, type FromPanel, type Shared, type ToPanel } from
 const KEEPALIVE_MS = 20_000;
 const LOOKUP_MS = 1_500; // a lookup for an alert's details, at most (`within`)
 const ROOM_KEY = 'mirattic.room'; // storage.session: back into the room if the worker restarts
+// storage.local: another device took over (decision 89); no connecting (worker or browser restart included) until
+// the user presses "여기서 계속" here.
+const REPLACED_FLAG = 'mirattic.replaced';
 const PROVIDER_ORIGINS = ['https://www.youtube.com/', 'https://www.netflix.com/', 'https://laftel.net/'];
 const PROVIDER_TABS = PROVIDER_ORIGINS.map((o) => `${o}*`);
 /** `until`: when it stops counting. */
@@ -250,13 +253,25 @@ export default defineBackground(() => {
 
   function startSocket() {
     if (socket) return;
+    const mine = session; // (not `s`: the first status comes before connectSocket returns)
     const s = connectSocket({
       url: SOCKET_URL,
       getTicket: api.wsTicket,
       onStatus: (next) => {
+        if (mine !== session) return; // a socket from before a sign-out: its news are stale
         status = next;
         platform?.connected?.(next === 'open' ? s : null);
         room?.setConnected(next === 'open');
+        if (next === 'replaced') {
+          // Another device took over (decision 89): this one stops following the room (still a member; the
+          // other device can go on in it) and alerts, until "여기서 계속" (resume) takes it back.
+          markReplaced(true);
+          room?.dispose();
+          room = null;
+          clearAlerts();
+          pushShared();
+        }
+        if (next === 'open') void backIntoRoom(); // after a resume: the room it was in, if it still is
         broadcast({ kind: 'status', status: next });
         if (next === 'closed' && socket === s) signOut(); // the session is gone (the ticket answered 401)
       },
@@ -325,7 +340,8 @@ export default defineBackground(() => {
 
   /** `entering`: the user opened it now, not the worker restoring it after a restart. */
   function openRoom(roomId: string, entering = false) {
-    if (!meId || room?.state.roomId === roomId) return;
+    // Replaced: no room here until the user takes over (the room it was in comes back then).
+    if (!meId || replaced() || status === 'replaced' || room?.state.roomId === roomId) return;
     room?.dispose();
     const sync: RoomSync = new RoomSync({
       roomId,
@@ -360,6 +376,29 @@ export default defineBackground(() => {
     pushShared();
   }
 
+  /**
+   * Replaced (decision 89): the account replaced here — per account, so another one signing in isn't held back —
+   * known here at once and kept in storage.local, written in order (a resume's removal never loses to the mark set
+   * before it). Read once when the worker starts; every connect waits for that.
+   */
+  let replacedAccount: string | null = null;
+  let marked = false; // set here since the worker started: the stored value (read later) is older
+  const replacedLoaded = browser.storage.local.get(REPLACED_FLAG).then((r) => {
+    const stored = r[REPLACED_FLAG];
+    if (!marked && typeof stored === 'string') replacedAccount = stored;
+  }, () => {});
+  const replaced = () => !!meId && replacedAccount === meId;
+  let marking = Promise.resolve();
+  function markReplaced(on: boolean) {
+    marked = true;
+    replacedAccount = on ? meId : null;
+    const account = replacedAccount;
+    marking = marking
+      .then(() => (account ? browser.storage.local.set({ [REPLACED_FLAG]: account }) : browser.storage.local.remove(REPLACED_FLAG)))
+      .catch(() => {});
+    return marking;
+  }
+
   async function signedIn() {
     const mine = session;
     const me = await api.me();
@@ -367,13 +406,36 @@ export default defineBackground(() => {
     meId = me.id;
     await ensureWatching();
     if (mine !== session) return;
-    startSocket();
+    await connect();
+    await backIntoRoom(mine);
+  }
+
+  /**
+   * The only way a socket starts (but a resume): not while replaced — this worker's or an earlier one's (worker or
+   * browser restart), read before deciding — until the user takes over again.
+   */
+  async function connect() {
+    await replacedLoaded;
+    if (!meId) return;
+    if (!replaced()) return startSocket();
+    if (socket) return; // its status says so already
+    status = 'replaced';
+    room?.dispose(); // opened before the stored mark was read
+    room = null;
+    pushShared();
+    broadcast({ kind: 'status', status });
+  }
+
+  /** The room this browser was in (kept across a worker restart and a replacement), once connected again. */
+  async function backIntoRoom(mine = session) {
     const saved = (await browser.storage.session.get(ROOM_KEY))[ROOM_KEY];
-    if (mine === session && typeof saved === 'string' && !room) openRoom(saved);
+    // Checked after the read: replaced (or still offline) meanwhile, it stays out.
+    if (mine === session && meId && status === 'open' && typeof saved === 'string' && !room) openRoom(saved);
   }
 
   function signOut() {
     session++;
+    void markReplaced(false); // the next sign-in connects
     clearAlerts();
     closeRoom();
     clearInterval(keepAlive);
@@ -438,13 +500,21 @@ export default defineBackground(() => {
           }
           break;
         case 'socket':
-          if (meId) startSocket();
+          await connect();
           post(port, { kind: 'status', status });
+          break;
+        case 'socket:resume':
+          // This device takes over again (the other one is replaced in turn).
+          await markReplaced(false);
+          if (!meId) break;
+          if (socket) socket.resume();
+          else startSocket(); // replaced in an earlier worker or browser session: this one never connected
           break;
         case 'send':
           socket?.send(m.event);
           break;
         case 'room:open':
+          await replacedLoaded; // replaced in an earlier worker: known before any room opens
           openRoom(m.roomId, !m.resume);
           viewers.set(port, m.roomId);
           if (room) post(port, { kind: 'room', state: room.state });

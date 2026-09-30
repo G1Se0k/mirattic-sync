@@ -111,6 +111,17 @@ class SocketHandler extends TextWebSocketHandler {
 
 	@Override
 	protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+		// One at a time per user, and never across a device switch (SocketHub.add takes the same lock): a frame
+		// either finishes before the new device takes over or, from the replaced one, counts for nothing.
+		synchronized (hub.lockFor(userId(session))) {
+			if (!hub.isCurrent(userId(session), out(session))) {
+				return;
+			}
+			handle(session, message);
+		}
+	}
+
+	private void handle(WebSocketSession session, TextMessage message) {
 		JsonNode event;
 		try {
 			event = json.readTree(message.getPayload());

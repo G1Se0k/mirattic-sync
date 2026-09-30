@@ -7,6 +7,14 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### 한 번에 한 기기 (2026-09-30, 결정 89)
+- 서버 `SocketHub.add`: 새 연결이 계정의 유일한 연결이 되고(원자적), 기존 연결에 `session:replaced` 후 close 4001. 교체로 presence 오프라인 없음
+- `packages/client` socket: 교체되면 `replaced` 상태로 재연결 안 함, `resume()`으로 다시 연결
+- 확장 background: 교체되면 방 동기화 · 알림 중지(보던 방 ID는 보관), 교체 상태는 계정 ID로 `storage.local`에 저장해(다른 계정 로그인은 막지 않음) 워커 · 브라우저를 다시 시작해도 연결하지 않음(로그아웃하면 지움), `socket:resume` 후 연결되면 그 방으로 복귀(연결이 열려 있을 때만).
+- 서버: 교체된 연결이 닫히기 전에 보낸 메시지는 무시(`SocketHub.isCurrent`). 사용자별 잠금(`lockFor`)으로 메시지 처리와 기기 교체를 한 줄로: 처리 중이던 메시지는 교체 전에 끝나고, 교체 뒤의 기존 연결 메시지는 버림. 확장의 교체 표시 저장 · 삭제도 한 줄로(`markReplaced`), 워커 시작 때 한 번 읽고 소켓은 그 뒤 `connect()`로만 시작(패널이 먼저 열려도), 교체 상태에서는 방을 열지 않음(시작 때 표시를 읽기 전에 온 방 열기도 기다림). 닫은 소켓 · 이전 소켓의 상태 알림은 무시(로그아웃 직후 늦은 교체 알림이 표시를 되살리지 않음). 교체 화면에 [로그아웃]도 패널: 닫을 수 없는 "다른 기기에서 사용 중입니다 [여기서 계속]"
+- 검증: Codex Sol 1차 FAIL(워커 재시작 뒤 자동 재연결 · 교체 중 옛 연결 명령 처리) → 교체 표시 저장, `isCurrent`. 재검증 1 FAIL(처리 중이던 메시지) → 사용자별 잠금. 재검증 2 FAIL(패널이 표시 확인 전에 연결) → `connect()` 한 경로. 재검증 3 FAIL(로그아웃 뒤 늦은 교체 알림) → 닫은 소켓 무시, 교체 화면 로그아웃. 재검증 4 FAIL(첫 상태 알림에서 초기화 전 변수 참조 → 연결 안 됨) → 로그인 세대 비교. 재검증 5 FAIL(교체 표시가 다른 계정도 막음) → 계정 ID로 저장. 재검증 6 **PASS** (낮음 1: 사용자별 잠금 객체가 계속 남음, `ponytail:`로 기록)
+- 테스트: 서버 67(`aNewDeviceReplacesTheOldOne`: 교체 알림 · 닫힘 · 오프라인 표시 없음 · 새 연결로 이벤트 · 동시 접속 둘 중 하나만 남음; 두 연결을 전제하던 테스트 4개를 한 연결로), client 9(교체 뒤 재연결 안 함 → resume → 연결, 일반 끊김은 재연결, 닫은 뒤 늦은 교체 알림 없음), ui 13, sync-core 25, extension 26, typecheck, 확장 빌드
+
 ### Desktop 앱 삭제 (2026-09-30, 결정 88)
 - 사용자 결정: Desktop은 지원하지 않음 → `apps/desktop`(Tauri, Rust) 삭제, lockfile 정리
 - `packages/ui`: Desktop 전용 대체 경로 삭제 — 화면이 여는 소켓(`connectSocket`), 화면이 도는 방(`localRoom.ts`), OS 알림과 그 채팅 알림 · 목록에 없는 방의 메시지 대기(`settleUnlisted`와 테스트). `Platform.connect` · `room` 필수, `notify` 삭제, `configure(api, platform)`(소켓 주소 불필요)

@@ -177,6 +177,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       onStatus: (s: SocketStatus) => {
         setStatus(s);
         platform.connected?.(s === "open" ? socket : null);
+        if (s === "replaced") setOpenRoom(null); // the room stops here; back in on "여기서 계속" if still in it
         if (s === "open") void reload(); // catch up on anything missed while disconnected
       },
       onEvent: (event: ServerEvent) => {
@@ -436,6 +437,21 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       <TimeBar key={`r:${requester.id}:${deadlines.current.get(`r:${requester.id}`)}`} until={deadlines.current.get(`r:${requester.id}`)!} total={INCOMING_MS} />
     </Dialog>
   ) : null;
+
+  // Another device of the account connected (decision 89): nothing here works until this one takes over again.
+  if (status === "replaced") {
+    return (
+      <div className="home">
+        <Dialog alert title="다른 기기에서 사용 중입니다">
+          <p className="muted">한 번에 한 기기에서만 쓸 수 있어, 다른 기기에서 접속해 이 기기의 연결이 끊겼습니다. 여기서 계속하면 다른 기기의 연결이 끊깁니다.</p>
+          <Actions>
+            <button className="link" onClick={onSignedOut}>로그아웃</button>
+            <button onClick={() => socket?.resume()}>여기서 계속</button>
+          </Actions>
+        </Dialog>
+      </div>
+    );
+  }
 
   if (openRoom && socket && handle) {
     return (

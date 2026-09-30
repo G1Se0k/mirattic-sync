@@ -144,6 +144,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
         close: () => {
           if (socketHandlers === handlers) socketHandlers = null; // the background's socket stays
         },
+        resume: () => send({ op: 'socket:resume' }),
       };
     },
     room: (roomId): RoomHandle => {

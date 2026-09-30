@@ -1,7 +1,9 @@
 package com.mirattic.sync.ws;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,8 +19,7 @@ import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Live sessions per user,
- * and which sessions have joined which room.
+ * Live sessions per user (one: the latest device, decision 89), and which sessions have joined which room.
  * ponytail: in-memory, single-instance only; move to Redis pub/sub alongside presence.
  */
 @Component
@@ -34,18 +35,35 @@ public class SocketHub {
 		this.json = json;
 	}
 
-	/** @return true if this is the user's first session (they just came online). */
+	/** A connection another device's replaced (decision 89): told so, then closed with this. */
+	public static final CloseStatus REPLACED = new CloseStatus(4001, "replaced");
+
+	/**
+	 * One device at a time (decision 89): the new session becomes the user's only one, in one step, so two
+	 * arriving together can't close each other. The ones it replaces get `session:replaced` and are closed.
+	 * @return true if the user had no session (they just came online).
+	 */
 	boolean add(String userId, WebSocketSession session) {
-		boolean[] first = {false};
-		sessions.compute(userId, (k, set) -> {
-			if (set == null) {
-				set = ConcurrentHashMap.newKeySet();
-				first[0] = true;
+		List<WebSocketSession> replaced = new ArrayList<>();
+		synchronized (lockFor(userId)) { // after any frame of the old device still being handled
+			sessions.compute(userId, (k, set) -> {
+				if (set != null) {
+					replaced.addAll(set);
+				}
+				Set<WebSocketSession> only = ConcurrentHashMap.newKeySet();
+				only.add(session);
+				return only;
+			});
+		}
+		for (WebSocketSession old : replaced) {
+			send(old, new ServerEvent("session:replaced", null, null, null, System.currentTimeMillis(), null));
+			try {
+				old.close(REPLACED);
+			} catch (IOException e) {
+				log.debug("close failed for session {}", old.getId());
 			}
-			set.add(session);
-			return set;
-		});
-		return first[0];
+		}
+		return replaced.isEmpty();
 	}
 
 	/** @return true if that was the user's last session (they went offline). */
@@ -82,6 +100,21 @@ public class SocketHub {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Per user: frames are handled one at a time and a device switch waits for the one in progress.
+	 * ponytail: one small object per user ever connected on this instance; evict idle ones if that grows.
+	 */
+	private final Map<String, Object> locks = new ConcurrentHashMap<>();
+
+	Object lockFor(String userId) {
+		return locks.computeIfAbsent(userId, k -> new Object());
+	}
+
+	/** Still the user's session (not replaced by another device since). */
+	boolean isCurrent(String userId, WebSocketSession session) {
+		return sessions.getOrDefault(userId, Set.of()).contains(session);
 	}
 
 	public boolean isOnline(String userId) {

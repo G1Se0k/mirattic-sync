@@ -35,12 +35,12 @@ class SafetyFlowTest extends IntegrationTest {
 		befriend(host, other);
 		String roomId = room(host, member, other);
 		String elsewhere = room(member, host); // the member's own room (a host is in one room at a time)
-		Client memberWs = connect(member);
-		Client otherWs = connect(other);
-
 		String hostSaid = say(host, roomId, "from the host");
 		String memberSaid = say(member, roomId, "from a member");
 		String otherSaid = say(other, roomId, "from another member");
+		// After saying (each say connects: one device at a time, a later connection replaces an earlier one).
+		Client memberWs = connect(member);
+		Client otherWs = connect(other);
 
 		deleteMessage(member, roomId, hostSaid).andExpect(status().isForbidden()); // not mine, not the host
 		deleteMessage(stranger, roomId, hostSaid).andExpect(status().isNotFound());
@@ -49,7 +49,7 @@ class SafetyFlowTest extends IntegrationTest {
 		JsonNode gone = otherWs.nextOfType("chat:delete");
 		assertThat(gone.path("roomId").asString()).isEqualTo(roomId);
 		assertThat(gone.path("payload").path("id").asString()).isEqualTo(memberSaid);
-		assertThat(memberWs.nextOfType("chat:delete")).isNotNull(); // my other apps too
+		assertThat(memberWs.nextOfType("chat:delete")).isNotNull(); // my own connection too
 		deleteMessage(host, roomId, otherSaid).andExpect(status().isNoContent()); // moderation
 		deleteMessage(host, roomId, otherSaid).andExpect(status().isNotFound());
 

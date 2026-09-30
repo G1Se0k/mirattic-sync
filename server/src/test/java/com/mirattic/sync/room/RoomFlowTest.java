@@ -121,21 +121,15 @@ class RoomFlowTest extends IntegrationTest {
 		Client friendWs = connect(friend);
 		friendWs.send(event("room:join", roomId, "{}"));
 		friendWs.nextOfType("playback:update");
-		Client hostApp = connect(host);
-		Client hostTab = connect(host);
-		hostApp.send(event("room:join", roomId, "{}"));
-		hostTab.send(event("room:join", roomId, "{}"));
-		hostTab.send(event("playback:play", roomId, "{\"positionMs\":1000,\"capturedAt\":%d}"
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.send(event("playback:play", roomId, "{\"positionMs\":1000,\"capturedAt\":%d}"
 				.formatted(System.currentTimeMillis())));
 		assertThat(friendWs.nextOfType("playback:update").path("payload").path("playing").asBoolean()).isTrue();
 
-		// Still in the room from the other app: nothing changes.
-		hostTab.send(event("room:leave", roomId, "{}"));
-		assertThat(friendWs.nextOfType("playback:update")).isNull();
-
-		// The last one goes (window closed): members stop where the host was.
+		// The host's connection goes (window closed): members stop where the host was.
 		Thread.sleep(200);
-		hostApp.session().close();
+		hostWs.session().close();
 		JsonNode paused = friendWs.nextOfType("playback:update");
 		assertThat(paused.path("payload").path("playing").asBoolean()).isFalse();
 		assertThat(paused.path("payload").path("positionMs").asLong()).isGreaterThan(1000).isLessThan(10_000);
@@ -450,10 +444,12 @@ class RoomFlowTest extends IntegrationTest {
 		friendWs.send(event("room:join", roomId, "{}"));
 		assertThat(hostWs.nextOfType("chat:log").path("userId").asString()).isEqualTo(friend.id());
 		friendWs.nextOfType("chat:log"); // their own join
-		// A second connection of someone already in the room is no new join.
+		// Another device of someone already in the room replaces the first (decision 89) and is no new join.
 		Client friendWs2 = connect(friend);
+		assertThat(friendWs.nextOfType("session:replaced")).isNotNull();
 		friendWs2.send(event("room:join", roomId, "{}"));
 		friendWs2.nextOfType("playback:update");
+		friendWs = friendWs2;
 
 		long now = System.currentTimeMillis();
 		String command = "{\"positionMs\":%d,\"capturedAt\":%d}";
@@ -561,15 +557,8 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
 		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("seek");
 
-		// Leaving: only once the last connection is gone for the grace period (0 here, two sweeps).
+		// Leaving: once the connection is gone for the grace period (0 here, two sweeps).
 		friendWs.session().close();
-		roomLog.sweep();
-		roomLog.sweep();
-		Thread.sleep(300); // let the first close land
-		roomLog.sweep();
-		roomLog.sweep();
-		assertThat(loggedKinds(host, roomId)).doesNotContain("leave"); // still there with the other connection
-		friendWs2.session().close();
 		for (int i = 0; i < 100 && !loggedKinds(host, roomId).contains("leave"); i++) { // the close lands asynchronously
 			roomLog.sweep();
 			Thread.sleep(20);
@@ -686,16 +675,14 @@ class RoomFlowTest extends IntegrationTest {
 		befriend(host, friend);
 		String roomId = body(createRoom(host, friend)).path("id").asString();
 		String path = "/api/rooms/" + roomId + "/members/me/muted";
-		Client desktop = connect(friend);
-		Client extension = connect(friend);
+		Client mine = connect(friend);
 		Client hostWs = connect(host);
 
 		call(HttpMethod.PUT, path, friend.accessToken(), "{\"muted\":true}").andExpect(status().isNoContent());
-		// Every app of mine refetches (and so notifies by the new setting); nobody else is told.
-		JsonNode onDesktop = desktop.nextOfType("room:update");
-		assertThat(onDesktop.path("roomId").asString()).isEqualTo(roomId);
-		assertThat(onDesktop.path("payload").path("muted").asBoolean()).isTrue(); // applied before any refetch
-		assertThat(extension.nextOfType("room:update").path("payload").path("muted").asBoolean()).isTrue();
+		// My connection refetches (and applies the new setting at once); nobody else is told.
+		JsonNode update = mine.nextOfType("room:update");
+		assertThat(update.path("roomId").asString()).isEqualTo(roomId);
+		assertThat(update.path("payload").path("muted").asBoolean()).isTrue(); // applied before any refetch
 		assertThat(hostWs.nextOfType("room:update")).isNull();
 		assertThat(myRoom(friend).path("muted").asBoolean()).isTrue();
 		assertThat(myRoom(host).path("muted").asBoolean()).isFalse();
@@ -1012,6 +999,51 @@ class RoomFlowTest extends IntegrationTest {
 	private JdbcTemplate jdbc;
 	@Autowired
 	private RoomController roomController;
+
+	@Test
+	void aNewDeviceReplacesTheOldOne() throws Exception {
+		TestUser me = signup();
+		TestUser friend = signup();
+		befriend(me, friend);
+		Client friendWs = connect(friend);
+		Client first = connect(me);
+		friendWs.nextOfType("presence:update"); // I came online
+
+		// Another device connects: the first is told and closed; I don't blink offline for my friends.
+		String roomId = body(createRoom(me, friend)).path("id").asString();
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		Client second = connect(me);
+		// Whatever the first still sends before its close lands counts for nothing.
+		first.send("{\"type\":\"chat:message\",\"roomId\":\"%s\",\"payload\":{\"text\":\"late\"}}".formatted(roomId));
+		assertThat(first.nextOfType("session:replaced")).isNotNull();
+		assertThat(friendWs.nextOfType("chat:message")).isNull();
+		for (int i = 0; i < 100 && first.session().isOpen(); i++) {
+			Thread.sleep(20);
+		}
+		assertThat(first.session().isOpen()).isFalse();
+		assertThat(second.session().isOpen()).isTrue();
+		assertThat(friendWs.nextOfType("presence:update")).isNull();
+
+		// Events reach the new device.
+		call(HttpMethod.POST, "/api/rooms/requests", friend.accessToken(), "{\"friendId\":\"" + me.id() + "\"}")
+				.andExpect(status().isAccepted());
+		assertThat(second.nextOfType("watch:request")).isNotNull();
+
+		// Two arriving together: one of them stays (they can't close each other).
+		List<Future<Client>> both = new ArrayList<>();
+		ExecutorService pool = Executors.newFixedThreadPool(2);
+		for (int i = 0; i < 2; i++) {
+			both.add(pool.submit(() -> connect(me)));
+		}
+		List<Client> clients = new ArrayList<>();
+		for (Future<Client> f : both) {
+			clients.add(f.get());
+		}
+		pool.shutdown();
+		Thread.sleep(500);
+		assertThat(clients.stream().filter((c) -> c.session().isOpen()).count()).isEqualTo(1);
+	}
 
 	@Test
 	void invitationsAndWatchRequestsCountForThirtySeconds() throws Exception {
