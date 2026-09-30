@@ -2,7 +2,7 @@
 
 ## Project
 
-Mirattic Sync is a cross-platform social watch-party application for macOS and Windows with a Chromium browser extension.
+Mirattic Sync is a social watch-party Chromium browser extension (no desktop app, decision 88).
 
 Core features:
 - friends / presence
@@ -36,7 +36,6 @@ Initial providers:
 
 ## Core Architecture
 
-- Desktop: Tauri 2 + React + TypeScript
 - Extension: WXT + TypeScript, Chromium first
 - Backend: Java 21 + Spring Boot + Spring Security + JPA + Raw WebSocket + MySQL
 - Shared code: pnpm workspace packages

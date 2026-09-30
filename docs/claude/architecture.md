@@ -9,7 +9,6 @@ Important current direction:
 - Raw WebSocket + JSON envelope
 - JWT access + DB refresh-token rotation
 - one-time WebSocket ticket
-- Extension ↔ Desktop communication through backend
 - Maven backend
 - presence in server memory
 - UUID string IDs

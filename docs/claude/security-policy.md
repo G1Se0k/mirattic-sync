@@ -8,7 +8,6 @@ Security requirements:
 - keep secrets out of logs
 - use restrictive CORS
 - use one-time WebSocket tickets
-- keep long-lived desktop refresh tokens in OS keychain
 
 Provider policy workflow:
 - verify official policy immediately before provider work

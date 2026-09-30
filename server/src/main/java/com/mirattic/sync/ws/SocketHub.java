@@ -17,7 +17,7 @@ import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Live sessions per user (a user may be connected from desktop and extension at once),
+ * Live sessions per user,
  * and which sessions have joined which room.
  * ponytail: in-memory, single-instance only; move to Redis pub/sub alongside presence.
  */

@@ -1,5 +1,7 @@
 # Mirattic Sync — Product & Technical Plan
 
+> Desktop 앱은 없어짐 (2026-09-30, `docs/architecture/plan.md` 결정 88): 클라이언트는 Chromium 확장 하나. 아래의 Desktop 관련 내용은 과거 기획 이력.
+
 ## 1. 프로젝트 개요
 
 Mirattic Sync는 **Netflix, Laftel, YouTube 등에서 각 사용자가 자신의 계정으로 콘텐츠를 재생하면서, 친구의 시청 상태를 보고 바로 합류하고, 재생 위치를 동기화하며, 영상 옆에서 실시간으로 대화할 수 있는 크로스플랫폼 소셜 워치파티 서비스**다.

@@ -7,6 +7,13 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### Desktop 앱 삭제 (2026-09-30, 결정 88)
+- 사용자 결정: Desktop은 지원하지 않음 → `apps/desktop`(Tauri, Rust) 삭제, lockfile 정리
+- `packages/ui`: Desktop 전용 대체 경로 삭제 — 화면이 여는 소켓(`connectSocket`), 화면이 도는 방(`localRoom.ts`), OS 알림과 그 채팅 알림 · 목록에 없는 방의 메시지 대기(`settleUnlisted`와 테스트). `Platform.connect` · `room` 필수, `notify` 삭제, `configure(api, platform)`(소켓 주소 불필요)
+- 서버 CORS 기본값 · `deploy.sh`의 Tauri origin 삭제, README · CLAUDE.md · docs/claude 정리
+- 남은 일: 운영 서버 `.env`의 `ALLOWED_ORIGINS`에서 Tauri origin 지우기(무해)
+- 테스트: typecheck, JS client 7 · sync-core 25 · ui 13 · extension 26, 확장 빌드
+
 ### 패널 밖 알림 · 받은 합류 요청 복구 (2026-09-30, 결정 87)
 - 확장: 초대 · 합류 요청 · 일시정지 요청(호스트)이 오면 패널이 없을 때 툴바 아이콘 배지(개수). 채팅은 알리지 않음. 툴바 말풍선(`action.openPopup`)은 넣었다가 사용자 요청으로 지움(수락/거절 버튼 · 프로그레스바 버전도 커밋 전 삭제). 권한 추가 없음
 - 영상 위 알림: provider 탭의 content script(`toast.ts`)가 영상 오른쪽 위에 알림(30초, 아래 프로그레스바, 앱 대화상자와 같은 디자인·밝은/어두운 테마, 페이드 인/아웃, 전체화면이 아니면 페이지 좌표라 스크롤하면 영상과 함께 움직임, closed shadow root)과 가로로 꽉 찬 응답 버튼 두 개. 버튼은 background(`answerAlert`)가 패널과 같은 호출로 처리("같이 보기"의 방 고르기 `roomToInvite`는 `@mirattic/types`로 옮겨 공유), 입장·같이 보기는 background가 방에 들어가 패널 없이도 동기화, 패널도 열어 봄(Chrome이 클릭으로 인정할 때), 열린 패널은 background가 들어간 방을 따라감. 패널이 닫혀 있을 때만(패널이 열리면 모든 탭의 토스트와 배지를 지움, 사용자 요청), 전체화면이면 전체화면 요소 위(나가면 사라짐), 아니면 화면에 보이는 가장 큰 `<video>`(너비 200px 이상) 위, 영상이 없는 페이지(홈 · 검색 등)는 페이지 오른쪽 위(화면 고정, 사용자 요청; 그동안 1초마다 확인해 영상이 나타나면 그 위로 옮김). 사용자 결정으로 overlay 금지의 예외 (정책 문서 3개에 기록)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ApiError, connectSocket, type Socket, type SocketStatus } from "@mirattic/client";
+import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
   MediaProvider,
   ChatDeleted,
@@ -13,11 +13,10 @@ import type {
   UserSummary,
 } from "@mirattic/types";
 import { episodeLabel, INCOMING_MS, roomToInvite, type IncomingRequest, type WatchingInfo } from "@mirattic/types";
-import { api, platform, SOCKET_URL } from "./session";
+import { api, platform } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
 import { MyFriendCode, Settings } from "./Settings";
-import { localRoom } from "./localRoom";
 import { without } from "./Chat";
 import { clock, latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, ProviderIcon } from "./Icons";
@@ -103,9 +102,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   // Room lists answer in any order; one started before a count changed locally must not overwrite it.
   const roomsLoad = useRef(latest()).current;
   const refetchRooms = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  /** Messages of rooms not in the list yet (an invite racing its first message): notified once listed. */
-  const unlisted = useRef<ChatMessage[]>([]);
-  /** Recent deletions: a message whose delivery was overtaken by its deletion is neither counted nor notified. */
+  /** Recent deletions: a message whose delivery was overtaken by its deletion isn't counted. */
   const deletedChats = useRef<ChatDeleted[]>([]);
 
   /** A local change to the list, visible to the socket handler at once; loads started before it are dropped. */
@@ -115,19 +112,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     setRooms(change);
   }, [roomsLoad]);
 
-  const notifyChat = useCallback((room: RoomView, m: ChatMessage) => {
-    const from = room.members.find((x) => x.user.id === m.userId)?.user.displayName ?? "친구";
-    if (!room.muted) notify(`${from} · ${room.content.title}`, m.text);
-  }, []);
-
-  /** The server's list (its unread counts include the unlisted messages). */
+  /** The server's list (its unread counts include messages of rooms not listed here yet). */
   const applyRooms = useCallback((rs: RoomView[]) => {
     current.current.rooms = rs;
     setRooms(rs);
-    const { listed, waiting } = settleUnlisted(unlisted.current, rs, current.current.openRoom);
-    unlisted.current = waiting;
-    listed.forEach(([room, m]) => notifyChat(room, m));
-  }, [notifyChat]);
+  }, []);
 
   /** The server's counts, once a burst of chat events settles. */
   const settleRooms = useCallback(() => {
@@ -204,7 +193,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           const from = event.payload as IncomingRequest;
           expireIn(`r:${from.id}`, from.expiresInMs);
           changeRequest(from, true);
-          notify(`${from.displayName}님이 같이 보자고 합니다`, "눌러서 같이 보기 방을 만들 수 있습니다.");
         }
         if (event.type === "watch:cancel") {
           if (event.userId) changeRequest({ id: event.userId, displayName: "" }, false);
@@ -218,34 +206,20 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           setNotice(null);
           setOpenRoom(event.roomId);
         }
-        if (event.type === "room:invite") {
-          const room = event.payload as RoomView;
-          const host = room.members.find((m) => m.role === "HOST");
-          // From the friend I asked: `watch:answer` enters it, no notification needed.
-          // Not from a friend I asked (still in time: after 30 s it is a plain invitation).
-          const askedHost = host && current.current.asked.includes(host.user.id) && (deadlines.current.get(`a:${host.user.id}`) ?? 0) > Date.now();
-          if (!askedHost) {
-            notify(`${host?.user.displayName ?? "친구"}님의 같이 보기 초대`, room.content.title);
-          }
-        }
         if (event.type === "chat:message" && without([event.payload as ChatMessage], deletedChats.current).length) {
           const m = event.payload as ChatMessage;
           // The open room shows it; my own messages are never unread.
           if (m.roomId !== current.current.openRoom && m.userId !== me.id) {
             const room = current.current.rooms.find((r) => r.id === m.roomId);
-            // Known room: count and notify now. A room not listed yet (just invited): once the refetch lists it.
-            if (room) {
-              updateRooms((list) => list.map((r) => (r.id === m.roomId ? { ...r, unread: r.unread + 1 } : r)));
-              notifyChat(room, m);
-            } else unlisted.current.push(m);
+            // Known room: counted now. A room not listed yet (just invited): the refetch brings its count.
+            if (room) updateRooms((list) => list.map((r) => (r.id === m.roomId ? { ...r, unread: r.unread + 1 } : r)));
             settleRooms();
           }
         }
-        // A deleted message may have been unread (the server's count) or still waiting to be notified.
+        // A deleted message may have been unread (the server's count).
         if (event.type === "chat:delete") {
           const d = event.payload as ChatDeleted;
           deletedChats.current = [...deletedChats.current, d].slice(-MAX_DELETED);
-          unlisted.current = without(unlisted.current, [d]);
           settleRooms();
         }
         if (event.type === "presence:update" && event.userId) {
@@ -254,16 +228,15 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         }
       },
     };
-    // The extension's background owns the socket (it outlives the side panel); otherwise the screen opens one.
-    const socket: Socket = platform.connect?.(handlers)
-      ?? connectSocket({ url: SOCKET_URL, getTicket: api.wsTicket, ...handlers });
+    // The extension's background owns the socket (it outlives the side panel).
+    const socket: Socket = platform.connect(handlers);
     setSocket(socket);
     return () => {
       clearTimeout(refetchRooms.current);
       socket.close();
       platform.connected?.(null);
     };
-  }, [reload, me.id, updateRooms, notifyChat, settleRooms]);
+  }, [reload, me.id, updateRooms, settleRooms]);
 
   // Every action refetches; the other side learns via `friend:update`.
   const act = (fn: () => Promise<unknown>) => async () => {
@@ -312,8 +285,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   async function createRoom() {
     if (creating.current) return;
     setError(null);
-    // Only the extension sees what plays in a tab; the desktop app can't wait for a video to be opened.
-    if (!watching) return platform.nowWatching ? setChoosing(true) : setError("지금 보는 영상이 없습니다. 영상을 연 뒤 다시 시도하세요.");
+    // Nothing watched: pick a site, and the room comes once a video of it is open.
+    if (!watching) return setChoosing(true);
     await makeRoom(watching);
   }
   /** One creation at a time; its answer opens the room only if I haven't entered another meanwhile. */
@@ -384,20 +357,13 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     }
   }
 
-  // The room screen's live side: the extension's background runs it (and keeps it when the panel closes);
-  // otherwise it runs here and leaves with the screen.
-  const local = useRef<ReturnType<typeof localRoom> | null>(null);
-  const handle = useMemo(() => {
-    if (!openRoom || !socket) return null;
-    if (platform.room) return platform.room(openRoom);
-    return (local.current = localRoom(openRoom, me.id, socket, subscribe));
-  }, [openRoom, socket, me.id, subscribe]);
+  // The room screen's live side: the extension's background runs it (and keeps it when the panel closes).
+  const handle = useMemo(() => (openRoom && socket ? platform.room(openRoom) : null), [openRoom, socket]);
   useEffect(() => {
     if (!handle) return;
     handle.show();
     return () => handle.close();
   }, [handle]);
-  useEffect(() => local.current?.setConnected(status === "open"), [handle, status]);
 
   async function answerInvitation(room: RoomView, accept: boolean) {
     setError(null);
@@ -793,30 +759,8 @@ export function applyRequestChanges(list: UserSummary[], changes: RequestChange[
   );
 }
 
-/** Only when the user isn't looking at the app: otherwise the screen already shows it. */
-function notify(title: string, body: string) {
-  if (!document.hasFocus()) platform.notify?.(title, body);
-}
-
 const ROOMS_REFETCH_MS = 500;
-const MAX_UNLISTED = 20;
 const MAX_DELETED = 100;
-
-/**
- * Messages that arrived before their room was listed, against a list from the server: those now listed are
- * due a notification (unless their room is open); the rest keep waiting (a list read before the invite).
- * Capped, so a room never listed (left or closed meanwhile) can't keep messages forever.
- */
-export function settleUnlisted(pending: ChatMessage[], rooms: RoomView[], openRoom: string | null) {
-  const listed: [RoomView, ChatMessage][] = [];
-  const waiting: ChatMessage[] = [];
-  for (const m of pending) {
-    const room = rooms.find((r) => r.id === m.roomId);
-    if (!room) waiting.push(m);
-    else if (m.roomId !== openRoom) listed.push([room, m]);
-  }
-  return { listed, waiting: waiting.slice(-MAX_UNLISTED) };
-}
 
 const noSubscribe = () => () => {};
 const nothing = () => null;

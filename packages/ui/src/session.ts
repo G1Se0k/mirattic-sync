@@ -24,9 +24,9 @@ export type RoomHandle = {
   exit(): void;
 };
 
-/** What differs between the desktop app and the extension, besides token storage. */
+/** What the extension provides the screens with (its side panel, backed by the background), besides the client. */
 export type Platform = {
-  /** A player this app drives for the provider. undefined = can't play it here. */
+  /** A player the background drives for the provider (the followed tab). undefined = none here. */
   adapter?(provider: MediaProvider): MediaProviderAdapter | undefined;
   /** What the user watches now; "같이 보기" shares it. Must return the same object until it changes. */
   nowWatching?(): RoomContent | null;
@@ -43,10 +43,10 @@ export type Platform = {
   subscribe?(onChange: () => void): () => void;
   /** The socket went up (or down: null). The extension publishes presence through it. */
   connected?(socket: Socket | null): void;
-  /** The app's socket; absent = the screen opens its own. The extension shares its background's. */
-  connect?(handlers: { onEvent(event: ServerEvent): void; onStatus(status: SocketStatus): void }): Socket;
-  /** The room's live side; absent = run in the screen (left with it). The extension runs it in its background. */
-  room?(roomId: string): RoomHandle;
+  /** The background's socket, shared with the screens. */
+  connect(handlers: { onEvent(event: ServerEvent): void; onStatus(status: SocketStatus): void }): Socket;
+  /** The room's live side, run in the background (it keeps going when the panel closes). */
+  room(roomId: string): RoomHandle;
   /** The room the app is still in (the extension keeps it when the panel closes). */
   activeRoom?(): string | null;
   /** Provider control the user turns on at their own risk (Netflix, Laftel). Absent = not offered in this app. */
@@ -60,18 +60,14 @@ export type Platform = {
    * (the user's own click); otherwise the extension reuses the tab it follows (the room following the host).
    */
   open(url: string, newTab?: boolean): void;
-  /** A system notification, shown only while the app isn't focused. */
-  notify?(title: string, body: string): void;
 };
 
-// Each app (desktop, extension) builds its own client and platform and hands them over here before
-// rendering. Live ES module bindings make the assignment visible to every importer.
+// The extension builds its client and platform and hands them over here before rendering. Live ES module
+// bindings make the assignment visible to every importer.
 export let api: ApiClient;
-export let SOCKET_URL: string;
 export let platform: Platform;
 
-export function configure(client: ApiClient, socketUrl: string, p: Platform) {
+export function configure(client: ApiClient, p: Platform) {
   api = client;
-  SOCKET_URL = socketUrl;
   platform = p;
 }

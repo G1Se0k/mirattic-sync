@@ -29,7 +29,7 @@ export const samePage = (a: URL, b: URL) => {
 const OFF_SITE_KEY = 'mirattic.offSite';
 const PRESENCE_DELAY_MS = 300; // the server drops presence updates closer than 250ms
 
-export type Watch = Platform & {
+export type Watch = Omit<Platform, 'connect' | 'room'> & {
   /** Follow the video tab of another window (the one whose side panel was opened last). */
   follow(windowId: number): void;
 };

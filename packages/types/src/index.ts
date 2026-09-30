@@ -1,4 +1,4 @@
-// Provider-agnostic types shared by desktop, extension and (by contract) the server.
+// Provider-agnostic types shared by the extension's parts and (by contract) the server.
 // All timestamps are UTC epoch milliseconds.
 
 /** "mock" is the fake player in @mirattic/sync-core, used to develop and test sync without a real provider. */
@@ -260,7 +260,7 @@ export function episodeLabel(p: Pick<MediaPresence, "season" | "episode">) {
 
 /**
  * The room I host to invite a friend into: the one showing what I watch now (the open one first). When I
- * watch nothing the app can see (desktop), any room I host. undefined = start a new room.
+ * watch nothing, any room I host. undefined = start a new room.
  */
 export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string | null, watching: RoomContent | null) {
   return [...rooms]

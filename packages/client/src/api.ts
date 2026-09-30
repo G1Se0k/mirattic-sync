@@ -13,7 +13,7 @@ import type {
   Visibility,
 } from "@mirattic/types";
 
-/** Where the refresh token lives: OS keychain on desktop, extension storage in the extension. */
+/** Where the refresh token lives (the extension's storage). */
 export type RefreshTokenStore = {
   load(): Promise<string | null>;
   save(token: string | null): Promise<void>;

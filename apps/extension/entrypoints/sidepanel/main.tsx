@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { App, configure } from '@mirattic/ui';
-import { SOCKET_URL } from '../../session';
 import { Consent, hasConsent } from './Consent';
 import { connectPanel } from './panel';
 
@@ -15,7 +14,7 @@ function SidePanel() {
   const start = async () => {
     connected ??= connectPanel(); // once, despite StrictMode; tabs are looked at only after consent
     const { api, platform } = await connected;
-    configure(api, SOCKET_URL, platform);
+    configure(api, platform);
     setState('ready');
   };
 

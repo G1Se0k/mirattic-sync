@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
-import type { ChatMessage, RoomContent, RoomView } from "@mirattic/types";
+import type { RoomContent, RoomView } from "@mirattic/types";
 import { roomToInvite } from "@mirattic/types";
-import { applyRequestChanges, describe as lines, settleUnlisted } from "./Home";
+import { applyRequestChanges, describe as lines } from "./Home";
 import { latest } from "./format";
 
 const content = (provider: RoomContent["provider"], contentId: string): RoomContent => ({ provider, contentId, title: contentId });
@@ -24,7 +24,7 @@ it("invites into my room showing what I watch, never one showing something else"
   expect(roomToInvite(rooms, "me", null, content("youtube", "OPf0YbXqDm0"))).toBeUndefined(); // → new room
 });
 
-it("without anything being watched (desktop), prefers the open room I host", () => {
+it("without anything being watched, prefers the open room I host", () => {
   expect(roomToInvite(rooms, "me", "other-video", null)?.id).toBe("other-video");
   expect(roomToInvite(rooms, "me", "theirs", null)?.id).toBe("mock");
 });
@@ -45,19 +45,6 @@ it("drops a room list that was requested before a newer load or a local count ch
   const newer = load("newer", 0);
   await Promise.all([older, newer]);
   expect(rooms).toBe("newer");
-});
-
-it("keeps a message whose room a list doesn't show yet, and notifies it once a later list shows it", () => {
-  const first: ChatMessage = { id: "m1", roomId: "new", userId: "friend", text: "hi", createdAt: 0 };
-  const before = settleUnlisted([first], rooms, null); // a list read before the invite
-  expect(before.listed).toEqual([]);
-  expect(before.waiting).toEqual([first]);
-
-  const invited = room("new", video, "friend");
-  const after = settleUnlisted(before.waiting, [...rooms, invited], null);
-  expect(after.listed).toEqual([[invited, first]]);
-  expect(after.waiting).toEqual([]);
-  expect(settleUnlisted([first], [invited], "new").listed).toEqual([]); // open: the room shows it
 });
 
 it("shows a YouTube friend's channel above the title, and a Netflix friend's episode below it", () => {
