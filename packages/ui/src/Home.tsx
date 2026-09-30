@@ -18,7 +18,7 @@ import { ReportDialog } from "./Report";
 import { Room } from "./Room";
 import { MyFriendCode, Settings } from "./Settings";
 import { without } from "./Chat";
-import { clock, latest, PROVIDER_NAMES } from "./format";
+import { latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, ProviderIcon } from "./Icons";
 import { ExperimentControl, isExperiment, useExperiment } from "./Experimental";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
@@ -463,12 +463,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const waitingFor = asked.find((id) => !asking.includes(id) && live(`a:${id}`));
   const nameOf = (id: string) => friends.find((f) => f.user.id === id)?.user.displayName ?? "친구";
   const askLine = declined && declined.until > now ? (
-    <div className="ask-status" role="status">
+    <div className="ask-status card" role="status">
       <p className="error">요청이 거절되었습니다.</p>
       <TimeBar key={`d:${declined.friendId}:${declined.until}`} until={declined.until} total={DECLINED_SHOWN_MS} inline danger />
     </div>
   ) : waitingFor ? (
-    <div className="ask-status" role="status">
+    <div className="ask-status card" role="status">
       <p className="muted">{nameOf(waitingFor)}님에게 같이 보자고 요청했습니다. 초대가 오면 바로 입장합니다.</p>
       <TimeBar key={`a:${waitingFor}:${deadlines.current.get(`a:${waitingFor}`)}`} until={deadlines.current.get(`a:${waitingFor}`)!}
         total={INCOMING_MS} inline />
@@ -518,7 +518,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     return (
       <div className="room-page">
         {error && <div className="banner"><p className="error grow" role="alert">{error}</p></div>}
-        {askLine && <div className="banner"><div className="grow">{askLine}</div></div>}
+        {askLine && <div className="ask-wrap">{askLine}</div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
         <Room key={openRoom} roomId={openRoom} me={me} handle={handle} socket={socket} status={status} subscribe={subscribe}
           onClose={closeRoom}
@@ -849,16 +849,17 @@ const nothing = () => null;
 
 
 /**
- * A friend's status lines: YouTube adds the channel above the title; Netflix and Laftel put the episode ("3화") below it,
+ * A friend's (or my own) status lines: YouTube "YouTube · channel" above the title; Netflix and Laftel put the episode ("3화") below it,
  * an empty line when it has none.
  */
 export function describe(p: { status: PresenceView["status"]; media?: WatchingInfo & { positionMs?: number; episodeTitle?: string } }): string[] {
   if (p.status === "OFFLINE") return ["오프라인"];
   if (!p.media) return ["온라인"];
   const m = p.media;
-  const position = m.positionMs !== undefined ? ` · ${clock(m.positionMs)}` : "";
-  const line = (title: string) => `${PROVIDER_NAMES[m.provider]} · ${title}${position}`;
-  if (m.provider === "youtube") return [m.channel ?? "", line(m.title)];
+  // No playback position anywhere: where they are in it isn't shown.
+  const line = (title: string) => `${PROVIDER_NAMES[m.provider]} · ${title}`;
+  // YouTube: the site and channel above, the title below.
+  if (m.provider === "youtube") return [m.channel ? `${PROVIDER_NAMES.youtube} · ${m.channel}` : PROVIDER_NAMES.youtube, m.title];
   if (m.provider === "netflix" || m.provider === "laftel") return [line(m.title), episodeLabel(m)];
   return [line(m.episodeTitle ? `${m.title} · ${m.episodeTitle}` : m.title)];
 }

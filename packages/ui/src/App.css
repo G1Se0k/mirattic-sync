@@ -55,6 +55,10 @@ section { margin-top: 4px; }
 .friend:hover .actions { opacity: 1; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .card.active { border-color: var(--accent); }
+/* My join request (or its decline) at the top: a box like "지금 보는 영상", a little apart from what follows. */
+.ask-status.card { margin-bottom: 10px; }
+.ask-status p { margin: 0; }
+.ask-wrap { padding: 10px 16px 0; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line); flex-shrink: 0; display: inline-block; }
 .dot.on { background: var(--on); }
 

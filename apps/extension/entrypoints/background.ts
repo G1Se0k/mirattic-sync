@@ -8,8 +8,8 @@ import { API_URL, SOCKET_URL, authorize, store } from '../session';
 import { hasConsent } from '../consent';
 import { watch, type Watch } from '../watch';
 import {
-  TOAST, TOAST_ANSWER, TOAST_CLEAR, TOAST_DISMISS, TOAST_READY,
-  type AlertKind, type ToastAnswer, type ToastClear, type ToastDismiss, type ToastMessage,
+  TOAST, TOAST_ANSWER, TOAST_CLEAR, TOAST_DISMISS, TOAST_OVER_VIDEO, TOAST_READY,
+  type AlertKind, type ToastAnswer, type ToastClear, type ToastDismiss, type ToastMessage, type ToastOverVideo,
 } from '../toast';
 import { ROOM_ACTIONS, UI_PORT, type FromPanel, type Shared, type ToPanel } from '../ui-port';
 
@@ -484,17 +484,122 @@ export default defineBackground(() => {
     return result;
   }
 
-  browser.runtime.onMessage.addListener((m: ToastAnswer | { type: typeof TOAST_READY }, sender) => {
-    // Only our content script, in a provider tab.
-    const url = sender.tab?.url ?? sender.url ?? '';
+  /**
+   * Join requests each tab showed over a video, by the document (page) that showed them. A tab's new page takes
+   * those of its other documents as left behind — dismissed if the new page has no video (a YouTube page looks
+   * itself; another site dismisses them at once). Keyed by document, so no order of tab events and messages matters.
+   */
+  const overVideo = new Map<number, Map<string | undefined, Map<string, number>>>();
+  /**
+   * A request a tab left behind, known late (the page that showed it is already gone): to the tab's page now, marked
+   * so it looks for a video; no page of ours there (another site): dismissed.
+   */
+  const handOver = (tabId: number, doc: string | undefined, target: string, alertId: number, tries = 3) => {
+    const a = alerts.find((x) => x.kind === 'request' && x.target === target && x.toast.alertId === alertId);
+    if (!a || !active('request', target, alertId)) return;
+    const message = { ...a.toast, ms: a.until - Date.now(), leftBehind: true, seq: ++seq };
+    // Taken: that page reports it back (kept with it until decided). No page of ours to take it yet: dismissed if the
+    // tab settled on another site; still loading, or one of ours starting: kept for its READY or its load's end —
+    // and offered again a little later, in case that page asked just before this was kept.
+    browser.tabs.sendMessage(tabId, message).catch(() => browser.tabs.get(tabId).then((tab) => {
+      if (tab.status === 'complete' && !mayShowVideo(tab.url)) return dismissLeftBehind(new Map([[target, alertId]]));
+      keep(tabId, doc, target, alertId);
+      if (tries > 0) setTimeout(() => {
+        const kept = overVideo.get(tabId)?.get(doc);
+        if (kept?.get(target) !== alertId) return; // taken meanwhile
+        kept.delete(target);
+        handOver(tabId, doc, target, alertId, tries - 1);
+      }, 2_000);
+    }, () => {}));
+  };
+  const keep = (tabId: number, doc: string | undefined, target: string, alertId: number) => {
+    const docs = overVideo.get(tabId) ?? new Map<string | undefined, Map<string, number>>();
+    docs.set(doc, (docs.get(doc) ?? new Map()).set(target, alertId));
+    overVideo.set(tabId, docs);
+  };
+  /** A YouTube page (our script is always there, it looks itself) or a Netflix/Laftel watch page. */
+  const mayShowVideo = (url = '') => url.startsWith('https://www.youtube.com/')
+    || (PROVIDER_ORIGINS.some((o) => url.startsWith(o)) && /\/(watch|player)\//.test(new URL(url).pathname));
+  /** The requests shown by the tab's documents other than `current`, no longer kept under them. */
+  const takeLeftBehind = (tabId: number, current: string | undefined) => {
+    const left = new Map<string, number>();
+    const docs = overVideo.get(tabId);
+    if (!docs) return left;
+    for (const [doc, requests] of docs) {
+      if (doc === current) continue;
+      requests.forEach((alertId, target) => left.set(target, alertId));
+      docs.delete(doc);
+    }
+    return left;
+  };
+  const dismissLeftBehind = (left: Map<string, number>) => {
+    for (const [target, alertId] of left) {
+      if (active('request', target, alertId)) void answerAlert({ type: TOAST_ANSWER, kind: 'request', target, accept: false, alertId });
+    }
+  };
+  /** Whether that document is still the tab's (pages ignore this message; Chrome rejects it for one that is gone). */
+  const alive = (tabId: number, doc: string | undefined) => doc === undefined ? Promise.resolve(true)
+    : browser.tabs.sendMessage(tabId, { type: 'mirattic:alive?' }, { documentId: doc }).then(() => true, () => false);
+  browser.tabs.onUpdated.addListener((tabId, info, tab) => {
+    const docs = overVideo.get(tabId);
+    if (info.status !== 'complete' || !docs || mayShowVideo(tab.url)) return; // only a provider page's url is known
+    // Another site (or a provider page without our script): the requests of the pages the tab left are dismissed —
+    // not those of a page still there (one that finished loading under its own toast).
+    for (const [doc, requests] of docs) {
+      void alive(tabId, doc).then((ok) => {
+        if (ok || docs.get(doc) !== requests) return;
+        docs.delete(doc);
+        dismissLeftBehind(requests);
+      });
+    }
+  });
+  browser.tabs.onRemoved.addListener((tabId) => overVideo.delete(tabId));
+  /**
+   * Recorded first (so a load ending meanwhile sees it), then checked: kept with that page if it is still there,
+   * handed over if it is already gone (a late message).
+   */
+  const track = (tabId: number, doc: string | undefined, target: string, alertId: number, checked = alive(tabId, doc)) => {
+    keep(tabId, doc, target, alertId);
+    void checked.then((ok) => {
+      const kept = overVideo.get(tabId)?.get(doc);
+      if (ok || kept?.get(target) !== alertId) return; // still there, or taken meanwhile
+      kept.delete(target);
+      handOver(tabId, doc, target, alertId);
+    });
+  };
+
+  browser.runtime.onMessage.addListener((m: ToastAnswer | ToastOverVideo | { type: typeof TOAST_READY }, sender) => {
+    // Only our content script, in a provider page (the sending document's: the tab may have moved on since).
+    const url = sender.url ?? sender.tab?.url ?? '';
     if (sender.id !== browser.runtime.id || !sender.tab || !PROVIDER_ORIGINS.some((o) => url.startsWith(o))) return;
     const tabId = sender.tab.id;
+    if (tabId === undefined) return;
+    const doc = sender.documentId;
+    if (m?.type === TOAST_OVER_VIDEO) {
+      if (typeof m.target !== 'string' || !active('request', m.target, m.alertId)) return;
+      const { target, alertId } = m;
+      // Kept for the tab's next page — unless the page that showed it is already gone (a late report): then handed
+      // over now. Chrome says whether that document is still there (a message to it fails otherwise).
+      track(tabId, doc, target, alertId);
+      return;
+    }
     if (m?.type === TOAST_READY) {
-      // A page loaded meanwhile: the alerts still counting, for the time they have left.
-      const now = Date.now();
-      for (const a of [...alerts].reverse()) { // oldest first: each goes on top, the newest last
-        if (a.until > now && tabId !== undefined) toTabs({ ...a.toast, ms: a.until - now }, () => alerts.includes(a), tabId);
-      }
+      // A page loaded meanwhile: the alerts still counting, for the time they have left — and the join requests this
+      // tab left behind on a page with a video (another document's), marked so this page dismisses them unless it has
+      // one (it reports them back, kept with it until decided). A page already gone again (a late READY): sent nothing, and
+      // what it took is handed over to the tab's page now.
+      const left = takeLeftBehind(tabId, doc);
+      const checked = alive(tabId, doc);
+      left.forEach((alertId, target) => track(tabId, doc, target, alertId, checked));
+      void checked.then((ok) => {
+        if (!ok) return;
+        const now = Date.now();
+        for (const a of [...alerts].reverse()) { // oldest first: each goes on top, the newest last
+          if (a.until <= now) continue;
+          const behind = a.kind === 'request' && left.get(a.target) === a.toast.alertId;
+          toTabs({ ...a.toast, ms: a.until - now, leftBehind: behind }, () => alerts.includes(a), tabId);
+        }
+      });
       return;
     }
     if (m?.type !== TOAST_ANSWER || !active(m.kind, m.target, m.alertId)) return; // settled or replaced meanwhile

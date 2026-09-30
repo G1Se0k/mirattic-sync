@@ -47,10 +47,14 @@ it("drops a room list that was requested before a newer load or a local count ch
   expect(rooms).toBe("newer");
 });
 
-it("shows a YouTube friend's channel above the title, and a Netflix friend's episode below it", () => {
+it("shows a YouTube friend's site and channel above the title, and a Netflix friend's episode below it", () => {
   const media = { title: "킹덤", playing: true, capturedAt: 0 };
   expect(lines({ status: "WATCHING", media: { ...media, provider: "youtube", channel: "채널" } }))
-    .toEqual(["채널", "YouTube · 킹덤"]);
+    .toEqual(["YouTube · 채널", "킹덤"]);
+  expect(lines({ status: "WATCHING", media: { ...media, provider: "youtube", positionMs: 83_000 } }))
+    .toEqual(["YouTube", "킹덤"]); // no channel known: the site alone; no position
+  expect(lines({ status: "WATCHING", media: { ...media, provider: "laftel", episode: 12, positionMs: 83_000 } }))
+    .toEqual(["Laftel · 킹덤", "12화"]); // no position for any site
   expect(lines({ status: "WATCHING", media: { ...media, provider: "netflix", season: 1, episode: 3 } }))
     .toEqual(["Netflix · 킹덤", "3화"]);
   expect(lines({ status: "WATCHING", media: { ...media, provider: "netflix", season: 2, episode: 3 } })[1]).toBe("시즌 2 3화");

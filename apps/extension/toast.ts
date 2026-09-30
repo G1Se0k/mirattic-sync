@@ -30,7 +30,15 @@ export type ToastMessage = {
   panelOpen: boolean; seq: number;
   /** Which alert (a new one for the same friend or room gets another): an answer names it. */
   alertId: number;
+  /** A join request this tab showed over a video before it loaded this page: dismissed if this page has none. */
+  leftBehind?: boolean;
 };
+/**
+ * This tab shows a join request over a video, or holds one left behind (the background dismisses it if the tab then
+ * loads a page without a video).
+ */
+export const TOAST_OVER_VIDEO = 'mirattic:toast-over-video';
+export type ToastOverVideo = { type: typeof TOAST_OVER_VIDEO; target: string; alertId: number };
 export type ToastClear = { type: typeof TOAST_CLEAR; seq: number };
 /** An alert settled elsewhere (cancelled, answered, expired): off every page. */
 export type ToastDismiss = { type: typeof TOAST_DISMISS; kind: AlertKind; target: string; seq: number };
@@ -182,8 +190,38 @@ export function serveToast() {
   const latest = new Map<string, number>();
   const stillLatest = (key: string, alertId: number) => latest.get(key) === alertId;
   let declineTimer: ReturnType<typeof setTimeout> | undefined;
-  // Only a page that is surely without a video: not a watch page (its player may still be loading), shown.
-  const noVideo = () => document.visibilityState === 'visible' && !WATCH_PAGE.test(location.pathname) && !place(false)?.over;
+  // Only a page that is surely without a video: not a watch page (its player may still be loading).
+  const noVideo = () => !WATCH_PAGE.test(location.pathname) && !place(false)?.over;
+  /**
+   * Dismisses these left-behind requests unless a video shows here: decided when the confirmation ends (an old
+   * player may linger at first, a new one may come late).
+   */
+  const scheduleDecline = (requests: Map<string, number>) => {
+    for (const [key, alertId] of requests) declining.set(key, alertId);
+    clearTimeout(declineTimer);
+    declineTimer = setTimeout(() => {
+      if (document.visibilityState !== 'visible') {
+        // A tab in the background: decided once it is looked at (the same confirmation from then).
+        document.addEventListener('visibilitychange', () => declining.size && scheduleDecline(new Map()), { once: true });
+        return;
+      }
+      const due = declining;
+      declining = new Map();
+      if (!noVideo()) return; // a video came after all
+      for (const [key, alertId] of due) {
+        if (!stillLatest(key, alertId)) continue; // a new request from that friend came meanwhile
+        const target = key.slice('request:'.length);
+        const answer: ToastAnswer = { type: TOAST_ANSWER, kind: 'request', target, accept: false, alertId };
+        void browser.runtime.sendMessage(answer).catch(() => {});
+      }
+    }, VIDEO_FREE_CONFIRM_MS);
+  };
+  /** A request shown over a video here: the background remembers it for this tab's next page load. */
+  const reportOverVideo = (key: string, alertId: number) => {
+    if (!key.startsWith('request:')) return;
+    const message: ToastOverVideo = { type: TOAST_OVER_VIDEO, target: key.slice('request:'.length), alertId };
+    void browser.runtime.sendMessage(message).catch(() => {});
+  };
   const watchNavigation = () => {
     if (navWatch) return;
     let at = location.href;
@@ -201,19 +239,7 @@ export function serveToast() {
       redraw(NAVIGATION_SETTLE_MS, () => {
         for (const [key, alertId] of requests) if (!stillLatest(key, alertId)) requests.delete(key);
         if (!hadVideo || !requests.size) return;
-        // Decided when the confirmation ends (an old player may linger at first): only then must there be no video.
-        declining = requests;
-        declineTimer = setTimeout(() => {
-          const due = declining;
-          declining = new Map();
-          if (!noVideo()) return; // a video came after all
-          for (const [key, alertId] of due) {
-            if (!stillLatest(key, alertId)) continue; // a new request from that friend came meanwhile
-            const target = key.slice('request:'.length);
-            const answer: ToastAnswer = { type: TOAST_ANSWER, kind: 'request', target, accept: false, alertId };
-            void browser.runtime.sendMessage(answer).catch(() => {});
-          }
-        }, VIDEO_FREE_CONFIRM_MS);
+        scheduleDecline(requests);
       });
     }, RECHECK_MS);
   };
@@ -271,6 +297,7 @@ export function serveToast() {
         for (const box of [...corner.list.children] as HTMLElement[]) {
           startBar(box); // moving it restarts its animation: from the time it has left
           insert(video.list, box);
+          reportOverVideo(box.dataset.key!, Number(box.dataset.alertId));
         }
         tidy();
       }, RECHECK_MS);
@@ -303,6 +330,7 @@ export function serveToast() {
     box.className = 'toast';
     box.dataset.seq = String(m.seq);
     box.dataset.alertId = String(m.alertId);
+    box.dataset.key = key;
     box.setAttribute('role', 'alertdialog');
     box.innerHTML = `<div class="text"><b></b><span class="meta"></span><span class="body"></span></div>
       <div class="actions"></div><div class="bar" role="progressbar" aria-label="자동으로 닫힘"><i></i></div>`;
@@ -351,7 +379,12 @@ export function serveToast() {
     // A newer alert for the same one (a new request from that friend): not the one left behind on another page.
     latest.set(keyOf(m), m.alertId);
     if (declining.has(keyOf(m)) && declining.get(keyOf(m)) !== m.alertId) declining.delete(keyOf(m));
-    show(m);
+    const drawn = show(m);
+    const overAVideo = drawn && [...stacks].some(([where, stack]) => where !== 'corner' && stack.list.contains(shown.get(keyOf(m)) ?? null));
+    // One left behind is reported too, video or not: the background keeps it with this page until it is decided here
+    // (leaving before that, the next page decides).
+    if (overAVideo || (m.leftBehind && m.kind === 'request')) reportOverVideo(keyOf(m), m.alertId);
+    if (m.leftBehind && m.kind === 'request') scheduleDecline(new Map([[keyOf(m), m.alertId]]));
   });
 }
 
