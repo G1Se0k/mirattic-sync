@@ -1,6 +1,7 @@
 import { browser, type Browser } from 'wxt/browser';
 import type { MediaPresence, MediaProvider, MediaProviderAdapter, PlayerSnapshot } from '@mirattic/types';
 import { seekInPage as netflixSeek } from './providers/netflix';
+import { serveToast } from './toast';
 
 // Side panel ⇄ provider content script over a port opened by the side panel (plan.md decision 29).
 // Content scripts only accept ports from this extension, never from the page.
@@ -32,6 +33,7 @@ export function serveAdapter(create: () => Served) {
   const g = globalThis as { miratticServing?: () => boolean };
   if (g.miratticServing?.()) return;
   g.miratticServing = () => !!browser.runtime?.id;
+  serveToast();
 
   browser.runtime.onConnect.addListener((port) => {
     if (port.name !== PORT_NAME) return;

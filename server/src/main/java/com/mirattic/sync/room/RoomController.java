@@ -286,6 +286,33 @@ class RoomController {
 				.toList();
 	}
 
+	/**
+	 * Friends' watch requests to me still open (not answered, cancelled or dismissed, under the hour): a panel
+	 * opened after the `watch:request` shows their banners again.
+	 */
+	@GetMapping("/requests/incoming")
+	List<UserSummary> incomingWatchRequests(@AuthenticationPrincipal Jwt jwt) {
+		String suffix = ">" + jwt.getSubject();
+		long now = System.currentTimeMillis();
+		List<String> from = openWatchRequests.entrySet().stream()
+				.filter(e -> e.getKey().endsWith(suffix) && now - e.getValue() < OPEN_WATCH_REQUEST_MS)
+				.map(e -> e.getKey().substring(0, e.getKey().length() - suffix.length()))
+				.toList();
+		return rooms.friendsAmong(jwt.getSubject(), from);
+	}
+
+	/**
+	 * Dismisses a friend's watch request to me ("무시"): it no longer comes back, and a later invite doesn't count
+	 * as its answer. The requester isn't told (as before); they may ask again after the 30 s limit.
+	 */
+	@DeleteMapping("/requests/incoming/{friendId}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void dismissWatchRequest(@AuthenticationPrincipal Jwt jwt, @PathVariable String friendId) {
+		synchronized (answerLock) {
+			openWatchRequests.remove(friendId + ">" + jwt.getSubject());
+		}
+	}
+
 	@GetMapping
 	List<RoomService.RoomView> mine(@AuthenticationPrincipal Jwt jwt) {
 		return rooms.mine(jwt.getSubject());

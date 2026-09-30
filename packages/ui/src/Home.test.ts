@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ChatMessage, RoomContent, RoomView } from "@mirattic/types";
-import { describe as lines, roomToInvite, settleUnlisted } from "./Home";
+import { applyRequestChanges, describe as lines, roomToInvite, settleUnlisted } from "./Home";
 import { latest } from "./format";
 
 const content = (provider: RoomContent["provider"], contentId: string): RoomContent => ({ provider, contentId, title: contentId });
@@ -68,4 +68,12 @@ it("shows a YouTube friend's channel above the title, and a Netflix friend's epi
   expect(lines({ status: "WATCHING", media: { ...media, provider: "netflix", season: 2, episode: 3 } })[1]).toBe("시즌 2 3화");
   expect(lines({ status: "WATCHING", media: { ...media, provider: "netflix" } })[1]).toBe(""); // a film: an empty line
   expect(lines({ status: "WATCHING", media: { ...media, provider: "laftel", episode: 12 } })).toEqual(["Laftel · 킹덤", "12화"]);
+});
+
+it("keeps a listed watch request when another comes live while the list loads, and drops one closed meanwhile", () => {
+  const a = { id: "a", displayName: "A" }, b = { id: "b", displayName: "B" }, c = { id: "c", displayName: "C" };
+  const fetched = [a, c]; // read before b came and c was cancelled
+  const after = applyRequestChanges(fetched, [{ n: 1, user: b, open: true }, { n: 2, user: { id: "c", displayName: "" }, open: false }]);
+  expect(after.map((u) => u.id)).toEqual(["a", "b"]);
+  expect(applyRequestChanges([a], [{ n: 3, user: a, open: true }])).toEqual([a]); // no duplicate
 });

@@ -75,7 +75,7 @@ export function emptyRoomState(roomId: string): RoomSyncState {
 
 const CLOCK_SAMPLES = 5;
 const AWAY_AFTER_MS = 2_000;
-const PAUSE_REQUEST_SHOWN_MS = 30_000;
+export const PAUSE_REQUEST_SHOWN_MS = 30_000;
 
 /**
  * One room's live side, without any UI: joins it, measures the clock, publishes the host's player or keeps

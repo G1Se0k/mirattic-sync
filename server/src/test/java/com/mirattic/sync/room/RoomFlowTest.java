@@ -1008,6 +1008,37 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void openWatchRequestsToMeAreListedUntilDismissed() throws Exception {
+		TestUser host = signup();
+		TestUser me = signup();
+		befriend(host, me);
+		connect(host);
+		createRoom(host, me); // an invitation I ignore
+		call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(), "{\"friendId\":\"" + host.id() + "\"}")
+				.andExpect(status().isAccepted());
+
+		// A panel opened after the watch:request still shows it.
+		JsonNode incoming = body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null));
+		assertThat(incoming.size()).isEqualTo(1);
+		assertThat(incoming.get(0).path("id").asString()).isEqualTo(me.id());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", me.accessToken(), null)).size()).isZero();
+
+		// Dismissed: gone, and a later invite is not its answer.
+		call(HttpMethod.DELETE, "/api/rooms/requests/incoming/" + me.id(), host.accessToken(), null)
+				.andExpect(status().isNoContent());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null)).size()).isZero();
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests", me.accessToken(), null)).size()).isZero();
+
+		// No longer friends: an open request isn't listed.
+		TestUser other = signup();
+		befriend(other, host);
+		call(HttpMethod.POST, "/api/rooms/requests", other.accessToken(), "{\"friendId\":\"" + host.id() + "\"}")
+				.andExpect(status().isAccepted());
+		call(HttpMethod.DELETE, "/api/friends/" + other.id(), host.accessToken(), null).andExpect(status().is2xxSuccessful());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/requests/incoming", host.accessToken(), null)).size()).isZero();
+	}
+
+	@Test
 	void watchRequestsGoToOnlineFriendsOnlyAndAreThrottled() throws Exception {
 		TestUser me = signup();
 		TestUser friend = signup();

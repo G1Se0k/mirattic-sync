@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * Every popup looks the same (the "방 만들기" one): centered over a dimmed screen, a title, the content, and the
@@ -12,14 +12,19 @@ export function Dialog({ title, children, onClose, alert }: {
   /** Needs an answer (a member's pause request): announced to screen readers as an alert. */
   alert?: boolean;
 }) {
+  const overlay = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!onClose) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // Escape closes only the dialog on top (the last overlay in the page), not one hidden under it.
+    const onKey = (e: KeyboardEvent) => {
+      const all = document.querySelectorAll(".overlay");
+      if (e.key === "Escape" && all[all.length - 1] === overlay.current) onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose?.()}>
+    <div ref={overlay} className="overlay" onClick={(e) => e.target === e.currentTarget && onClose?.()}>
       <dialog open className="stack" role={alert ? "alertdialog" : "dialog"} aria-modal="true">
         <h2>{title}</h2>
         {children}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mirattic Sync</title>
+    <style>
+      :root { --fg: #1c1c1e; --bg: #ffffff; --muted: #6b6b68; --line: #e6e6e3; --accent: #3f6b5a; --on-accent: #ffffff; }
+      @media (prefers-color-scheme: dark) {
+        :root { --fg: #ececea; --bg: #202020; --muted: #9b9b98; --line: #2e2e2d; --accent: #8cc4a8; --on-accent: #171717; }
+      }
+      body { margin: 0; width: 280px; padding: 12px 14px; font: 13px/1.45 system-ui, -apple-system, sans-serif; color: var(--fg); background: var(--bg); }
+      ul { list-style: none; margin: 0 0 10px; padding: 0; }
+      li + li { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+      b { display: block; font-weight: 600; }
+      span { color: var(--muted); overflow-wrap: anywhere; }
+      button { width: 100%; padding: 7px; border: 0; border-radius: 6px; font: inherit; font-weight: 600; color: var(--on-accent); background: var(--accent); cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <ul id="list"></ul>
+    <button id="open">열기</button>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

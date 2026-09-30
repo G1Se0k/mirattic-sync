@@ -49,6 +49,17 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   /** Rooms inviting me (decision 85): shown as banners until I accept or decline. */
   const [invitations, setInvitations] = useState<RoomView[]>([]);
   const invitationLoads = useRef(0);
+  /** Every change to the watch requests here, numbered: replayed over a list read before it. */
+  const requestChanges = useRef<RequestChange[]>([]);
+  const requestSeq = useRef(0);
+  /** Dismissals the server hasn't confirmed yet: a list read meanwhile may still have them open. */
+  const dismissing = useRef(new Set<string>());
+  const requestLoads = useRef(0);
+  const changeRequest = (user: UserSummary, open: boolean) => {
+    const n = ++requestSeq.current;
+    requestChanges.current = [...requestChanges.current, { n, user, open }].slice(-MAX_REQUEST_CHANGES);
+    setWatchRequests((list) => applyRequestChanges(list, [{ n: 0, user, open }]));
+  };
   /** Friends I asked to watch together: their invite then opens the room by itself. */
   const [asked, setAsked] = useState<string[]>([]);
   /** A request on its way: its cancel waits, or the server wouldn't know the request yet. */
@@ -125,11 +136,19 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     try {
       const fresh = roomsLoad.begin();
       const invites = ++invitationLoads.current;
-      const [f, r, b, rs, inv] = await Promise.all([
+      const asks = ++requestLoads.current;
+      const since = requestSeq.current;
+      const [f, r, b, rs, inv, wr] = await Promise.all([
         api.friends(), api.friendRequests(), api.blocked(), api.rooms(), api.invitations(),
+        api.incomingWatchRequests().catch(() => null), // a server without it yet: the live events only
       ]);
       // Only the newest load, and not one started before I answered an invitation: it would bring it back.
       if (invites === invitationLoads.current) setInvitations(inv);
+      // Likewise the newest for watch requests, with what came, was cancelled, answered or dismissed meanwhile.
+      if (wr && asks === requestLoads.current) {
+        const open = wr.filter((u) => !dismissing.current.has(u.id));
+        setWatchRequests(applyRequestChanges(open, requestChanges.current.filter((c) => c.n > since)));
+      }
       setFriends(f);
       setRequests(r);
       setBlocked(b);
@@ -158,11 +177,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         }
         if (event.type === "watch:request") {
           const from = event.payload as UserSummary;
-          setWatchRequests((list) => [...list.filter((u) => u.id !== from.id), from]);
+          changeRequest(from, true);
           notify(`${from.displayName}님이 같이 보자고 합니다`, "눌러서 같이 보기 방을 만들 수 있습니다.");
         }
         if (event.type === "watch:cancel") {
-          setWatchRequests((list) => list.filter((u) => u.id !== event.userId));
+          if (event.userId) changeRequest({ id: event.userId, displayName: "" }, false);
         }
         // The friend I asked answered with an invite (the server says so): in at once, no "입장" to press.
         if (event.type === "watch:answer" && event.roomId) {
@@ -255,7 +274,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     try {
       if (hosted) await api.inviteToRoom(hosted.id, [friend.id]);
       setOpenRoom(hosted?.id ?? (await api.createRoom(watching!, [friend.id])).id);
-      setWatchRequests((list) => list.filter((u) => u.id !== friend.id)); // answered; kept on failure to retry
+      changeRequest(friend, false); // answered; kept on failure to retry
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
     }
@@ -370,32 +389,50 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     }
   }
 
-  const invitationBanner = invitations.map((r) => {
-    const host = r.members.find((m) => m.role === "HOST")?.user;
-    return (
-      <div key={r.id} className="banner">
-        <Avatar name={host?.displayName ?? "?"} />
-        <span className="grow ellipsis">{host?.displayName ?? "친구"}님이 같이 보기에 초대했습니다 · {r.content.title}</span>
-        <button onClick={() => void answerInvitation(r, true)}>입장</button>
-        <IconButton icon="close" label="거절" onClick={() => void answerInvitation(r, false)} />
-      </div>
-    );
-  });
+  /** Gone here at once; the server forgets it so a reopened panel doesn't bring it back. */
+  function dismissWatchRequest(friend: UserSummary) {
+    changeRequest(friend, false);
+    const mine = requestSeq.current;
+    const settledSince = () => requestChanges.current.some((c) => c.n > mine && c.user.id === friend.id);
+    // A list read before the server closed it may still have it open: filtered out while the call is out...
+    dismissing.current.add(friend.id);
+    api.dismissWatchRequest(friend.id).then(
+      // ...and closed again once it is done, so a load that read before and answers after replays the close.
+      () => !settledSince() && changeRequest(friend, false),
+      () => {
+        // Still open on the server: back, to dismiss again — unless it was settled since (cancelled, asked again).
+        if (settledSince()) return;
+        changeRequest(friend, true);
+        setError("요청을 무시하지 못했습니다. 다시 시도하세요.");
+      },
+    ).finally(() => dismissing.current.delete(friend.id));
+  }
 
-  const requestBanner = watchRequests.map((u) => (
-    <div key={u.id} className="banner">
-      <Avatar name={u.displayName} />
-      <span className="grow">{u.displayName}님이 같이 보자고 합니다</span>
-      <button onClick={() => void watchTogether(u)}>같이 보기</button>
-      <IconButton icon="close" label="무시" onClick={() => setWatchRequests((list) => list.filter((x) => x.id !== u.id))} />
-    </div>
-  ));
+  // One at a time, like the room's pause request: invitations first, then watch requests.
+  const invited = invitations[0];
+  const invitingHost = invited?.members.find((m) => m.role === "HOST")?.user;
+  const requester = !invited ? watchRequests[0] : undefined;
+  const incoming = invited ? (
+    <Dialog alert title={`${invitingHost?.displayName ?? "친구"}님이 같이 보기에 초대했습니다`} onClose={() => void answerInvitation(invited, false)}>
+      <p>{invited.content.title}</p>
+      <Actions>
+        <button className="link" onClick={() => void answerInvitation(invited, false)}>거절</button>
+        <button onClick={() => void answerInvitation(invited, true)}>입장</button>
+      </Actions>
+    </Dialog>
+  ) : requester ? (
+    <Dialog alert title={`${requester.displayName}님이 같이 보자고 합니다`} onClose={() => dismissWatchRequest(requester)}>
+      <p className="muted">지금 보는 영상으로 초대합니다.</p>
+      <Actions>
+        <button className="link" onClick={() => dismissWatchRequest(requester)}>무시</button>
+        <button onClick={() => void watchTogether(requester)}>같이 보기</button>
+      </Actions>
+    </Dialog>
+  ) : null;
 
   if (openRoom && socket && handle) {
     return (
       <div className="room-page">
-        {invitationBanner}
-        {requestBanner}
         {error && <div className="banner"><p className="error grow" role="alert">{error}</p></div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
         <Room key={openRoom} roomId={openRoom} me={me} handle={handle} socket={socket} status={status} subscribe={subscribe}
@@ -404,6 +441,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             // A list read before the change would bring the old setting back: updateRooms drops it.
             updateRooms((list) => list.map((r) => (r.id === openRoom ? { ...r, muted } : r)));
           }} />
+        {/* After the room: an invitation or watch request shows over its dialogs (same layer, later on top). */}
+        {incoming}
       </div>
     );
   }
@@ -423,8 +462,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <span className={`dot ${status === "open" ? "on" : ""}`} title={status === "open" ? "연결됨" : "연결 중"} />
         <IconButton icon="settings" label="설정" onClick={() => setScreen("settings")} />
       </header>
-      {invitationBanner}
-      {requestBanner}
+      {incoming}
       <main className="container">
         {error && <p className="error" role="alert">{error}</p>}
         {notice && <p className="muted">{notice}</p>}
@@ -706,6 +744,18 @@ function AddFriend({ onSent }: { onSent: () => void }) {
  * The room I host to invite a friend into: the one showing what I watch now (the open one first). When I
  * watch nothing the app can see (desktop), any room I host. undefined = start a new room.
  */
+export type RequestChange = { n: number; user: UserSummary; open: boolean };
+/** Changes kept to replay over a list load in flight. ponytail: more during one load drops the oldest. */
+const MAX_REQUEST_CHANGES = 100;
+
+/** The watch requests after these changes, in order: an open one goes last (newest), a closed one goes. */
+export function applyRequestChanges(list: UserSummary[], changes: RequestChange[]): UserSummary[] {
+  return changes.reduce(
+    (acc, c) => [...acc.filter((u) => u.id !== c.user.id), ...(c.open ? [c.user] : [])],
+    list,
+  );
+}
+
 export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string | null, watching: RoomContent | null) {
   return [...rooms]
     .sort((a, b) => Number(b.id === openRoom) - Number(a.id === openRoom))

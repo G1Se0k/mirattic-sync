@@ -7,6 +7,15 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### 패널 밖 알림 · 받은 합류 요청 복구 (2026-09-30, 결정 87)
+- 확장: 패널이 없을 때 초대 · 합류 요청 · 일시정지 요청(호스트)이 오면 툴바 아이콘 배지 + 아이콘 아래 말풍선(`action.openPopup`, `entrypoints/alert/`, 창에 포커스가 있을 때만, 10초 뒤 닫힘, "열기"로 패널). 채팅은 알리지 않음. 권한 추가 없음
+- 전체화면 영상: provider 탭의 content script(`toast.ts`)가 영상 위 오른쪽 위에 글자 알림 8초(shadow root, 누르면 닫힘, 전체화면을 나가면 사라짐). 사용자 결정으로 overlay 금지의 예외 (정책 문서 3개에 기록)
+- 버그 수정 (사용자 발견): 패널이 닫힌 동안 온 합류 요청이 다시 연 패널에 안 나옴 → 서버 `GET /api/rooms/requests/incoming`(열린 요청, 친구만, 1시간), "무시"는 `DELETE …/incoming/{id}`(요청자에게 알리지 않음). Home은 로드 카운터로 늦은 목록 무시, API 없는 서버에서도 나머지 로드는 그대로
+- 패널: 초대 · 합류 요청 배너 → 일시정지 요청과 같은 대화상자(하나씩, 초대 먼저). 일시정지 요청 대화상자는 남은 초를 1초마다 표시
+- 테스트: 서버 `RoomFlowTest` 29(초대를 무시한 뒤 합류 요청 → 목록 → 무시 → 사라짐 · 이후 초대는 응답 아님, 친구 삭제 후 제외), JS client 7 · sync-core 25 · ui 13 · extension 26, typecheck, 확장 빌드. 헤드리스 확인: 전체화면이 아니면 표시 안 함 → 전체화면 표시 → 나가면 사라짐
+- 검증: Codex Sol 1차 FAIL(지운 알림이 늦은 쓰기로 되살아남 · 동시 알림 덮어씀 · Esc가 가려진 대화상자까지 닫음) → 알림은 메모리 목록 하나 + 순서대로 반영(`publishAlerts`), Esc는 맨 위 `.overlay`만. 재검증 1 FAIL(목록 로드 중 온 요청이 로드 결과 전체를 버림) → 변경에 순번을 매겨 로드 결과 위에 다시 적용(`applyRequestChanges`, ui 테스트), `<video>` 전체화면은 알림 생략. 재검증 2 FAIL(무시 DELETE 전에 읽은 목록이 되살림) → 진행 중 무시는 목록에서 제외, 방 대화상자 뒤에 받은 요청 대화상자. 재검증 3 FAIL(DELETE 뒤에 도착한 로드) → DELETE 성공 때 닫힘을 한 번 더 기록. 재검증 4(사용자 승인) FAIL(`openPanelOnActionClick`이 popup보다 먼저라 배지 아이콘이 말풍선을 못 엶) → 끄고 `action.onClicked`에서 패널을 엶. 재검증 5 **PASS** (낮음 1: 배지는 최대 3)
+- 알려진 한계: 말풍선은 Chrome 창에 포커스가 없거나 전체화면이면 안 뜸(배지만). 영상 위 알림은 글자만(응답은 패널에서), 사이트가 `<video>` 자체를 전체화면으로 만들면 그릴 곳이 없어 표시 안 함(YouTube는 플레이어 div라 표시됨). 합류 요청 복구는 서버 배포 뒤부터 동작. 무시(DELETE)가 서버에 닿기 직전(수 ms)에 같은 친구의 다음 요청(30초 간격)이 오면 새 요청까지 지워질 수 있음(요청에 식별자가 없음). 배지 숫자는 최대 3(말풍선이 최근 3개만 보여 줌)
+
 ### Mirattic 계정 탈퇴 연동 (2026-09-29, Auth Phase 5)
 - `POST /api/internal/account-deletion`: Auth 계정 화면에서 탈퇴하면 Auth 가 보내는 삭제 명령(Auth 서명 JWT, aud `mirattic-sync`, purpose `account_deletion`, 60초). 기존 `DELETE /api/me` 와 같은 삭제·알림(방 나가기/닫기, `chat:delete`, `friend:update`, 소켓 종료). 프로필이 없으면 204 (여러 번 와도 같다)
 - purpose 없는 JWT(access token, ID token)와 다른 aud 는 401. 명령에는 scope 가 없어 API 토큰으로 쓰이지 않음. 이 경로는 access token 해석기에서 제외(SecurityConfig)

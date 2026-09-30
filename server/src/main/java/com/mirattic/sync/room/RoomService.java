@@ -239,6 +239,13 @@ public class RoomService {
 		return UserSummary.of(users.findById(me).orElseThrow(RoomService::notFound));
 	}
 
+	/** Of these requesters, the ones still my friends (unfriended or blocked since: dropped). */
+	@Transactional(readOnly = true)
+	public List<UserSummary> friendsAmong(String me, List<String> ids) {
+		Set<String> friends = Set.copyOf(friendships.friendIds(me));
+		return users.findAllById(ids.stream().filter(friends::contains).toList()).stream().map(UserSummary::of).toList();
+	}
+
 	@Transactional(readOnly = true)
 	public List<RoomView> mine(String me) {
 		List<String> ids = members.findByUserId(me).stream().map(RoomMember::getRoomId).toList();

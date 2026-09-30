@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
 import { openUrl, type FriendView, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
-import type { FollowerStatus, RoomSyncState } from "@mirattic/sync-core";
+import { PAUSE_REQUEST_SHOWN_MS, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
@@ -165,17 +165,28 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
           onClose={() => setInviting(false)} />
       )}
       {askingPause && <RequestPause handle={handle} onClose={() => setAskingPause(false)} />}
-      {s.pauseRequest && isHost && (
-        <Dialog alert title={`${s.pauseRequest.name}님이 일시정지를 요청했습니다`} onClose={() => handle.dismissPauseRequest()}>
-          {s.pauseRequest.reason && <p>{s.pauseRequest.reason}</p>}
-          <p className="muted">30초 후에 자동으로 닫힙니다.</p>
-          <Actions>
-            <button className="link" onClick={() => handle.dismissPauseRequest()}>닫기</button>
-            <button onClick={() => handle.pauseAll()}>모두 일시정지</button>
-          </Actions>
-        </Dialog>
-      )}
+      {s.pauseRequest && isHost && <PauseRequest request={s.pauseRequest} handle={handle} />}
     </main>
+  );
+}
+
+/** A member asks the host to pause; it closes by itself (sync-core) 30 s after it came, counted down here. */
+function PauseRequest({ request, handle }: { request: NonNullable<RoomSyncState["pauseRequest"]>; handle: RoomHandle }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const left = Math.max(0, Math.ceil((request.at + PAUSE_REQUEST_SHOWN_MS - now) / 1000));
+  return (
+    <Dialog alert title={`${request.name}님이 일시정지를 요청했습니다`} onClose={() => handle.dismissPauseRequest()}>
+      {request.reason && <p>{request.reason}</p>}
+      <p className="muted">{left}초 후에 자동으로 닫힙니다.</p>
+      <Actions>
+        <button className="link" onClick={() => handle.dismissPauseRequest()}>닫기</button>
+        <button onClick={() => handle.pauseAll()}>모두 일시정지</button>
+      </Actions>
+    </Dialog>
   );
 }
 

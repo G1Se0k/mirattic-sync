@@ -1,9 +1,11 @@
 import { browser, type Browser } from 'wxt/browser';
 import { ApiError, connectSocket, createApi, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { RoomSync } from '@mirattic/sync-core';
+import type { RoomView, ServerEvent, UserSummary } from '@mirattic/types';
 import { API_URL, SOCKET_URL, authorize, store } from '../session';
 import { hasConsent } from '../consent';
 import { watch, type Watch } from '../watch';
+import { TOAST, type ToastMessage } from '../toast';
 import { ROOM_ACTIONS, UI_PORT, type FromPanel, type Shared, type ToPanel } from '../ui-port';
 
 // The extension's engine (plan.md decision 69): signed-in session, socket, presence, the followed tab and the
@@ -13,10 +15,18 @@ import { ROOM_ACTIONS, UI_PORT, type FromPanel, type Shared, type ToPanel } from
 
 const KEEPALIVE_MS = 20_000;
 const ROOM_KEY = 'mirattic.room'; // storage.session: back into the room if the worker restarts
+const PROVIDER_TABS = ['https://www.youtube.com/*', 'https://www.netflix.com/*', 'https://laftel.net/*'];
+const ALERTS_KEY = 'mirattic.alerts'; // storage.session: what the toolbar bubble (entrypoints/alert) shows
+type Alert = { title: string; body: string };
 
 export default defineBackground(() => {
-  // Toolbar icon opens the side panel (outside the page, never over the player).
-  void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  // Toolbar icon opens the side panel (outside the page, never over the player). Opened here, not by
+  // `openPanelOnActionClick` (Chrome would take that over the alert bubble's popup): `onClicked` fires only
+  // while no popup is set, i.e. with no alert pending. The setting persists, so it is turned off explicitly.
+  void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+  browser.action.onClicked.addListener((tab) => {
+    if (tab.windowId !== undefined) void browser.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+  });
 
   const api = createApi({ baseUrl: API_URL, store, authorize });
   const ports = new Set<Browser.runtime.Port>();
@@ -54,6 +64,56 @@ export default defineBackground(() => {
   });
   const pushShared = () => broadcast({ kind: 'shared', shared: shared() });
 
+  /**
+   * With no panel open, an invite, a join request or a pause request marks the toolbar icon and opens a bubble
+   * under it (`action.openPopup`, Chrome 127+, only while a Chrome window has focus). Until a panel opens, the
+   * icon opens that bubble instead of the panel; its "열기" opens the panel. Chat never alerts here.
+   */
+  /** The alerts shown (newest first); the one source, written out in order by `publishAlerts`. */
+  let alerts: Alert[] = [];
+  let publishing = Promise.resolve();
+
+  function alert(title: string, body = '') {
+    void toastFullscreen(title, body); // a fullscreen video hides the panel and the toolbar alike
+    if (ports.size || !meId) return; // an open panel shows it; signed out: nothing
+    alerts = [{ title, body }, ...alerts].slice(0, 3);
+    publishAlerts(true);
+  }
+
+  /**
+   * Badge, tooltip, popup and the bubble's list follow `alerts` as it is when each step runs, one step at a
+   * time: a clear queued after an alert always wins, and alerts arriving together all count.
+   */
+  function publishAlerts(open = false) {
+    publishing = publishing
+      .then(async () => {
+        const list = alerts;
+        if (list.length) await browser.storage.session.set({ [ALERTS_KEY]: list });
+        else await browser.storage.session.remove(ALERTS_KEY);
+        await browser.action.setBadgeBackgroundColor({ color: '#3f6b5a' });
+        await browser.action.setBadgeText({ text: list.length ? String(list.length) : '' });
+        await browser.action.setTitle({ title: list[0]?.title ?? 'Mirattic Sync' });
+        await browser.action.setPopup({ popup: list.length ? 'alert.html' : '' });
+        // Still wanted now (no panel opened, nothing cleared meanwhile). No focused window: the badge waits.
+        if (open && list.length && alerts === list && !ports.size) await browser.action.openPopup().catch(() => {});
+      })
+      .catch(() => {});
+  }
+
+  /** To the provider tabs (only those with our script answer); one showing a fullscreen video draws it. */
+  async function toastFullscreen(title: string, body: string) {
+    const tabs = await browser.tabs.query({ url: PROVIDER_TABS }).catch(() => []);
+    for (const t of tabs) {
+      if (t.id !== undefined) void browser.tabs.sendMessage(t.id, { type: TOAST, title, body } satisfies ToastMessage).catch(() => {});
+    }
+  }
+
+  function clearAlerts() {
+    alerts = [];
+    publishAlerts();
+  }
+  clearAlerts(); // a (re)started worker holds no alerts for signed-out or stale state
+
   /** Tabs are looked at only after the user's consent (Chrome Web Store user data policy). */
   async function ensureWatching(windowId?: number) {
     if (!(await hasConsent())) return null;
@@ -87,11 +147,27 @@ export default defineBackground(() => {
       onEvent: (event) => {
         room?.handle(event);
         broadcast({ kind: 'event', event });
+        alertFor(event);
         if (event.type === 'chat:message' && event.roomId === room?.state.roomId) markRead(500);
       },
     });
     socket = s;
     keepAlive = setInterval(() => socket?.send({ type: 'sync:request', reqId: 'keepalive', payload: null }), KEEPALIVE_MS);
+  }
+
+  function alertFor(event: ServerEvent) {
+    if (event.type === 'room:invite') {
+      const view = event.payload as RoomView;
+      const host = view.members.find((m) => m.role === 'HOST');
+      alert(`${host?.user.displayName ?? '친구'}님의 같이 보기 초대`, view.content.title);
+    }
+    if (event.type === 'watch:request') {
+      alert(`${(event.payload as UserSummary).displayName}님이 같이 보자고 합니다`);
+    }
+    const asked = room?.state.pauseRequest;
+    if (event.type === 'pause:request' && asked && asked.userId === event.userId) {
+      alert(`${asked.name}님이 일시정지를 요청했습니다`, asked.reason);
+    }
   }
 
   const viewing = () => !!room && [...viewers.values()].includes(room.state.roomId);
@@ -161,6 +237,7 @@ export default defineBackground(() => {
 
   function signOut() {
     session++;
+    clearAlerts();
     closeRoom();
     clearInterval(keepAlive);
     const s = socket;
@@ -188,6 +265,7 @@ export default defineBackground(() => {
     // Only our own pages (the side panel), never a content script running in a provider's page.
     if (port.name !== UI_PORT || port.sender?.id !== browser.runtime.id || !port.sender.url?.startsWith(browser.runtime.getURL('/'))) return;
     ports.add(port);
+    clearAlerts(); // the panel shows them now
     port.onMessage.addListener(async (m: FromPanel) => {
       switch (m.op) {
         case 'hello':
