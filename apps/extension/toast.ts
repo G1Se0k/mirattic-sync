@@ -2,7 +2,8 @@ import { browser } from 'wxt/browser';
 
 // Alerts drawn over the video (plan.md decision 87): the background sends every alert to the provider tabs; a
 // visible one draws it at the top right of its video — of the fullscreen element in fullscreen (where neither the
-// panel nor the toolbar shows), else of the largest <video> in view, unless a panel is open (it shows its own).
+// panel nor the toolbar shows), else of the largest <video> in view, else of the page (no video: a home or search
+// page); the background sends none while a panel is open (it shows its own).
 // In a shadow root so the page's styles don't reach it, with the alert's two answers, which the background carries
 // out as the panel would. It reads nothing from the page but whether it is fullscreen and where its <video> are.
 // A page loaded while an alert still counts (the room's video opened on entering) asks for it (`TOAST_READY`).
@@ -42,7 +43,7 @@ const ANSWERS: Record<AlertKind, [string, string]> = {
 };
 const FADE_MS = 200;
 const READY_DELAY_MS = 2_000;
-const RETRY_MS = 1_000;
+const RECHECK_MS = 1_000;
 const FULLSCREEN_SETTLE_MS = 300; // the new layout, before measuring the video again
 const MAX_MS = 30_000;
 const MIN_VIDEO_WIDTH = 200; // thumbnails and previews aren't "the video"
@@ -53,26 +54,34 @@ const WIDTH = 300;
  * Where to draw: the element to append to, and the box's position — fixed to the screen in fullscreen, else in
  * the page's coordinates (`absolute`), so it stays on the video when the page scrolls.
  */
-function place(panelOpen: boolean): { host: Element; position: 'fixed' | 'absolute'; top: number; left: number } | null {
+type Place = {
+  host: Element; position: 'fixed' | 'absolute'; top: number; left: number;
+  /** What it sits over (the video, or the fullscreen element); none: the page's corner. */
+  over?: Element;
+};
+
+function place(panelOpen: boolean): Place | null {
   const fs = document.fullscreenElement;
   // A fullscreen <video> (or frame) renders no children: nothing can show over it (known limit).
   if (fs) {
     if (['VIDEO', 'IFRAME', 'CANVAS', 'IMG'].includes(fs.tagName)) return null;
-    return { host: fs, position: 'fixed', top: 24, left: innerWidth - WIDTH - 24 };
+    return { host: fs, position: 'fixed', top: 24, left: innerWidth - WIDTH - 24, over: fs };
   }
   if (panelOpen) return null;
-  const rect = [...document.querySelectorAll('video')]
-    .map((v) => v.getBoundingClientRect())
-    .filter((r) => r.width >= MIN_VIDEO_WIDTH && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth)
-    .sort((a, b) => b.width * b.height - a.width * a.height)[0];
-  if (!rect) return null;
-  // The video's top right corner (its visible part), in page coordinates. ponytail: placed once; a player that
-  // moves or resizes meanwhile (theater mode) leaves it where the video was.
+  const [video, rect] = [...document.querySelectorAll('video')]
+    .map((v) => [v, v.getBoundingClientRect()] as const)
+    .filter(([, r]) => r.width >= MIN_VIDEO_WIDTH && r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth)
+    .sort(([, a], [, b]) => b.width * b.height - a.width * a.height)[0] ?? [];
+  // No video in view (a home or search page, a player still loading): the page's top right, fixed on screen.
+  if (!video || !rect) return { host: document.documentElement, position: 'fixed', top: 16, left: innerWidth - WIDTH - 16 };
+  // The video's top right corner (its visible part), in page coordinates. ponytail: placed once over a video; one
+  // that moves or resizes meanwhile (theater mode) leaves it where the video was.
   return {
     host: document.documentElement,
     position: 'absolute',
     top: Math.max(rect.top, 0) + scrollY + 16,
     left: Math.min(rect.right, innerWidth) + scrollX - WIDTH - 16,
+    over: video,
   };
 }
 
@@ -119,26 +128,74 @@ export function serveToast() {
   // ponytail: asked once, a moment after load (the player's <video> comes late); a later one misses it.
   setTimeout(() => void browser.runtime.sendMessage({ type: TOAST_READY }).catch(() => {}), READY_DELAY_MS);
   /**
-   * The alerts shown, stacked newest on top in one host element whose closed shadow root the page can't read;
-   * placed when the first one comes, gone with the last.
+   * The alerts shown, newest on top (by `seq`), one stack per place: over each video (or the fullscreen element),
+   * placed where that video was when its first toast came, and at the page's corner when no video was in view. Each is a host element whose closed shadow
+   * root the page can't read; a new alert joins the stack for where it goes now and never moves the others (a
+   * toast over the video doesn't follow the page's scrolling). A stack goes with its last toast.
    */
-  let stack: { el: HTMLElement; list: Element } | null = null;
+  type Stack = { el: HTMLElement; list: HTMLElement };
+  const stacks = new Map<Element | 'corner', Stack>();
   const shown = new Map<string, Element>();
-  const clear = () => {
-    stack?.el.remove();
-    stack = null;
-    shown.clear();
+  let recheck: ReturnType<typeof setInterval> | undefined;
+  const stopRecheck = () => {
+    clearInterval(recheck);
+    recheck = undefined;
   };
-  /** Fades one out; the stack goes with the last. */
+  const clear = () => {
+    for (const stack of stacks.values()) stack.el.remove();
+    stacks.clear();
+    shown.clear();
+    stopRecheck();
+  };
+  /** A stack's toasts gone: so is the stack (and the corner's recheck). */
+  const tidy = () => {
+    for (const [where, stack] of stacks) {
+      if (stack.list.childElementCount) continue;
+      stack.el.remove();
+      stacks.delete(where);
+      if (where === 'corner') stopRecheck();
+    }
+  };
+  /** Into a stack by arrival, newest first (a merge keeps that order too). */
+  const insert = (list: HTMLElement, box: HTMLElement) => {
+    const seq = Number(box.dataset.seq);
+    const after = [...list.children].find((c) => Number((c as HTMLElement).dataset.seq) < seq);
+    list.insertBefore(box, after ?? null);
+  };
+  const stackAt = (at: Place) => {
+    const where = at.over ?? 'corner';
+    let stack = stacks.get(where);
+    if (!stack) {
+      const el = document.createElement('div');
+      const root = el.attachShadow({ mode: 'closed' });
+      root.innerHTML = `<style>${STYLE}</style><div class="stack"></div>`;
+      stack = { el, list: root.querySelector('.stack')! as HTMLElement };
+      Object.assign(stack.list.style, { position: at.position, top: `${at.top}px`, left: `${at.left}px` });
+      at.host.append(el);
+      stacks.set(where, stack);
+    }
+    // At the corner (no video yet): looked at again each second, and onto the video once one shows.
+    if (where === 'corner') {
+      recheck ??= setInterval(() => {
+        const now = place(false);
+        const corner = stacks.get('corner');
+        if (!now?.over || !corner) return;
+        const video = stackAt(now);
+        for (const box of [...corner.list.children]) insert(video.list, box as HTMLElement);
+        tidy();
+      }, RECHECK_MS);
+    }
+    return stack;
+  };
+  /** Fades one out; its stack goes with its last. */
   const remove = (key: string) => {
     const box = shown.get(key);
     if (!box) return;
     shown.delete(key);
     box.classList.add('out');
-    const from = stack;
     setTimeout(() => {
       box.remove();
-      if (stack === from && !shown.size) clear();
+      tidy();
     }, FADE_MS);
   };
   // Their place is gone either way: drawn again where they now go, for the time they have left.
@@ -147,28 +204,17 @@ export function serveToast() {
     setTimeout(() => void browser.runtime.sendMessage({ type: TOAST_READY }).catch(() => {}), FULLSCREEN_SETTLE_MS);
   });
 
-  /** Alerts with no place yet, retried until they stop counting. */
-  const waiting = new Map<string, { m: ToastMessage; until: number }>();
-  let retry: ReturnType<typeof setInterval> | undefined;
-
-  /** Draws it where the video is now; false when there is no place for it (no video in view yet). */
+  /** Draws it over the video (or the page's top right); false when it can't (a fullscreen <video>, a panel open). */
   function show(m: ToastMessage): boolean {
     const at = place(m.panelOpen === true);
     if (!at) return false;
-    if (!stack) {
-      const el = document.createElement('div');
-      const root = el.attachShadow({ mode: 'closed' });
-      root.innerHTML = `<style>${STYLE}</style><div class="stack"></div>`;
-      const list = root.querySelector('.stack')! as HTMLElement;
-      Object.assign(list.style, { position: at.position, top: `${at.top}px`, left: `${at.left}px` });
-      at.host.append(el);
-      stack = { el, list };
-    }
+    const stack = stackAt(at);
     const key = keyOf(m);
     shown.get(key)?.remove(); // the same alert again (a page replaying it): once
     const ms = Number.isFinite(m.ms) && m.ms > 0 ? Math.min(m.ms, MAX_MS) : MAX_MS;
     const box = document.createElement('div');
     box.className = 'toast';
+    box.dataset.seq = String(m.seq);
     box.setAttribute('role', 'alertdialog');
     box.innerHTML = `<div class="text"><b></b><span class="meta"></span><span class="body"></span></div>
       <div class="actions"></div><div class="bar" role="progressbar" aria-label="자동으로 닫힘"><i></i></div>`;
@@ -189,8 +235,9 @@ export function serveToast() {
     });
     // The bar running out closes it (the box's own fade-in ends too: only the bar's counts).
     box.querySelector('.bar > i')!.addEventListener('animationend', () => shown.get(key) === box && remove(key));
-    stack.list.prepend(box);
+    insert(stack.list, box);
     shown.set(key, box);
+    tidy(); // the same alert's earlier box may have left a stack empty
     return true;
   }
 
@@ -202,30 +249,15 @@ export function serveToast() {
     if (sender.id !== browser.runtime.id || typeof m?.seq !== 'number') return;
     if (m.type === TOAST_CLEAR) {
       clearedAt = Math.max(clearedAt, m.seq);
-      waiting.clear();
       return clear();
     }
     if (m.type === TOAST_DISMISS) {
       dismissedAt.set(keyOf(m), Math.max(dismissedAt.get(keyOf(m)) ?? 0, m.seq));
-      waiting.delete(keyOf(m));
       return void remove(keyOf(m)); // settled elsewhere: no longer answerable
     }
     if (m.type !== TOAST || !(m.kind in ANSWERS)) return;
     if (m.seq < clearedAt || m.seq < (dismissedAt.get(keyOf(m)) ?? 0)) return; // overtaken by its clear or dismissal
-    waiting.delete(keyOf(m));
-    if (show(m)) return;
-    // No video in view yet (a player still loading): tried again each second while it counts.
-    waiting.set(keyOf(m), { m, until: Date.now() + (Number.isFinite(m.ms) && m.ms > 0 ? Math.min(m.ms, MAX_MS) : MAX_MS) });
-    retry ??= setInterval(() => {
-      for (const [key, w] of waiting) {
-        const left = w.until - Date.now();
-        if (left <= 0 || show({ ...w.m, ms: left })) waiting.delete(key);
-      }
-      if (!waiting.size) {
-        clearInterval(retry);
-        retry = undefined;
-      }
-    }, RETRY_MS);
+    show(m);
   });
 }
 

@@ -438,7 +438,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   }
 
   // Ticks while anything here runs out (the dialogs' seconds, the cancel buttons).
-  const counting = invitations.length + watchRequests.length + asked.length > 0;
+  // Only while one of them is still in time: expired ones stay in the lists but no longer need the clock.
+  const counting = invitations.some((r) => live(`i:${r.id}`)) || watchRequests.some((u) => live(`r:${u.id}`))
+    || asked.some((id) => live(`a:${id}`));
   useEffect(() => {
     if (!counting) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
