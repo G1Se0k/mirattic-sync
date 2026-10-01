@@ -66,6 +66,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   /** Dismissals the server hasn't confirmed yet: a list read meanwhile may still have them open. */
   const dismissing = useRef(new Set<string>());
   const requestLoads = useRef(0);
+  /** Each friend's requests as they arrive, counted: a new one is another request (a list read isn't). */
+  const requestArrivals = useRef(new Map<string, number>());
   const changeRequest = (user: IncomingRequest, open: boolean) => {
     if (open && user.expiresInMs !== undefined) expireIn(`r:${user.id}`, user.expiresInMs);
     const n = ++requestSeq.current;
@@ -223,6 +225,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         }
         if (event.type === "watch:request") {
           const from = event.payload as IncomingRequest;
+          requestArrivals.current.set(from.id, (requestArrivals.current.get(from.id) ?? 0) + 1);
           expireIn(`r:${from.id}`, from.expiresInMs);
           changeRequest(from, true);
         }
@@ -479,6 +482,24 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const invited = invitations.find((r) => live(`i:${r.id}`));
   const invitingHost = invited?.members.find((m) => m.role === "HOST")?.user;
   const requester = !invited ? watchRequests.find((u) => live(`r:${u.id}`)) : undefined;
+  // A watch request shown while I watched something: dismissed ("무시") once I've been without a video for a moment,
+  // like its toast over a page — "같이 보기" invites to what I watch. Not one that came while nothing was open.
+  // Each request by its friend and its arrival (a new one from the same friend is another; a list read is the same).
+  // Forgotten once that request isn't the one shown (answered, run out, another shown).
+  // Only while its dialog is on screen: not behind the "replaced" notice or Settings (which don't draw it).
+  const roomShown = Boolean(openRoom && socket && handle);
+  const dialogOnScreen = status !== "replaced" && (roomShown || screen !== "settings");
+  const shownRequest = requester && dialogOnScreen ? `${requester.id}:${requestArrivals.current.get(requester.id) ?? 0}` : null;
+  const sawVideo = useRef<string | null>(null);
+  useEffect(() => {
+    if (shownRequest !== sawVideo.current) sawVideo.current = null;
+    if (!requester || !shownRequest) return;
+    if (watching) return void (sawVideo.current = shownRequest);
+    if (sawVideo.current !== shownRequest) return;
+    const t = setTimeout(() => dismissWatchRequest(requester), VIDEO_FREE_CONFIRM_MS);
+    return () => clearTimeout(t);
+  }, [shownRequest, watching]); // the request itself: the same one while its key is
+
   const incoming = invited ? (
     <Dialog alert title={`${invitingHost?.displayName ?? "친구"}님이 같이 보기에 초대했습니다`} onClose={() => void answerInvitation(invited, false)}>
       <p>{invited.content.title}</p>
@@ -842,6 +863,8 @@ const ROOMS_REFETCH_MS = 500;
 const MAX_DELETED = 100;
 /** How long "요청이 거절되었습니다" shows. */
 const DECLINED_SHOWN_MS = 5_000;
+/** Without a video this long (a page between videos may load meanwhile): a watch request shown is dismissed. */
+const VIDEO_FREE_CONFIRM_MS = 3_000;
 
 const noSubscribe = () => () => {};
 const nothing = () => null;
