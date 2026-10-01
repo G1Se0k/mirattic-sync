@@ -4,4 +4,5 @@ FROM eclipse-temurin:21-jre
 COPY target/server-0.0.1-SNAPSHOT.jar /app.jar
 USER 65534
 EXPOSE 8080
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app.jar"]
+# 60%: non-heap needs ~0.9 GB under load (threads, buffers), which 25% of compose's mem_limit would not leave.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=60", "-jar", "/app.jar"]

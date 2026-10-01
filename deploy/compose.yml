@@ -20,6 +20,9 @@ services:
   server:
     image: mirattic-sync-server:current
     restart: unless-stopped
+    # Shares the host's Docker VM with other services. Heap 60% (server/Dockerfile) = 1.5 GB, the rest for threads
+    # and buffers (~0.9 GB under load): about 5000 concurrent users (docs/progress.md, load test).
+    mem_limit: 2560m
     depends_on:
       mysql:
         condition: service_healthy
