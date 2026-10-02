@@ -365,7 +365,6 @@ function PlayerStatus({ content, s, isHost, experimentOff, onRequestPause }: {
       {s.canPlay && (
         <p className="muted">
           {isHost ? "탭에서 재생·일시정지·이동하면 멤버에게 전달됩니다." : describeSync(s.sync, s.clockReady)}
-          {!isHost && s.lastCorrection !== null && ` · 마지막 보정 ${s.lastCorrection}ms`}
           {!isHost && cooldown > 0 && ` · 일시정지 요청은 ${cooldown}초 후에 다시 보낼 수 있습니다`}
         </p>
       )}

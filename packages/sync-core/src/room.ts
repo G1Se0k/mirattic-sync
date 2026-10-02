@@ -34,7 +34,6 @@ export type RoomSyncState = {
    */
   away: boolean;
   sync: FollowerStatus | null;
-  lastCorrection: number | null;
   /** Member: the host moved to another video outside the series — ask whether to open it. */
   switched: RoomContent | null;
   /** Member: no pause request before this (epoch ms). */
@@ -69,7 +68,7 @@ export type RoomSyncDeps = {
 export function emptyRoomState(roomId: string): RoomSyncState {
   return {
     roomId, room: null, closed: false, loadFailed: false, clockReady: false, canPlay: false, snapshot: undefined,
-    away: false, sync: null, lastCorrection: null, switched: null, pauseCooldownUntil: 0, pauseRequest: null,
+    away: false, sync: null, switched: null, pauseCooldownUntil: 0, pauseRequest: null,
   };
 }
 
@@ -323,7 +322,7 @@ export class RoomSync {
     const follower = new SyncFollower({
       adapter: engineOf,
       clock: this.clock,
-      onStatus: (s) => this.set(s.kind === "corrected" ? { sync: s, lastCorrection: Math.round(s.driftMs) } : { sync: s }),
+      onStatus: (s) => this.set({ sync: s }),
     });
     this.follower = follower;
     if (this.latest) follower.apply(this.latest);
