@@ -1135,6 +1135,44 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void noWatchRequestToAFriendInMyRoomRightNow() throws Exception {
+		TestUser host = signup();
+		TestUser member = signup();
+		befriend(host, member);
+		JsonNode room = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(),
+				"{\"content\":%s,\"inviteIds\":[]}".formatted(CONTENT)));
+		String roomId = room.path("id").asString();
+		call(HttpMethod.POST, "/api/rooms/join", member.accessToken(), "{\"code\":\"%s\"}".formatted(room.path("code").asString()))
+				.andExpect(status().isOk());
+		Client hostWs = connect(host);
+		connect(member);
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+		hostWs.nextOfType("room:update"); // the join's own announcement
+		String to = "{\"friendId\":\"%s\"}";
+
+		// The host is in our room: asking them would only invite me again.
+		String detail = body(call(HttpMethod.POST, "/api/rooms/requests", member.accessToken(), to.formatted(host.id()))
+				.andExpect(status().isConflict())).path("detail").asString();
+		assertThat(detail).isEqualTo("already in the same room");
+		assertThat(hostWs.nextOfType("watch:request")).isNull();
+
+		// Out of the room (watching elsewhere, still online): asking works again.
+		hostWs.send(event("room:leave", roomId, "{}"));
+		assertThat(hostWs.nextOfType("room:update")).isNotNull(); // announced after the leave is applied
+		call(HttpMethod.POST, "/api/rooms/requests", member.accessToken(), to.formatted(host.id()))
+				.andExpect(status().isAccepted());
+		assertThat(hostWs.nextOfType("watch:request").path("userId").asString()).isEqualTo(member.id());
+
+		// Back in the room before answering: the open request can still be taken back.
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("room:update");
+		call(HttpMethod.DELETE, "/api/rooms/requests/" + host.id(), member.accessToken(), null)
+				.andExpect(status().isNoContent());
+		assertThat(hostWs.nextOfType("watch:cancel").path("userId").asString()).isEqualTo(member.id());
+	}
+
+	@Test
 	void watchRequestsGoToOnlineFriendsOnlyAndAreThrottled() throws Exception {
 		TestUser me = signup();
 		TestUser friend = signup();

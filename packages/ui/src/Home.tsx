@@ -307,6 +307,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   }
 
   const sorted = [...friends].sort((a, b) => rank(a.presence) - rank(b.presence));
+  /** In a room of mine right now: nothing to ask them to join (the server refuses it too). */
+  const together = (friendId: string) =>
+    rooms.some((r) => r.members.some((m) => m.user.id === me.id) && r.members.some((m) => m.user.id === friendId && m.present));
 
   /** Invites into my room for what I watch now, or starts one with it. */
   async function watchTogether(friend: UserSummary) {
@@ -383,7 +386,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           () => {},
         );
       }
-      setError(status === 409 ? "친구가 오프라인입니다." : status === 429 ? "방금 요청했습니다. 잠시 후 다시 시도하세요." : "요청하지 못했습니다.");
+      setError(status === 409 && e instanceof ApiError && e.message === "already in the same room" ? "이미 같은 방에 있습니다."
+        : status === 409 ? "친구가 오프라인입니다." : status === 429 ? "방금 요청했습니다. 잠시 후 다시 시도하세요." : "요청하지 못했습니다.");
     } finally {
       inFlight.current.delete(friend.id);
       pendingDeclines.current.delete(friend.id);
@@ -659,7 +663,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 <span className="actions">
                   {asked.includes(f.user.id) && live(`a:${f.user.id}`) ? (
                     <IconButton icon="close" label="합류 요청 취소" disabled={asking.includes(f.user.id)} onClick={() => void cancelWatch(f.user)} />
-                  ) : f.presence.status === "WATCHING" && (
+                  ) : f.presence.status === "WATCHING" && !together(f.user.id) && (
                     <IconButton icon="join" label="합류 요청" onClick={() => void requestWatch(f.user)} />
                   )}
                   <Menu label={`${f.user.displayName} 메뉴`} items={[

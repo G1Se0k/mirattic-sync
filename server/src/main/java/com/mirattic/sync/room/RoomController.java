@@ -199,6 +199,7 @@ class RoomController {
 	@ResponseStatus(HttpStatus.ACCEPTED)
 	Asked requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body) {
 		UserSummary me = rooms.requestWatch(jwt.getSubject(), body.friendId());
+		rooms.requireApart(me.id(), body.friendId());
 		if (!hub.isOnline(body.friendId())) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "friend is offline");
 		}

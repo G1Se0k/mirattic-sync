@@ -65,6 +65,8 @@ public class RoomService {
 	/** An invitation counts this long (decision 87); inviting again starts it over. */
 	static final long INVITATION_MS = 30_000;
 	static final int MAX_CHAT_LENGTH = 1000;
+	/** The 409 detail of a watch request to a friend I'm already in a room with (the client says so). */
+	static final String ALREADY_TOGETHER = "already in the same room";
 	static final int CHAT_HISTORY = 100;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
@@ -247,6 +249,19 @@ public class RoomService {
 			throw notFound();
 		}
 		return UserSummary.of(users.findById(me).orElseThrow(RoomService::notFound));
+	}
+
+	/**
+	 * A new watch request (not its cancel): refused while I'm a member of a room the friend is in right now, where
+	 * their answer would only invite me again.
+	 */
+	@Transactional(readOnly = true)
+	public void requireApart(String me, String friendId) {
+		Set<String> mine = members.findByUserId(me).stream().map(RoomMember::getRoomId).collect(Collectors.toSet());
+		if (members.findByUserId(friendId).stream()
+				.anyMatch(m -> mine.contains(m.getRoomId()) && hub.presentIn(m.getRoomId()).contains(friendId))) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, ALREADY_TOGETHER);
+		}
 	}
 
 	/** Of these requesters, the ones still my friends (unfriended or blocked since: dropped). */
