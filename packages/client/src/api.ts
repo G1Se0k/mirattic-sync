@@ -225,6 +225,12 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     room: (id: string) => authed<RoomView>("GET", `/api/rooms/${id}`),
     /** Leave or decline. The host leaving closes the room. */
     leaveRoom: (id: string) => authed<void>("DELETE", `/api/rooms/${id}/members/me`),
+    /**
+     * Back from the room screen (decision 90): the host's closes the room (`closed`) once `confirmed` (409 before),
+     * a member's does nothing.
+     */
+    backFromRoom: (id: string, confirmed: boolean) =>
+      authed<{ closed: boolean }>("POST", `/api/rooms/${id}/back`, { confirmed }),
     /** 100 chat messages, oldest first: the latest, or those before message `before`. New ones arrive as `chat:message`. */
     messages: (id: string, before?: string) =>
       authed<ChatMessage[]>("GET", `/api/rooms/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ""}`),

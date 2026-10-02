@@ -120,6 +120,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const watching = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatching ?? nothing);
   const info = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.nowWatchingInfo ?? nothing);
   const activeRoom = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.activeRoom ?? nothing);
+  // Rooms of mine their host closed (decision 90), kept by the platform until a panel showed the notice.
+  const ended = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.closedRooms ?? noneClosed)[0];
   // The extension entered another room without this screen (an answer on the alert over the video): show it.
   const lastActive = useRef(activeRoom);
   useEffect(() => {
@@ -504,6 +506,14 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     return () => clearTimeout(t);
   }, [shownRequest, watching]); // the request itself: the same one while its key is
 
+  const endedNotice = ended ? (
+    <Dialog alert title="방이 종료되었습니다" onClose={() => platform.seenClosed?.(ended.roomId)}>
+      <p className="muted">방장이 방을 나가 방이 종료되었습니다.</p>
+      {ended.title && <p>{ended.title}</p>}
+      <Actions><button onClick={() => platform.seenClosed?.(ended.roomId)}>확인</button></Actions>
+    </Dialog>
+  ) : null;
+
   const incoming = invited ? (
     <Dialog alert title={`${invitingHost?.displayName ?? "친구"}님이 같이 보기에 초대했습니다`} onClose={() => void answerInvitation(invited, false)}>
       <p>{invited.content.title}</p>
@@ -553,14 +563,18 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           }} />
         {/* After the room: an invitation or watch request shows over its dialogs (same layer, later on top). */}
         {incoming}
+        {endedNotice}
       </div>
     );
   }
 
   if (screen === "settings") {
     return (
-      <Settings me={me} blocked={blocked} onMeChange={onMeChange} onUnblock={(id) => void act(() => api.unblock(id))()}
-        onSignedOut={onSignedOut} onClose={() => setScreen("home")} />
+      <>
+        <Settings me={me} blocked={blocked} onMeChange={onMeChange} onUnblock={(id) => void act(() => api.unblock(id))()}
+          onSignedOut={onSignedOut} onClose={() => setScreen("home")} />
+        {endedNotice /* a closure is told wherever the panel is */}
+      </>
     );
   }
 
@@ -573,6 +587,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <IconButton icon="settings" label="설정" onClick={() => setScreen("settings")} />
       </header>
       {incoming}
+      {endedNotice}
       <main className="container">
         {error && <p className="error" role="alert">{error}</p>}
         {askLine}
@@ -872,6 +887,8 @@ const VIDEO_FREE_CONFIRM_MS = 3_000;
 
 const noSubscribe = () => () => {};
 const nothing = () => null;
+const NONE_CLOSED: { roomId: string; title: string }[] = [];
+const noneClosed = () => NONE_CLOSED;
 
 
 

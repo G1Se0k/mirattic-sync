@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -117,6 +118,70 @@ public class SocketHub {
 		return sessions.getOrDefault(userId, Set.of()).contains(session);
 	}
 
+	/** How long a kept event waits for its acknowledgement. */
+	static final long KEPT_MS = 3_600_000;
+	/**
+	 * user → events kept until their app acknowledges them (`room:closed`, decision 90). ponytail: in memory,
+	 * single instance, an hour.
+	 */
+	private final Map<String, List<ServerEvent>> kept = new ConcurrentHashMap<>();
+
+	/**
+	 * Sends the event and keeps it until `acknowledge`: every connection of the user gets it again (`sendKept`
+	 * on connect), so one made or lost right now doesn't miss it. Under the user's lock, like `add`.
+	 */
+	public void sendKept(String userId, ServerEvent event) {
+		synchronized (lockFor(userId)) {
+			long now = System.currentTimeMillis();
+			// Only this user's list, under their lock: another user's is theirs to prune (when they get one next).
+			kept.compute(userId, (k, list) -> {
+				List<ServerEvent> next = list == null ? new CopyOnWriteArrayList<>() : list;
+				next.removeIf(e -> now - e.serverTime() >= KEPT_MS);
+				next.add(event);
+				return next;
+			});
+			sendEvent(userId, event);
+		}
+	}
+
+	/** Expired kept events of users who didn't connect again, every 10 minutes (each list under its user's lock). */
+	@Scheduled(fixedDelay = 600_000)
+	void dropExpiredKept() {
+		long now = System.currentTimeMillis();
+		for (String userId : kept.keySet()) {
+			synchronized (lockFor(userId)) {
+				kept.computeIfPresent(userId, (k, l) -> {
+					l.removeIf(e -> now - e.serverTime() >= KEPT_MS);
+					return l.isEmpty() ? null : l;
+				});
+			}
+		}
+	}
+
+	/** A new connection: the kept events not acknowledged yet (expired ones dropped). */
+	void sendKept(String userId) {
+		synchronized (lockFor(userId)) {
+			long now = System.currentTimeMillis();
+			List<ServerEvent> list = kept.computeIfPresent(userId, (k, l) -> {
+				l.removeIf(e -> now - e.serverTime() >= KEPT_MS);
+				return l.isEmpty() ? null : l;
+			});
+			if (list != null) {
+				list.forEach(e -> sendEvent(userId, e));
+			}
+		}
+	}
+
+	/** The user's app has the kept event of this type and room: not sent again. */
+	void acknowledge(String userId, String type, String roomId) {
+		synchronized (lockFor(userId)) {
+			kept.computeIfPresent(userId, (k, list) -> {
+				list.removeIf(e -> e.type().equals(type) && roomId.equals(e.roomId()));
+				return list.isEmpty() ? null : list;
+			});
+		}
+	}
+
 	public boolean isOnline(String userId) {
 		return sessions.containsKey(userId);
 	}
@@ -154,19 +219,20 @@ public class SocketHub {
 		return (T) result[0];
 	}
 
+
 	/**
-	 * Runs `close` only if no connection is in the room, under the room's entry lock — the one `joinRoom` takes, so
-	 * a join can't slip in between the check and the close (it then finds the room gone). ponytail: holds the
-	 * entry lock across one DB write, like joinRoom across one read.
+	 * Runs `action` only if none of the user's connections is in the room, under the room's entry lock (the one
+	 * `joinRoom` takes): a join of theirs can't slip in between. A non-null result means the room closed (its
+	 * connections are dropped from it); null keeps it. ponytail: holds the entry lock across one DB write.
 	 */
-	<T> T closeIfEmpty(String roomId, Supplier<T> close, T otherwise) {
-		Object[] result = {otherwise};
+	<T> T whileAbsent(String roomId, String userId, Supplier<T> action) {
+		Object[] result = {null};
 		rooms.compute(roomId, (k, set) -> {
-			if (set != null && !set.isEmpty()) {
+			if (set != null && set.stream().anyMatch(s -> userId.equals(s.getAttributes().get(SocketHandler.USER_ID)))) {
 				return set;
 			}
-			result[0] = close.get();
-			return null;
+			result[0] = action.get();
+			return result[0] == null ? set : null;
 		});
 		@SuppressWarnings("unchecked")
 		T out = (T) result[0];

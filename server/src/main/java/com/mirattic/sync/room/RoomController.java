@@ -417,15 +417,37 @@ class RoomController {
 	}
 
 	/** Leave (or decline an invite). The host leaving closes the room; members then get 404 on refetch. */
+	record Back(boolean closed) {
+	}
+
+	record BackRequest(boolean confirmed) {
+	}
+
+	/**
+	 * Back from the room screen (decision 90): the host's closes the room (`room:closed` to the members) once
+	 * `confirmed`, 409 before; a member's does nothing.
+	 */
+	@PostMapping("/{id}/back")
+	Back back(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @RequestBody(required = false) BackRequest body) {
+		RoomService.Left left = rooms.back(jwt.getSubject(), id, body != null && body.confirmed());
+		if (left == null) {
+			return new Back(false);
+		}
+		hub.closeRoom(id);
+		rooms.announceClosed(id, jwt.getSubject(), left);
+		return new Back(true);
+	}
+
 	@DeleteMapping("/{id}/members/me")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void leave(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
 		RoomService.Left left = rooms.leave(jwt.getSubject(), id);
 		if (left.closed()) {
 			hub.closeRoom(id);
-		} else {
-			hub.removeFromRoom(id, jwt.getSubject());
+			rooms.announceClosed(id, jwt.getSubject(), left);
+			return;
 		}
+		hub.removeFromRoom(id, jwt.getSubject());
 		rooms.announce(id, left.memberIds());
 	}
 }

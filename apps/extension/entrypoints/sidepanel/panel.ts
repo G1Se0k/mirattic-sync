@@ -24,9 +24,15 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
   const replies = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void }>();
   let nextId = 0;
   let shared: Shared = {
-    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, experiments: { netflix: false, laftel: false }, activeRoom: null, alertsUntil: {},
+    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, experiments: { netflix: false, laftel: false }, activeRoom: null, alertsUntil: {}, closedRooms: [],
   };
   let status: SocketStatus = 'closed';
+  /**
+   * Closure notices shown here (`closed:seen`, "account|room") the background hasn't confirmed storing: said again
+   * after its restart.
+   */
+  const dismissed = new Map<string, { roomId: string; userId: string }>();
+  const seen = (d: { roomId: string; userId: string }) => send({ op: 'closed:seen', ...d });
   let socketHandlers: { onEvent(event: ServerEvent): void; onStatus(status: SocketStatus): void } | null = null;
   /** The room this panel shows; `seen` once the background made it its active room. */
   let view: { roomId: string; state: RoomSyncState; listeners: Set<() => void>; seen: boolean; shown: boolean } | null = null;
@@ -37,6 +43,9 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
 
   const onMessage = (m: ToPanel) => {
     switch (m.kind) {
+      case 'closed:recorded':
+        dismissed.delete(`${m.userId}|${m.roomId}`);
+        return;
       case 'reply': {
         const r = replies.get(m.id);
         replies.delete(m.id);
@@ -54,6 +63,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
           watching: same(shared.watching, m.shared.watching),
           watchingInfo: same(shared.watchingInfo, m.shared.watchingInfo),
           offSite: same(shared.offSite, m.shared.offSite),
+          closedRooms: same(shared.closedRooms, m.shared.closedRooms),
         };
         // Another window's panel made a different room the active one: this view is over (back to the list).
         const v = view;
@@ -99,6 +109,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
         send({ op: 'hello', windowId });
         if (socketHandlers) send({ op: 'socket' });
         if (view?.shown) send({ op: 'room:open', roomId: view.roomId, resume: true });
+        dismissed.forEach(seen);
       }, RECONNECT_MS);
     });
   };
@@ -129,6 +140,15 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
     },
     activeRoom: () => shared.activeRoom,
     alertUntil: (kind, target) => shared.alertsUntil[`${kind}:${target}`],
+    closedRooms: () => shared.closedRooms,
+    seenClosed: (roomId) => {
+      // The account it was shown to (the one these notices are for), until the background confirms storing it.
+      const shown = shared.closedRooms.find((c) => c.roomId === roomId);
+      if (!shown) return;
+      const key = `${shown.userId}|${roomId}`;
+      dismissed.set(key, { roomId, userId: shown.userId });
+      seen({ roomId, userId: shown.userId });
+    },
     subscribe: (onChange) => {
       subscribers.add(onChange);
       return () => void subscribers.delete(onChange);

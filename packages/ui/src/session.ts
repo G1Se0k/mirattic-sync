@@ -49,6 +49,10 @@ export type Platform = {
   room(roomId: string): RoomHandle;
   /** When an invitation or watch request alerted before the panel opened runs out (epoch ms), if known. */
   alertUntil?(kind: "invite" | "request", target: string): number | undefined;
+  /** Rooms of mine their host closed (decision 90), to tell about; the same array until it changes (`subscribe`). */
+  closedRooms?(): { roomId: string; title: string }[];
+  /** Its notice was shown: not again (in any panel). */
+  seenClosed?(roomId: string): void;
   /** The room the app is still in (the extension keeps it when the panel closes). */
   activeRoom?(): string | null;
   /** Provider control the user turns on at their own risk (Netflix, Laftel). Absent = not offered in this app. */

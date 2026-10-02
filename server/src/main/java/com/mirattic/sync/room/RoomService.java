@@ -50,7 +50,8 @@ public class RoomService {
 	}
 
 	/** Who to notify after a leave, and whether the room was closed (host left). */
-	public record Left(List<String> memberIds, boolean closed) {
+	/** `memberIds`: everyone to tell (members, and invitees if it closed). `ended`: a closed room's members and title. */
+	public record Left(List<String> memberIds, boolean closed, Ended ended) {
 	}
 
 	/** A room left by a deleted account. */
@@ -67,6 +68,8 @@ public class RoomService {
 	static final int MAX_CHAT_LENGTH = 1000;
 	/** The 409 detail of a watch request to a friend I'm already in a room with (the client says so). */
 	static final String ALREADY_TOGETHER = "already in the same room";
+	/** The 409 detail of an unconfirmed back by the host (the client asks them, then sends it confirmed). */
+	static final String HOST_MUST_CONFIRM = "the host closes the room: confirm first";
 	static final int CHAT_HISTORY = 100;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
@@ -82,6 +85,7 @@ public class RoomService {
 	private final ChatMessageRepository messages;
 	private final SocketHub hub;
 	private final BlockRepository blocks;
+
 
 	RoomService(RoomRepository rooms, RoomMemberRepository members, FriendshipRepository friendships,
 			UserRepository users, ChatMessageRepository messages, SocketHub hub, BlockRepository blocks) {
@@ -294,10 +298,52 @@ public class RoomService {
 		List<String> everyone = memberIds(roomId);
 		if (self.getRole() == RoomMember.Role.HOST) {
 			rooms.deleteById(roomId);
-			return new Left(withInvited(everyone, room), true);
+			return new Left(withInvited(everyone, room), true, new Ended(everyone, room.content().title()));
 		}
 		members.delete(self);
-		return new Left(everyone, false);
+		return new Left(everyone, false, null);
+	}
+
+	@Transactional(readOnly = true)
+	public boolean isHost(String me, String roomId) {
+		return members.findByRoomIdAndUserId(roomId, me).filter(m -> m.getRole() == RoomMember.Role.HOST).isPresent();
+	}
+
+	/**
+	 * The host's connections stayed out of the room (decision 90): closes it if they're still its host (not after a
+	 * hand-over). @return the members and invitees to tell, or null if it stays.
+	 */
+	@Transactional
+	public Left closeHostedBy(String hostId, String roomId) {
+		Room room = rooms.findForUpdate(roomId).orElse(null);
+		if (room == null || !isHost(hostId, roomId)) {
+			return null;
+		}
+		List<String> everyone = memberIds(roomId);
+		rooms.deleteById(roomId);
+		return new Left(withInvited(everyone, room), true, new Ended(everyone, room.content().title()));
+	}
+
+	/** A room closed by its host's leaving: who was in it, and what it was called (for their notice). */
+	public record Ended(List<String> members, String title) {
+	}
+
+	/**
+	 * Back from the room screen to the list (decision 90): the host's closes the room, like their "방 나가기" — once
+	 * they `confirmed` it (409 otherwise: a screen that still showed them as a member asks them first); a member's
+	 * does nothing (they stay in it). Decided under the room lock, after any hand-over in progress.
+	 * @return the closed room's people to tell, or null if it stays.
+	 */
+	@Transactional
+	public Left back(String me, String roomId, boolean confirmed) {
+		rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+		if (requireMember(me, roomId).getRole() != RoomMember.Role.HOST) {
+			return null;
+		}
+		if (!confirmed) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, HOST_MUST_CONFIRM);
+		}
+		return leave(me, roomId);
 	}
 
 	/** Account deletion: leaves every room (closing those hosted), in the caller's transaction. */
@@ -481,17 +527,13 @@ public class RoomService {
 		return rooms.findAll().stream().map(Room::getId).toList();
 	}
 
-	/** Closes a room nobody is in (decision 75). @return its members (to tell them), empty if already gone. */
-	@Transactional
-	public List<String> close(String roomId) {
-		Room room = rooms.findForUpdate(roomId).orElse(null);
-		if (room == null) {
-			return List.of();
-		}
-		List<String> everyone = memberIds(roomId);
-		rooms.deleteById(roomId);
-		return withInvited(everyone, room);
+	/** Every room's host: room → user. */
+	@Transactional(readOnly = true)
+	public Map<String, String> hosts() {
+		return members.findAll().stream().filter(m -> m.getRole() == RoomMember.Role.HOST)
+				.collect(Collectors.toMap(RoomMember::getRoomId, RoomMember::getUserId, (a, b) -> a));
 	}
+
 
 	/** A closing room's members and invitees: all told (`room:update`), so an invitation's banner goes too. */
 	private static List<String> withInvited(List<String> memberIds, Room room) {
@@ -622,6 +664,19 @@ public class RoomService {
 	}
 
 	/** Tells every member's connections to refetch the room (same pattern as `friend:update`). */
+	/**
+	 * The host's leaving closed the room (decision 90): `room:closed` with its title to the other members (for their
+	 * notice; not to invitees), then the usual `room:update` to everyone told.
+	 */
+	public void announceClosed(String roomId, String hostId, Left left) {
+		long now = System.currentTimeMillis();
+		ServerEvent closed = new ServerEvent("room:closed", roomId, hostId, null, now, Map.of("title", left.ended().title()));
+		// Kept until each member's app acknowledges it (`room:closed:ack`), sent again on their connections meanwhile:
+		// one offline or reconnecting right now still gets it.
+		left.ended().members().stream().filter(id -> !id.equals(hostId)).forEach(id -> hub.sendKept(id, closed));
+		announce(roomId, left.memberIds());
+	}
+
 	public void announce(String roomId, Collection<String> memberIds) {
 		ServerEvent event = new ServerEvent("room:update", roomId, null, null, System.currentTimeMillis(), null);
 		for (String id : memberIds) {

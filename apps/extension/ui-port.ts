@@ -33,7 +33,9 @@ export type FromPanel =
   | { op: 'room:close'; roomId: string }
   | { op: 'room:exit'; roomId: string }
   | { op: 'room:act'; roomId: string; name: RoomAction; args: unknown[] }
-  | { op: 'open'; url: string; newTab?: boolean };
+  | { op: 'open'; url: string; newTab?: boolean }
+  /** The notice of this closed room was shown to this account: not again (every panel). */
+  | { op: 'closed:seen'; roomId: string; userId: string };
 
 export type Shared = {
   watching: RoomContent | null;
@@ -44,6 +46,8 @@ export type Shared = {
   activeRoom: string | null;
   /** When alerts shown before a panel opened run out ("invite:<room>", "request:<friend>"; epoch ms). */
   alertsUntil: Record<string, number>;
+  /** Rooms of mine their host closed (decision 90), until a panel showed the notice (`closed:seen`). */
+  closedRooms: { roomId: string; title: string; userId: string }[];
 };
 
 export type ToPanel =
@@ -51,4 +55,6 @@ export type ToPanel =
   | { kind: 'status'; status: SocketStatus }
   | { kind: 'event'; event: ServerEvent }
   | { kind: 'shared'; shared: Shared }
-  | { kind: 'room'; state: RoomSyncState };
+  | { kind: 'room'; state: RoomSyncState }
+  /** The background has stored that this room's closure notice was shown: not shown again. */
+  | { kind: 'closed:recorded'; roomId: string; userId: string };

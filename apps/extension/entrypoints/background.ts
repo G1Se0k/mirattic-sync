@@ -21,6 +21,8 @@ import { ROOM_ACTIONS, UI_PORT, type FromPanel, type Shared, type ToPanel } from
 const KEEPALIVE_MS = 20_000;
 const LOOKUP_MS = 1_500; // a lookup for an alert's details, at most (`within`)
 const ROOM_KEY = 'mirattic.room'; // storage.session: back into the room if the worker restarts
+// storage.local: closure notices not shown yet survive a worker or browser restart (cleared on sign-out)
+const CLOSED_ROOMS_ITEM = 'mirattic.closedRooms';
 // storage.local: another device took over (decision 89); no connecting (worker or browser restart included) until
 // the user presses "여기서 계속" here.
 const REPLACED_FLAG = 'mirattic.replaced';
@@ -44,6 +46,12 @@ export default defineBackground(() => {
   let status: SocketStatus = 'closed';
   let meId: string | null = null;
   let room: RoomSync | null = null;
+  /**
+   * Rooms of mine their host closed (decision 90), each with the account it was told to (only that account's are
+   * shown: another may sign in meanwhile) and whether a panel showed it — kept after that, so the same notice sent
+   * again (the server repeats it until our ack reaches it) isn't shown twice.
+   */
+  let closedRooms: (Shared['closedRooms'][number] & { userId: string; seen?: boolean })[] = [];
   let keepAlive: ReturnType<typeof setInterval> | undefined;
   /** Bumped by every sign-out: a sign-in still finishing after one must not start anything. */
   let session = 0;
@@ -67,6 +75,7 @@ export default defineBackground(() => {
     },
     activeRoom: room && !room.state.closed ? room.state.roomId : null,
     alertsUntil: Object.fromEntries([...alertUntil].filter(([, until]) => until > Date.now())),
+    closedRooms: closedRooms.filter((c) => c.userId === meId && !c.seen).map(({ roomId, title, userId }) => ({ roomId, title, userId })),
   });
   const pushShared = () => broadcast({ kind: 'shared', shared: shared() });
 
@@ -301,6 +310,14 @@ export default defineBackground(() => {
         room?.handle(event);
         recordEnd(event); // before the panel hears of it (it reloads on it)
         broadcast({ kind: 'event', event });
+        // Only from this session's socket (not one from before a sign-out): kept for this account, acknowledged on
+        // the socket it came by (a repeat is dropped there; not stored: the server sends it again later).
+        if (event.type === 'room:closed' && event.roomId && meId && mine === session) {
+          const title = (event.payload as { title?: string } | null)?.title ?? '';
+          const roomId = event.roomId;
+          void setClosedRooms([...closedRooms, { roomId, title, userId: meId }])
+            .then(() => mine === session && s.send({ type: 'room:closed:ack', roomId, payload: null }), () => {});
+        }
         alertFor(event);
         if (event.type === 'chat:message' && event.roomId === room?.state.roomId) markRead(500);
       },
@@ -392,6 +409,27 @@ export default defineBackground(() => {
     pushShared();
   }
 
+  /** Storage writes of the notices, one after another: each writes the latest state when its turn comes. */
+  let closedWrites: Promise<void> = Promise.resolve();
+  /**
+   * One per account and room (`seen` if any copy is), the latest 20 shown ones kept. Resolves once a write
+   * containing this state (or a later one) is stored.
+   */
+  function setClosedRooms(next: typeof closedRooms) {
+    const same = (a: (typeof next)[number], b: (typeof next)[number]) => a.roomId === b.roomId && a.userId === b.userId;
+    const once = next
+      .filter((c, i) => next.findIndex((o) => same(o, c)) === i)
+      // Seen if any copy is: a dismissal recorded before the stored copy was read back still counts.
+      .map((c) => (next.some((o) => same(o, c) && o.seen) ? { ...c, seen: true } : c));
+    // Shown ones are kept only against repeats (the latest 20); one not shown yet stays until it is.
+    const keptSeen = new Set(once.filter((c) => c.seen).slice(-20));
+    closedRooms = once.filter((c) => !c.seen || keptSeen.has(c));
+    pushShared();
+    const write = closedWrites.catch(() => {}).then(() => browser.storage.local.set({ [CLOSED_ROOMS_ITEM]: closedRooms }));
+    closedWrites = write;
+    return write;
+  }
+
   function closeRoom() {
     room?.dispose();
     room = null;
@@ -427,6 +465,7 @@ export default defineBackground(() => {
     const me = await api.me();
     if (mine !== session) return;
     meId = me.id;
+    pushShared(); // this account's closure notices, if any were kept
     await ensureWatching();
     if (mine !== session) return;
     await connect();
@@ -459,6 +498,7 @@ export default defineBackground(() => {
   function signOut() {
     session++;
     alertUntil.clear(); // another account may sign in next (shared with the panel by closeRoom below)
+    void setClosedRooms([]).catch(() => {}); // the same: their notices aren't the next account's
     void markReplaced(false); // the next sign-in connects
     clearAlerts();
     closeRoom();
@@ -654,6 +694,12 @@ export default defineBackground(() => {
           markRead(); // up to now it was on screen
           viewers.delete(port);
           break;
+        case 'closed:seen':
+          // Marked even if it isn't here yet (a restarted worker still reading its store): the read merges into it.
+          // That account's notice only (a dismissal arriving after an account switch can't hide the next one's).
+          void setClosedRooms([...closedRooms, { roomId: m.roomId, title: '', userId: m.userId, seen: true }])
+            .then(() => post(port, { kind: 'closed:recorded', roomId: m.roomId, userId: m.userId }), () => {});
+          break;
         case 'room:exit':
           if (room?.state.roomId === m.roomId) closeRoom();
           break;
@@ -678,6 +724,13 @@ export default defineBackground(() => {
 
   // A (re)started worker picks the session up again: signed in and consented → socket, presence and room.
   void (async () => {
+    // Kept by an earlier worker: before any that came since (merged, not replaced) — unless signed out meanwhile.
+    const mine = session;
+    // A failed read: no kept notices (the session is restored all the same).
+    const kept: unknown = (await browser.storage.local.get(CLOSED_ROOMS_ITEM).catch(() => ({}) as Record<string, unknown>))[CLOSED_ROOMS_ITEM];
+    if (Array.isArray(kept) && mine === session) {
+      void setClosedRooms([...kept.filter((c) => typeof c?.userId === 'string'), ...closedRooms]).catch(() => {});
+    }
     if (!(await hasConsent())) return;
     if (await api.restore().catch(() => false)) await signedIn().catch(() => {});
   })();

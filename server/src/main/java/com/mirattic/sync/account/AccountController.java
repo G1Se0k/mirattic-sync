@@ -125,14 +125,15 @@ public class AccountController {
 		for (RoomService.Departure d : deleted.rooms()) {
 			if (d.left().closed()) {
 				hub.closeRoom(d.roomId());
+				rooms.announceClosed(d.roomId(), me, d.left());
 			} else {
 				hub.removeFromRoom(d.roomId(), me);
 				// My messages are gone from the database: the others drop them from their screens too.
 				ServerEvent gone = new ServerEvent("chat:delete", d.roomId(), me, null, System.currentTimeMillis(),
 						Map.of("userId", me));
 				d.left().memberIds().forEach(id -> hub.sendEvent(id, gone));
+				rooms.announce(d.roomId(), d.left().memberIds());
 			}
-			rooms.announce(d.roomId(), d.left().memberIds());
 		}
 		deleted.contacts().forEach(id -> hub.sendEvent(id, "friend:update", null, null));
 		hub.disconnect(me);

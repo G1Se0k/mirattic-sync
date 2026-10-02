@@ -64,6 +64,8 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `session:replaced` | S→C | 없음 | 같은 계정의 다른 기기가 연결함 (결정 89). 곧 close code 4001로 닫힘 |
 | `watch:decline` | S→C | `{ askedAt }` (거절한 요청) | 내가 합류 요청한 친구가 무시함 (`DELETE /api/rooms/requests/incoming/{id}`, 영상 없는 페이지로 가서 자동 무시 포함). `userId` = 친구. 요청 패널에 "요청이 거절되었습니다" 5초 |
 | `watch:answer` | S→C | 없음 | 내가 합류 요청한 친구가 초대로 응답함 (이미 멤버가 됨, `room:invite`는 오지 않음). `roomId` = 그 방, `userId` = 친구. 받은 앱은 그 방으로 바로 입장. 서버에 열린 요청이 있을 때만 (다른 초대에는 없음) |
+| `room:closed` | S→C | `{ title }` | 호스트가 방을 나가 방이 닫힘 (결정 90): "방 닫기" · 방 화면 뒤로(`POST /api/rooms/{id}/back`)는 바로, 호스트의 연결이 방에서 모두 빠지면(연결 끊김 등 — 패널 닫기는 나감이 아님) 30초 안에 돌아오지 않을 때. `roomId` = 그 방, `userId` = 호스트, `title` = 방 제목. 호스트를 뺀 **멤버에게만**(초대받은 사람은 `room:update`만), `room:update`보다 먼저. 받은 앱이 `room:closed:ack`를 보낼 때까지 서버가 보관하고(최대 1시간) 그 사용자의 연결마다 다시 보냄 → 그때 오프라인이던 멤버도 다음 연결 때 받음. 확장은 같은 방의 안내를 한 번만 보여 줌 |
+| `room:closed:ack` | C→S | 없음 (`roomId`) | `room:closed`를 받았음 (결정 90): 서버가 그 방의 안내를 더 보내지 않음 패널은 "방이 종료되었습니다" 안내창, 패널이 닫혀 있었으면 다음에 열 때. 호스트가 넘어갔으면 닫지 않음 |
 | `room:update` | S→C | 없음, 또는 `{ muted }` | 참가 / 나감 / 방 닫힘 시 모든 멤버에게. 클라이언트는 `GET /api/rooms/{id}`로 다시 조회 (404면 닫힘). 채팅 알림 설정을 바꾸면 그 사용자의 연결에만 `{ muted }`를 담아 보냄 → 조회 응답 전에 바로 적용 |
 | `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt, scrubbing? }` | HOST만 (`not_host`). `scrubbing`(결정 86): 호스트가 시크바를 누르고 있는지 — 페이지가 알 수 있을 때만(YouTube). `false`인 일시정지는 방 기록에 바로, `true`는 드래그가 끝날 때까지 붙잡음, 없으면 1초 붙잡음. `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회 |
 | `playback:content-change` | C→S | `RoomContent` | HOST만. 호스트 플레이어의 영상이 바뀌었을 때 다음 명령 전에 보냄. 방 콘텐츠를 바꾸고 0초·일시정지로 초기화, version 증가 → `playback:update` + `room:update`. YouTube는 contentId가 11자 영상 ID, Netflix는 1–12자리 숫자, Laftel은 `작품ID/에피소드ID`(각 1–10자리 숫자)여야 함 (`bad_payload`). playback 명령과 같은 초당 예산. `series`가 이전 콘텐츠와 같으면 멤버 클라이언트가 묻지 않고 새 영상을 열고, 다르면 팝업으로 물음 (결정 67) |
@@ -92,7 +94,7 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 |---|---|---|---|
 | `chat:message` | C→S | `{ text, mediaPositionMs? }` | 멤버만 (`not_member`). text는 앞뒤 공백 제거 후 1–1000자, `mediaPositionMs` ≥ 0 (아니면 `bad_payload`). 세션당 초당 5회 |
 | `chat:delete` | S→C | `{ id }` 또는 `{ userId }` | 메시지 삭제(`DELETE /api/rooms/{id}/messages/{messageId}`, envelope `userId` = 지운 사람) 또는 계정 삭제(`{ userId }` = 그 사람의 모든 메시지). `chat:message`와 같이 모든 멤버의 연결에게. 채팅은 `{ id }`를 "삭제된 메시지입니다" 자리표시로 바꾸고(결정 71, 기록에도 `deleted: true`로 남음), `{ userId }`는 목록에서 뺀다. 늦게 도착한 같은 메시지에도 적용. 방 목록은 배지·알림에서 뺀다 |
-| (서버) 빈 방 닫기 | S→C | `room:update` | 결정 75: 참가 중인 연결이 없는 상태가 1–2분 이어진 방은 서버가 닫고 멤버에게 알림 |
+| (서버) 방장 없는 방 닫기 | S→C | `room:closed`, `room:update` | 결정 75 · 90: 방장의 연결이 방에 없는 상태가 1–2분 이어진 방(빈 방 포함)은 서버가 닫고 멤버에게 알림 |
 | `room:read` | C→S | `{}` | 멤버만 (`not_member`). 지금까지 온 메시지를 읽음으로 표시하고 내 연결들에 `room:update` (목록 재조회). Extension은 패널을 닫아도 방에 들어가 있으므로(결정 69), 패널이 그 방을 보여 줄 때만 보냄 — 열 때, 보는 중 메시지가 올 때(0.5초 모아서), 화면을 닫을 때 |
 | `pause:request` | C→S, S→C | `{ reason? }` (200자 이하) | 결정 70. 멤버만 (호스트 `bad_payload`, 비멤버 `not_member`). 멤버·방마다 30초에 1번 (`rate_limited`). 서버는 호스트의 모든 연결로 같은 이름으로 보냄: envelope `userId` = 요청한 멤버, `roomId`, payload `{ reason }`(앞뒤 공백 제거) |
 | `chat:message` | S→C | `ChatMessage` `{ id, roomId, userId, text, mediaPositionMs?, kind?, createdAt, deleted }` | **방의 모든 멤버의 연결**에게 (참가하지 않은 멤버, 보낸 사람 포함). envelope `userId` = 보낸 사람. 기록은 `GET /api/rooms/{id}/messages`. 리액션(`reaction:add`)은 결정 78로 없어짐 → `unknown_type` |

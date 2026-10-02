@@ -8,6 +8,7 @@ import com.mirattic.sync.room.RoomContent;
 import com.mirattic.sync.room.RoomService;
 import com.mirattic.sync.user.UserRepository;
 import jakarta.validation.Validator;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
@@ -17,6 +18,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.TransactionException;
 import org.springframework.web.socket.CloseStatus;
@@ -61,9 +64,15 @@ class SocketHandler extends TextWebSocketHandler {
 	private final Validator validator;
 	/** "user|room" → when its last pause request went out. ponytail: in memory, single instance; expired ones pruned past 10k. */
 	private final Map<String, Long> pauseRequests = new ConcurrentHashMap<>();
+	/** "room|host" → when the host's last connection left the room: a later leave restarts the wait. */
+	private final Map<String, Long> hostGone = new ConcurrentHashMap<>();
+	private final TaskScheduler scheduler;
+	private final long hostGoneCloseMs;
 
 	SocketHandler(SocketHub hub, PresenceService presence, RoomService rooms, RoomLog roomLog, UserRepository users, JsonMapper json,
-			Validator validator) {
+			Validator validator, TaskScheduler scheduler, @Value("${app.host-gone-close-ms:30000}") long hostGoneCloseMs) {
+		this.scheduler = scheduler;
+		this.hostGoneCloseMs = hostGoneCloseMs;
 		this.hub = hub;
 		this.users = users;
 		this.presence = presence;
@@ -85,6 +94,7 @@ class SocketHandler extends TextWebSocketHandler {
 			hub.disconnect(userId(session));
 			return;
 		}
+		hub.sendKept(userId(session)); // e.g. rooms closed while this user was offline (decision 90)
 		if (first) {
 			presence.online(userId(session));
 		}
@@ -135,6 +145,12 @@ class SocketHandler extends TextWebSocketHandler {
 		// Any client-supplied userId is ignored: identity comes only from the authenticated handshake.
 		switch (type) {
 			case "presence:update" -> onPresence(session, reqId, event.path("payload"));
+			case "room:closed:ack" -> {
+				// The app has the notice of this closed room (decision 90): not sent again.
+				if (roomId != null) {
+					hub.acknowledge(userId(session), "room:closed", roomId);
+				}
+			}
 			case "sync:request" -> hub.send(out(session), new ServerEvent("sync:response", null, null, null,
 					System.currentTimeMillis(), Map.of("reqId", reqId == null ? "" : reqId)));
 			case "room:join", "room:leave", "playback:play", "playback:pause", "playback:seek",
@@ -161,7 +177,13 @@ class SocketHandler extends TextWebSocketHandler {
 		String me = userId(session);
 		switch (type) {
 			case "room:join" -> {
-				PlaybackState state = hub.joinRoom(roomId, out(session), () -> rooms.join(me, roomId));
+				PlaybackState state = hub.joinRoom(roomId, out(session), () -> {
+					PlaybackState s = rooms.join(me, roomId);
+					// Back in: an earlier leave's wait is over. Under the entry lock, so a disconnect's new wait (made
+					// after its leaveRoom, which takes the same lock) can't be cleared by this join.
+					hostGone.remove(roomId + "|" + me);
+					return s;
+				});
 				joined(session).add(roomId);
 				roomLog.joined(roomId, me);
 				rooms.read(me, roomId); // outside joinRoom: never wait on the room row lock inside the hub's entry lock
@@ -294,6 +316,38 @@ class SocketHandler extends TextWebSocketHandler {
 		if (state != null) {
 			hub.sendToRoom(roomId, playbackEvent(roomId, state));
 		}
+		if (rooms.isHost(userId, roomId)) {
+			closeIfHostStaysAway(userId, roomId);
+		}
+	}
+
+	/**
+	 * The host left the room (panel or window closed, room screen left, connection lost): unless one of their
+	 * connections is back in it after `hostGoneCloseMs` — a reconnect or worker restart — the room closes and the
+	 * members are told (decision 90). ponytail: in memory, single instance; a restart forgets the wait (the empty-room
+	 * sweep closes it if nobody is left).
+	 */
+	private void closeIfHostStaysAway(String hostId, String roomId) {
+		String key = roomId + "|" + hostId;
+		long leftAt = System.nanoTime();
+		// Marked under the room's entry lock, only while still away: a join (which clears marks under the same lock)
+		// either came first — no wait — or comes after and clears this one.
+		hub.whileAbsent(roomId, hostId, () -> {
+			hostGone.put(key, leftAt);
+			return null;
+		});
+		if (!Long.valueOf(leftAt).equals(hostGone.get(key))) {
+			return; // back in already
+		}
+		scheduler.schedule(() -> {
+			// Under the same lock: still away, and this is still their latest leave (a join clears it, a later leave
+			// replaces it with its own wait).
+			RoomService.Left left = hub.whileAbsent(roomId, hostId,
+					() -> hostGone.remove(key, leftAt) ? rooms.closeHostedBy(hostId, roomId) : null);
+			if (left != null) {
+				rooms.announceClosed(roomId, hostId, left);
+			}
+		}, Instant.now().plusMillis(hostGoneCloseMs));
 	}
 
 	private static ServerEvent playbackEvent(String roomId, PlaybackState state) {
