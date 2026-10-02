@@ -40,6 +40,15 @@ export type Platform = {
     askOnSwitch(): boolean;
     setAskOnSwitch(ask: boolean): Promise<void>;
   };
+  /**
+   * Text size in percent (100 = default, within `TEXT_SIZE`), kept by the platform and applied to the page as the
+   * CSS `--text-scale`. Announced via `subscribe`.
+   */
+  textSize?: {
+    get(): number;
+    /** Shown at once and saved; rejects if it couldn't be saved. */
+    set(percent: number): Promise<void>;
+  };
   subscribe?(onChange: () => void): () => void;
   /** The socket went up (or down: null). The extension publishes presence through it. */
   connected?(socket: Socket | null): void;
@@ -67,6 +76,16 @@ export type Platform = {
    */
   open(url: string, newTab?: boolean): void;
 };
+
+/** The text sizes Settings offers, in percent. */
+export const TEXT_SIZE = { min: 80, max: 150, step: 5, normal: 100 } as const;
+
+/** A stored text size, or the normal one if it isn't a size offered (in range, on a step). */
+export function textSizeOf(value: unknown): number {
+  const offered = typeof value === "number" && value >= TEXT_SIZE.min && value <= TEXT_SIZE.max
+    && (value - TEXT_SIZE.min) % TEXT_SIZE.step === 0;
+  return offered ? value : TEXT_SIZE.normal;
+}
 
 // The extension builds its client and platform and hands them over here before rendering. Live ES module
 // bindings make the assignment visible to every importer.

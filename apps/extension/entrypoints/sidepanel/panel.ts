@@ -2,8 +2,8 @@ import { browser } from 'wxt/browser';
 import { ApiError, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { emptyRoomState, type RoomSyncState } from '@mirattic/sync-core';
 import type { MediaProvider, ServerEvent } from '@mirattic/types';
-import type { Platform, RoomHandle } from '@mirattic/ui';
-import { ASK_ON_SWITCH_KEY, experimentKey, UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
+import { textSizeOf, type Platform, type RoomHandle } from '@mirattic/ui';
+import { ASK_ON_SWITCH_KEY, experimentKey, TEXT_SIZE_ITEM, UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
 
 const RECONNECT_MS = 500;
 
@@ -38,6 +38,31 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
   let view: { roomId: string; state: RoomSyncState; listeners: Set<() => void>; seen: boolean; shown: boolean } | null = null;
   const windowId = (await browser.windows.getCurrent()).id;
   const subscribers = new Set<() => void>();
+  // Text size (Settings), kept in storage.local: applied before the app renders and on any panel's change. Each step
+  // in Settings is one choice, saved at once. While this panel's saves are out, storage changes aren't applied (they
+  // may be its own older ones, which would undo a quicker press); once all are done, storage is read again.
+  // Known limit: two windows' panels changing it at the same moment — the write that lands last wins.
+  let textSize = 100;
+  const applyTextSize = (value: unknown) => {
+    textSize = textSizeOf(value);
+    document.documentElement.style.setProperty('--text-scale', String(textSize / 100));
+    subscribers.forEach((s) => s());
+  };
+  let saving = 0;
+  /** Bumped by every change (a press here or a storage event): a read applies only if none came while it was out. */
+  let changes = 0;
+  /** What storage holds, unless something changed while reading (that's newer) or the read failed (nothing new). */
+  const readTextSize = async () => {
+    const at = changes;
+    const got = await browser.storage.local.get(TEXT_SIZE_ITEM).then((v) => ({ value: v[TEXT_SIZE_ITEM] }), () => null);
+    if (got && at === changes && saving === 0) applyTextSize(got.value);
+  };
+  browser.storage.onChanged.addListener((changed, area) => {
+    if (area !== 'local' || !(TEXT_SIZE_ITEM in changed)) return;
+    changes++;
+    if (saving === 0) applyTextSize(changed[TEXT_SIZE_ITEM].newValue);
+  });
+  await readTextSize(); // the listener is up first
   let ready!: () => void;
   const hello = new Promise<void>((r) => (ready = r));
 
@@ -208,6 +233,19 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
       },
     },
     open: (url, newTab) => send({ op: 'open', url, newTab }),
+    textSize: {
+      get: () => textSize,
+      set: (percent) => {
+        changes++;
+        applyTextSize(percent); // at once here; other panels follow storage.onChanged
+        saving++;
+        const save = browser.storage.local.set({ [TEXT_SIZE_ITEM]: textSize });
+        void save.catch(() => {}).finally(() => {
+          if (--saving === 0) void readTextSize();
+        });
+        return save;
+      },
+    },
   };
   return { api, platform };
 }

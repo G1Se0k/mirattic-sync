@@ -1,9 +1,9 @@
-import { useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import type { Me, UserSummary } from "@mirattic/types";
 import { DeleteAccount, Privacy } from "./Privacy";
 import { ExperimentalSettings } from "./Experimental";
 import { Avatar, IconButton } from "./Icons";
-import { platform } from "./session";
+import { platform, TEXT_SIZE } from "./session";
 
 type Props = {
   me: Me;
@@ -33,6 +33,7 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
           <IconButton icon="logout" label="로그아웃" onClick={onSignedOut} />
         </section>
         <Privacy me={me} onChange={onMeChange} />
+        <TextSize />
         <AskOnSwitch />
         <ExperimentalSettings />
         <section>
@@ -59,6 +60,40 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
 }
 
 const noSubscribe = () => () => {};
+
+/** The text size, in percent (only where the platform keeps it). */
+function TextSize() {
+  const size = platform.textSize;
+  const percent = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => size?.get() ?? TEXT_SIZE.normal);
+  const [failed, setFailed] = useState(false);
+  const latest = useRef(0);
+  if (!size) return null;
+  /** Each step is a choice, saved at once; the error shows the latest choice's save only. */
+  const choose = (value: number) => {
+    const mine = ++latest.current;
+    setFailed(false);
+    size.set(value).then(
+      () => mine === latest.current && setFailed(false),
+      () => mine === latest.current && setFailed(true),
+    );
+  };
+  return (
+    <section>
+      <div className="row text-size-row">
+        <span className="grow">글자 크기</span>
+        <button className="secondary" aria-label="글자 작게" disabled={percent <= TEXT_SIZE.min}
+          onClick={() => choose(percent - TEXT_SIZE.step)}>−</button>
+        <strong className="text-size" aria-live="polite">{percent}%</strong>
+        <button className="secondary" aria-label="글자 크게" disabled={percent >= TEXT_SIZE.max}
+          onClick={() => choose(percent + TEXT_SIZE.step)}>+</button>
+        <button className="secondary" disabled={percent === TEXT_SIZE.normal && !failed} onClick={() => choose(TEXT_SIZE.normal)}>
+          기본
+        </button>
+      </div>
+      {failed && <p className="error" role="alert">글자 크기를 저장하지 못했습니다. 패널을 다시 열면 이전 크기로 돌아갈 수 있습니다.</p>}
+    </section>
+  );
+}
 
 /** Whether a member is asked before following the host to another video (decision 81). Only where kept. */
 function AskOnSwitch() {

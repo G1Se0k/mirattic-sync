@@ -58,3 +58,6 @@ export type ToPanel =
   | { kind: 'room'; state: RoomSyncState }
   /** The background has stored that this room's closure notice was shown: not shown again. */
   | { kind: 'closed:recorded'; roomId: string; userId: string };
+
+/** storage.local: the side panel's text size in percent (100 = default); only the panel uses it. */
+export const TEXT_SIZE_ITEM = 'mirattic.textSize';
