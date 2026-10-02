@@ -24,6 +24,9 @@ export type RoomHandle = {
   exit(): void;
 };
 
+/** A browser tab on a video site the extension can follow (titles never leave the user's own panel). */
+export type VideoTab = { id: number; title: string; provider: MediaProvider; windowId: number };
+
 /** What the extension provides the screens with (its side panel, backed by the background), besides the client. */
 export type Platform = {
   /** A player the background drives for the provider (the followed tab). undefined = none here. */
@@ -48,6 +51,18 @@ export type Platform = {
     get(): number;
     /** Shown at once and saved; rejects if it couldn't be saved. */
     set(percent: number): Promise<void>;
+  };
+  /**
+   * The video tab the extension follows (the room's player). `auto`: the window's active video tab, as the user
+   * switches; otherwise the one chosen stays until it closes. Announced via `subscribe`; `list` is the same array
+   * until it changes.
+   */
+  tabs?: {
+    list(): VideoTab[];
+    followed(): number | null;
+    auto(): boolean;
+    /** null: follow the active tab. `windowId`: the window it was chosen in (the extension's panel adds it). */
+    choose(tabId: number | null, windowId?: number): void;
   };
   subscribe?(onChange: () => void): () => void;
   /** The socket went up (or down: null). The extension publishes presence through it. */

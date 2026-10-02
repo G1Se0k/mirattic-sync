@@ -136,6 +136,9 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .member { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 2px; border: 1px solid var(--line);
   border-radius: 999px; font-size: calc(12px * var(--text-scale)); background: var(--surface); }
 .member .avatar { width: 20px; height: 20px; font-size: calc(10px * var(--text-scale)); }
+.tab-picker summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-picker .stack { margin-top: 8px; }
+.tab-picker label { display: flex; align-items: center; gap: 6px; min-width: 0; cursor: pointer; }
 .player { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .player .time { font-variant-numeric: tabular-nums; white-space: nowrap; min-width: max-content; font-size: calc(12px * var(--text-scale)); }
 .chat-panel { flex: 1; min-height: 156px; display: flex; flex-direction: column; border-top: 1px solid var(--line); margin-top: 8px; }

@@ -2,7 +2,7 @@ import { browser } from 'wxt/browser';
 import { ApiError, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { emptyRoomState, type RoomSyncState } from '@mirattic/sync-core';
 import type { MediaProvider, ServerEvent } from '@mirattic/types';
-import { textSizeOf, type Platform, type RoomHandle } from '@mirattic/ui';
+import { textSizeOf, type Platform, type RoomHandle, type VideoTab } from '@mirattic/ui';
 import { ASK_ON_SWITCH_KEY, experimentKey, TEXT_SIZE_ITEM, UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
 
 const RECONNECT_MS = 500;
@@ -24,7 +24,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
   const replies = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void }>();
   let nextId = 0;
   let shared: Shared = {
-    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, experiments: { netflix: false, laftel: false }, activeRoom: null, alertsUntil: {}, closedRooms: [],
+    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, tabs: [], followedTab: null, followActive: false, experiments: { netflix: false, laftel: false }, activeRoom: null, alertsUntil: {}, closedRooms: [],
   };
   let status: SocketStatus = 'closed';
   /**
@@ -38,6 +38,9 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
   let view: { roomId: string; state: RoomSyncState; listeners: Set<() => void>; seen: boolean; shown: boolean } | null = null;
   const windowId = (await browser.windows.getCurrent()).id;
   const subscribers = new Set<() => void>();
+  let windowTabs: VideoTab[] = [];
+  /** A tab choice the background hasn't shown back yet: said again after a worker restart (the port may have dropped it). */
+  let choosingTab: { tabId: number | null } | null = null;
   // Text size (Settings), kept in storage.local: applied before the app renders and on any panel's change. Each step
   // in Settings is one choice, saved at once. While this panel's saves are out, storage changes aren't applied (they
   // may be its own older ones, which would undo a quicker press); once all are done, storage is read again.
@@ -89,7 +92,13 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
           watchingInfo: same(shared.watchingInfo, m.shared.watchingInfo),
           offSite: same(shared.offSite, m.shared.offSite),
           closedRooms: same(shared.closedRooms, m.shared.closedRooms),
+          tabs: same(shared.tabs, m.shared.tabs),
         };
+        // This window's tabs only (the background's list has every window's).
+        windowTabs = same(windowTabs, shared.tabs.filter((t) => t.windowId === windowId));
+        if (choosingTab && (choosingTab.tabId === null ? shared.followActive : !shared.followActive && shared.followedTab === choosingTab.tabId)) {
+          choosingTab = null;
+        }
         // Another window's panel made a different room the active one: this view is over (back to the list).
         const v = view;
         if (v?.seen && shared.activeRoom !== v.roomId && !v.state.closed) {
@@ -135,6 +144,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
         if (socketHandlers) send({ op: 'socket' });
         if (view?.shown) send({ op: 'room:open', roomId: view.roomId, resume: true });
         dismissed.forEach(seen);
+        if (choosingTab) send({ op: 'tab', tabId: choosingTab.tabId, windowId });
       }, RECONNECT_MS);
     });
   };
@@ -162,6 +172,15 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
       askOnSwitch: () => shared.askOnSwitch,
       // Written to storage.local here, not sent over the port: a background restarting meanwhile can't drop it.
       setAskOnSwitch: (ask) => browser.storage.local.set({ [ASK_ON_SWITCH_KEY]: ask }),
+    },
+    tabs: {
+      list: () => windowTabs,
+      followed: () => shared.followedTab,
+      auto: () => shared.followActive,
+      choose: (tabId) => {
+        choosingTab = { tabId };
+        send({ op: 'tab', tabId, windowId }); // this window's active tab, or a tab of it
+      },
     },
     activeRoom: () => shared.activeRoom,
     alertUntil: (kind, target) => shared.alertsUntil[`${kind}:${target}`],

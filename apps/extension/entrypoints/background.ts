@@ -69,6 +69,9 @@ export default defineBackground(() => {
     watchingInfo: platform?.nowWatchingInfo?.() ?? null,
     offSite: platform?.offSite?.() ?? null,
     askOnSwitch: platform?.preferences?.askOnSwitch() ?? true,
+    tabs: platform?.tabs?.list() ?? [],
+    followedTab: platform?.tabs?.followed() ?? null,
+    followActive: platform?.tabs?.auto() ?? false,
     experiments: {
       netflix: platform?.experimental?.enabled('netflix') ?? false,
       laftel: platform?.experimental?.enabled('laftel') ?? false,
@@ -706,6 +709,11 @@ export default defineBackground(() => {
         case 'room:act':
           if (room?.state.roomId === m.roomId && ROOM_ACTIONS.includes(m.name)) {
             (room[m.name] as (...a: unknown[]) => void)(...m.args);
+          }
+          break;
+        case 'tab':
+          if ((m.tabId === null || typeof m.tabId === 'number') && (m.windowId === undefined || typeof m.windowId === 'number')) {
+            (await ensureWatching())?.tabs?.choose(m.tabId, m.windowId); // a restarted worker: once it follows tabs again
           }
           break;
         case 'open':

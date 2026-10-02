@@ -1,6 +1,7 @@
 import type { SocketStatus } from '@mirattic/client';
 import type { RoomSyncState } from '@mirattic/sync-core';
 import type { ClientEvent, MediaProvider, RoomContent, ServerEvent, WatchingInfo } from '@mirattic/types';
+import type { VideoTab } from '@mirattic/ui';
 
 // Side panel ⇄ background (plan.md decision 69). The background owns the API client (the only one that
 // refreshes tokens), the socket, the followed tab and the room's sync, so they outlive the side panel. The
@@ -34,6 +35,8 @@ export type FromPanel =
   | { op: 'room:exit'; roomId: string }
   | { op: 'room:act'; roomId: string; name: RoomAction; args: unknown[] }
   | { op: 'open'; url: string; newTab?: boolean }
+  /** The tab to follow; null = the active one, as the user switches. */
+  | { op: 'tab'; tabId: number | null; windowId?: number }
   /** The notice of this closed room was shown to this account: not again (every panel). */
   | { op: 'closed:seen'; roomId: string; userId: string };
 
@@ -42,6 +45,10 @@ export type Shared = {
   watchingInfo: WatchingInfo | null;
   offSite: { provider: MediaProvider; visit: number } | null;
   askOnSwitch: boolean;
+  /** Video tabs that can be followed, the one followed, and whether it follows the active one. */
+  tabs: VideoTab[];
+  followedTab: number | null;
+  followActive: boolean;
   experiments: { netflix: boolean; laftel: boolean };
   activeRoom: string | null;
   /** When alerts shown before a panel opened run out ("invite:<room>", "request:<friend>"; epoch ms). */
@@ -61,3 +68,5 @@ export type ToPanel =
 
 /** storage.local: the side panel's text size in percent (100 = default); only the panel uses it. */
 export const TEXT_SIZE_ITEM = 'mirattic.textSize';
+/** Whether the followed tab is the window's active video tab as the user switches (else one tab, chosen). */
+export const followActiveSetting = 'mirattic.followActive';

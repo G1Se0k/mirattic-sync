@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
 import { openUrl, type FriendView, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
-import { api, platform, type RoomHandle } from "./session";
+import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
 import { ReportDialog } from "./Report";
@@ -176,6 +176,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
         </div>
         <PlayerStatus content={content} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
           onRequestPause={() => setAskingPause(true)} />
+        {isHost && <TabPicker />}
       </div>
 
       <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
@@ -322,6 +323,42 @@ function RequestPause({ handle, onClose }: { handle: RoomHandle; onClose: () => 
         <button onClick={() => { handle.requestPause(reason); onClose(); }}>요청 보내기</button>
       </Actions>
     </Dialog>
+  );
+}
+
+const noSubscribe = () => () => {};
+const NO_TABS: VideoTab[] = [];
+
+/** The host picks the tab the room follows: one tab (stays, whichever is active), or the active one as they switch. */
+function TabPicker() {
+  const tabs = platform.tabs;
+  const subscribe = platform.subscribe ?? noSubscribe;
+  const list = useSyncExternalStore(subscribe, () => tabs?.list() ?? NO_TABS);
+  const followed = useSyncExternalStore(subscribe, () => tabs?.followed() ?? null);
+  const auto = useSyncExternalStore(subscribe, () => tabs?.auto() ?? false);
+  if (!tabs) return null;
+  const current = list.find((t) => t.id === followed);
+  return (
+    <details className="card tab-picker">
+      <summary>
+        인식할 탭 <span className="muted">· {auto ? "활성 탭 자동 따라가기" : current?.title ?? (followed !== null ? "영상이 없는 탭 또는 다른 창의 탭" : "없음")}</span>
+      </summary>
+      <div className="stack" role="radiogroup" aria-label="인식할 탭">
+        <label>
+          <input type="radio" name="followed-tab" checked={auto} onChange={() => tabs.choose(null)} />
+          활성 탭 자동 따라가기
+        </label>
+        {list.map((t) => (
+          <label key={t.id} title={t.title}>
+            <input type="radio" name="followed-tab" checked={!auto && t.id === followed} onChange={() => tabs.choose(t.id)} />
+            <span className="pill">{PROVIDER_NAMES[t.provider]}</span>
+            <span className="ellipsis grow">{t.title}</span>
+            {t.id === followed && <span className="muted">인식 중</span>}
+          </label>
+        ))}
+        {list.length === 0 && <p className="muted">영상이 열린 탭이 없습니다.</p>}
+      </div>
+    </details>
   );
 }
 
