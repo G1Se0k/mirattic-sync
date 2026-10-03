@@ -109,7 +109,7 @@ public class Room {
 		if (provider == null) {
 			return null;
 		}
-		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl, series);
+		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl, series, null);
 	}
 
 	PlaybackState playback() {

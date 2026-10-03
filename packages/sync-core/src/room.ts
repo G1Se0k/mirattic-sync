@@ -304,7 +304,7 @@ export class RoomSync {
     const announced = this.announced;
     if (!this.isHost || !this.connected || !now || !announced) return;
     if (now.provider !== announced.provider || now.contentId !== announced.contentId) return; // a new video: the publisher's
-    if (now.title === announced.title && now.series === announced.series) return;
+    if (now.title === announced.title && now.series === announced.series && now.channel === announced.channel) return;
     this.deps.send({ type: "playback:content-change", roomId: this.deps.roomId, payload: now });
     this.announced = now;
   }

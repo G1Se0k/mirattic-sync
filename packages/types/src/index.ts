@@ -167,6 +167,8 @@ export type RoomContent = {
   canonicalUrl?: string;
   /** See `MediaPresence.series`. */
   series?: string;
+  /** Who made it (YouTube's channel): sent with a change for its chat line ("<channel> - <title>"); rooms don't keep it. */
+  channel?: string;
 };
 
 const YOUTUBE_VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;

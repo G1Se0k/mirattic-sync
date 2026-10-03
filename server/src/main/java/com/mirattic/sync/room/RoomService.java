@@ -686,22 +686,22 @@ public class RoomService {
 		Room room = lockAsHost(me, roomId);
 		RoomContent before = room.content();
 		if (!room.changeContent(me, content, System.currentTimeMillis())) {
-			// The title read late (YouTube's tab says "YouTube" until the page catches up): the line follows, if it is
-			// still this video's (the room's last "content" line, saying the title it had).
+			// The title or channel read late (YouTube's tab says "YouTube" until the page catches up): the line follows,
+			// if it is still this video's — the room's last "content" line, naming this video (or, written before lines
+			// named theirs, saying the title it had).
 			String was = before == null ? null : before.title();
-			if (was == null || was.equals(content.title())) {
-				return null;
-			}
+			String key = room.contentKey();
 			return messages.findFirstByRoomIdAndKindOrderBySeqDesc(roomId, "content")
-					.filter(m -> !m.view().deleted() && was.equals(m.view().text()))
-					.map(m -> new Changed(null, m.retitle(content.title()).view(), null))
+					.filter(m -> !m.view().deleted() && !content.label().equals(m.view().text()))
+					.filter(m -> m.view().contentKey() != null ? m.view().contentKey().equals(key) : m.view().text().equals(was))
+					.map(m -> new Changed(null, m.retitle(content.label()).view(), null))
 					.orElse(null);
 		}
 		MediaProvider type = room.setType(content.provider()) ? content.provider() : null; // a video of another site
 		if (type != null) {
 			members.seeType(roomId, me, room.typeVersion()); // the host's own change (see setType)
 		}
-		return new Changed(room.playback(), messages.save(new ChatMessage(roomId, me, content.title(), null, "content")).view(), type);
+		return new Changed(room.playback(), messages.save(new ChatMessage(roomId, me, content.label(), null, "content").about(room)).view(), type);
 	}
 
 	/**

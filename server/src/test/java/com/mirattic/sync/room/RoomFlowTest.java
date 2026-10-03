@@ -547,7 +547,17 @@ class RoomFlowTest extends IntegrationTest {
 		JsonNode retitled = friendWs.nextOfType("chat:log").path("payload");
 		assertThat(retitled.path("id").asString()).isEqualTo(content.path("id").asString());
 		assertThat(retitled.path("text").asString()).isEqualTo("Next one, the real title");
+		// Its channel read too: "<channel> - <title>", the same line again.
+		hostWs.send(event("playback:content-change", roomId,
+				"{\"provider\":\"youtube\",\"contentId\":\"abcdefghijk\",\"title\":\"Next one, the real title\",\"channel\":\" Chan \"}"));
+		JsonNode channeled = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(channeled.path("id").asString()).isEqualTo(content.path("id").asString());
+		assertThat(channeled.path("text").asString()).isEqualTo("Chan - Next one, the real title");
+		// The same again: nothing to tell.
+		hostWs.send(event("playback:content-change", roomId,
+				"{\"provider\":\"youtube\",\"contentId\":\"abcdefghijk\",\"title\":\"Next one, the real title\",\"channel\":\"Chan\"}"));
 		assertThat(Collections.frequency(loggedKinds(host, roomId), "content")).isEqualTo(1);
+		Thread.sleep(1_000); // a new second of the playback command budget
 		// Dragging the seek bar: pause, move, play within the hold is one "seek" line, no "pause" / "play".
 		hostWs.send(event("playback:play", roomId, command.formatted(0, System.currentTimeMillis()))); // the new video's first
 		friendWs.nextOfType("playback:update");
@@ -1091,7 +1101,7 @@ class RoomFlowTest extends IntegrationTest {
 		try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
 			// A room creation that has checked the friendship and added the friend, but not committed yet.
 			Future<String> room = pool.submit(() -> new TransactionTemplate(transactions).execute(tx -> {
-				String id = roomService.create(host.id(), new RoomContent(MediaProvider.mock, "c1", "Fake", null, null, null),
+				String id = roomService.create(host.id(), new RoomContent(MediaProvider.mock, "c1", "Fake", null, null, null, null),
 						List.of(friend.id()), List.of(friend.id())).id(); // joining at once (a watch request answered)
 				created.countDown();
 				try {

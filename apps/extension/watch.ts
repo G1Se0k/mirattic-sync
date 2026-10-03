@@ -181,7 +181,8 @@ export async function watch(opts: {
   const show = (p: MediaPresence | null) => {
     presence = p;
     const next: RoomContent | null = p?.contentId
-      ? { provider: p.provider, contentId: p.contentId, title: contentTitle(p), durationMs: p.durationMs, canonicalUrl: p.canonicalUrl, series: p.series }
+      ? { provider: p.provider, contentId: p.contentId, title: contentTitle(p), durationMs: p.durationMs, canonicalUrl: p.canonicalUrl, series: p.series,
+        channel: p.channel?.slice(0, 100) || undefined }
       : null;
     const nextInfo = p ? { provider: p.provider, title: p.title, channel: p.channel, season: p.season, episode: p.episode } : null;
     if (JSON.stringify(nextInfo) !== JSON.stringify(info)) {
@@ -190,7 +191,7 @@ export async function watch(opts: {
     }
     // Same object while the video is the same, as useSyncExternalStore requires.
     if (next?.provider !== content?.provider || next?.contentId !== content?.contentId || next?.title !== content?.title || (next?.durationMs ?? 0) !== (content?.durationMs ?? 0)
-      || next?.series !== content?.series) {
+      || next?.series !== content?.series || next?.channel !== content?.channel) {
       content = next;
       changed();
     }

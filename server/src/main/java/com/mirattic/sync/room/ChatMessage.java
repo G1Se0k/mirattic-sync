@@ -57,6 +57,12 @@ public class ChatMessage {
 		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey);
 	}
 
+	/** A "content" line: about `room`'s video now (which video it names, for its title read late). */
+	ChatMessage about(Room room) {
+		this.contentKey = room.contentKey();
+		return this;
+	}
+
 	/** A "content" line: the title read late. */
 	ChatMessage retitle(String title) {
 		this.text = title;
