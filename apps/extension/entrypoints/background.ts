@@ -890,10 +890,14 @@ export default defineBackground(() => {
   const offLoaded = browser.storage.local.get(OFF_FLAG).then((v) => {
     if (!offTouched) off = v[OFF_FLAG] === true;
   }, () => {});
+  let offWrites: Promise<void> = Promise.resolve();
+  /** Known here at once; stored in the order set (a turning on never loses to the turning off before it). */
   const setOff = (on: boolean) => {
     offTouched = true;
     off = on;
-    void (on ? browser.storage.local.set({ [OFF_FLAG]: true }) : browser.storage.local.remove(OFF_FLAG)).catch(() => {});
+    return (offWrites = offWrites
+      .then(() => (on ? browser.storage.local.set({ [OFF_FLAG]: true }) : browser.storage.local.remove(OFF_FLAG)))
+      .catch(() => {}));
   };
   /** Turning off, one at a time; a panel opening waits for it (see `panelOn`). */
   let offTurn: Promise<void> = Promise.resolve();
@@ -1092,9 +1096,10 @@ export default defineBackground(() => {
     // just now to the destination's panel (the one its click opened, whose hello came first).
     const lost = lostTo.get(port);
     const handoff = moveTo !== undefined && lost?.windowId === moveTo && Date.now() - lost.at < LOST_TO_MS;
+    if (closedByOff.has(port)) return; // closed by turning off while this waited
     const owns = (!closedPanels.has(port) && (await (panelAllowed.get(port) ?? true)))
       || (((await asArrived) || handoff) && (await movedThere()));
-    if (!owns) return;
+    if (!owns || closedByOff.has(port)) return; // (turned off during those waits too)
     // A move: the watcher brings nothing forward itself, and doesn't follow a tab dragged out of the destination by
     // its lookup (the user picks again from the panel there) — then nothing is brought forward here either.
     await watcher?.tabs?.choose(m.tabId, m.windowId, moveTo !== undefined ? { move: true } : undefined);
@@ -1109,6 +1114,7 @@ export default defineBackground(() => {
     ports.add(port);
     clearAlerts(); // the panel shows them now
     port.onMessage.addListener(async (m: FromPanel) => {
+      if (closedByOff.has(port)) return; // closed by turning off: nothing more from it, tab choices included
       // A tab choice: in the turn, as it arrives (see chooseTab).
       if (m.op === 'tab') {
         const asArrived = panelAllowed.get(port) ?? Promise.resolve(true); // whether it was the panel as it chose
@@ -1117,9 +1123,10 @@ export default defineBackground(() => {
       // A panel opening turns it on again (decision 98) — after a turning off under way, unless that closed it — before
       // anything else from it is done: its sign-in check (`restore`) then starts the session.
       if (m.op === 'hello') {
-        panelOn.set(port, offTurn.then(() => {
+        // Once the stored flag is known (a worker just started), and the turning on stored before the session starts.
+        panelOn.set(port, offTurn.then(() => offLoaded).then(async () => {
           if (closedByOff.has(port) || !ports.has(port)) return false;
-          if (off) setOff(false);
+          if (off) await setOff(false);
           return true;
         }));
       }
