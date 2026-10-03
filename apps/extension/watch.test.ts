@@ -28,6 +28,7 @@ let created: string[]; // tabs.create URLs
 let activated: number[]; // tabs made active by us
 let focusedWindows: number[]; // windows brought forward by us
 let heldUpdate: ReturnType<typeof hold<void>> | null = null; // the next tabs.update answers when released
+let lastFocused = 1; // the browser window focused last
 
 const on = (name: string) => ({ addListener: (l: Listener) => void (listeners[name] ??= []).push(l) });
 const fire = (name: string, ...args: unknown[]) => Promise.all((listeners[name] ?? []).map((l) => l(...args)));
@@ -37,6 +38,8 @@ vi.mock('wxt/browser', () => ({
   browser: {
     windows: {
       getCurrent: async () => ({ id: 1 }),
+      getLastFocused: async () => ({ id: lastFocused }),
+      get: async (id: number) => ({ id, focused: id === lastFocused, type: 'normal' }),
       update: async (id: number, q: { focused?: boolean }) => void (q.focused && focusedWindows.push(id)),
       onFocusChanged: on('windows.onFocusChanged'),
       WINDOW_ID_NONE: -1,
@@ -157,6 +160,7 @@ beforeEach(() => {
   created = [];
   activated = [];
   focusedWindows = [];
+  lastFocused = 1;
 });
 
 describe('watch: a YouTube tab without a live script', () => {
@@ -1568,4 +1572,85 @@ it('no pause for a tab whose site was turned off while the choice was looked up 
   await choosing;
   expect(w.tabs!.followed()).toBe(2);
   expect(posted.filter(([, op]) => op === 'pause')).toEqual([]);
+});
+
+describe('watch: the panel detached into its own window', () => {
+  it('follows the active tab of whichever browser window the user is in, and offers no window the panel', async () => {
+    delete stored['mirattic.followActive'];
+    tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }];
+    const offered: number[] = [];
+    const w = await watchOutside({ inRoom: false, onOtherWindow: (id) => void offered.push(id) });
+    w.detach();
+    await settle();
+    await fire('tabs.onUpdated', 5, { status: 'complete' }, tabs[1]); // window 2's active video loads: no offer
+    for (let i = 0; i < 3; i++) await settle();
+    expect(offered).toEqual([]);
+    lastFocused = 2;
+    await fire('windows.onFocusChanged', 2);
+    for (let i = 0; i < 3; i++) await settle();
+    expect(w.tabs!.followed()).toBe(5);
+    tabs[0] = { ...tabs[0]!, active: false };
+    tabs.push({ ...YT(3, true) }); // window 1 behind: a tab activated there (e.g. its active tab closed) isn't followed
+    await fire('tabs.onActivated', { tabId: 3, windowId: 1 });
+    await settle();
+    expect(w.tabs!.followed()).toBe(5);
+    lastFocused = 1; // the user clicks a tab in window 1 (activation reported before the focus change)
+    await fire('tabs.onActivated', { tabId: 3, windowId: 1 });
+    for (let i = 0; i < 3; i++) await settle();
+    expect(w.tabs!.followed()).toBe(3);
+    expect(offered).toEqual([]);
+    w.follow(1); // a side panel opened again: offers come back
+    lastFocused = 2;
+    await fire('tabs.onActivated', { tabId: 5, windowId: 2 });
+    expect(offered).toEqual([5]);
+  });
+
+  it('fixed: a chosen tab stays followed when moved to another window; a closed one is replaced from any window', async () => {
+    delete stored['mirattic.followActive'];
+    tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }, { ...YT(6), windowId: 3 }];
+    const w = await watch();
+    w.detach();
+    await settle();
+    await w.tabs!.choose(5, 2);
+    tabs[1] = { ...tabs[1]!, windowId: 1 };
+    await fire('tabs.onAttached', 5, { newWindowId: 1 });
+    expect(w.tabs!.followed()).toBe(5);
+    tabs = tabs.filter((t) => t.id !== 1 && t.id !== 5); // only window 3's tab is left
+    await fire('tabs.onRemoved', 1, { windowId: 1 });
+    await fire('tabs.onRemoved', 5, { windowId: 1 });
+    for (let i = 0; i < 5; i++) await settle();
+    expect(w.tabs!.followed()).toBe(6);
+  });
+
+  it('a tab chosen in another window: nothing brought forward, and back to automatic follows the focused window', async () => {
+    delete stored['mirattic.followActive'];
+    tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }];
+    const w = await watch();
+    w.detach();
+    await settle();
+    await w.tabs!.choose(5, 2); // from the list, while window 1 is the one in front
+    expect(w.tabs!.followed()).toBe(5);
+    expect(activated).toEqual([]);
+    expect(focusedWindows).toEqual([]);
+    await w.tabs!.choose(null);
+    for (let i = 0; i < 3; i++) await settle();
+    expect(w.tabs!.followed()).toBe(1); // window 1's active tab, not window 2's
+  });
+
+  it('"이 영상 열기" with the video open in another window brings that window forward, and follows the tab there', async () => {
+    tabs = [YT(1, true), { ...YT(7), windowId: 2 }];
+    const w = await watch();
+    w.detach();
+    await settle();
+    expect(w.tabs!.followed()).toBe(1);
+    w.open(tabs[1]!.url, true);
+    for (let i = 0; i < 3; i++) await settle();
+    expect(activated).toEqual([7]);
+    expect(focusedWindows).toEqual([2]);
+    tabs[1] = { ...tabs[1]!, active: true };
+    lastFocused = 2;
+    await fire('windows.onFocusChanged', 2);
+    for (let i = 0; i < 3; i++) await settle();
+    expect(w.tabs!.followed()).toBe(7);
+  });
 });

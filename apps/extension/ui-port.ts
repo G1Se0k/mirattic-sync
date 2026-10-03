@@ -26,9 +26,10 @@ export type FromPanel =
   /**
    * `openedAt`: when this panel opened (taken before anything else, sent with every hello, reconnects too): the
    * latest opened panel's window has the side panel (decision 94), an older one closes. `hold`: only that (a panel
-   * still asking for consent: nothing else starts for it).
+   * still asking for consent: nothing else starts for it). `detached`: the panel is its own window (`windowId` is that
+   * popup's): every browser window's tabs count alike, and no window is offered the panel.
    */
-  | { op: 'hello'; windowId?: number; openedAt?: number; hold?: boolean }
+  | { op: 'hello'; windowId?: number; openedAt?: number; hold?: boolean; detached?: boolean }
   | { op: 'api'; id: number; name: string; args: unknown[] }
   | { op: 'socket' }
   | { op: 'socket:resume' }

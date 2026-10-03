@@ -7,7 +7,7 @@ import { clock, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
 import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
-import { Avatar, IconButton, ProviderIcon } from "./Icons";
+import { Avatar, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 
 /** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
@@ -183,6 +183,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       <header className="topbar">
         <IconButton icon="back" label="친구 목록" onClick={() => void back()} />
         <h1 title={content?.title}>{content?.title ?? "새 방"}</h1>
+        <PanelWindowButton />
         <IconButton icon="userPlus" label="방에 초대하기" onClick={() => setInviting(true)} />
         <IconButton icon={room.muted ? "bellOff" : "bell"} label={room.muted ? "채팅 알림 켜기" : "채팅 알림 끄기"}
           onClick={() => void toggleMute()} />

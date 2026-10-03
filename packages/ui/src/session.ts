@@ -109,6 +109,11 @@ export type Platform = {
    * (the user's own click); otherwise the extension reuses the tab it follows (the room following the host).
    */
   open(url: string, newTab?: boolean): void;
+  /**
+   * The panel in a window of its own (the extension): `detached` while this is one — every browser window's tabs then
+   * count alike. `toggle`: out to its own window, or back to the side panel. Call from a click.
+   */
+  panelWindow?: { detached: boolean; toggle(): void };
 };
 
 /** The text sizes Settings offers, in percent. */

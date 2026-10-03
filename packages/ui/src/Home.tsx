@@ -18,7 +18,7 @@ import { Room } from "./Room";
 import { MyFriendCode, Settings } from "./Settings";
 import { without } from "./Chat";
 import { latest, PROVIDER_NAMES } from "./format";
-import { Avatar, IconButton, ProviderIcon } from "./Icons";
+import { Avatar, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
@@ -585,6 +585,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       <header className="topbar">
         <span className="wordmark grow">Mirattic <span>Sync</span></span>
         <span className={`dot ${status === "open" ? "on" : ""}`} title={status === "open" ? "연결됨" : "연결 중"} />
+        <PanelWindowButton />
         <IconButton icon="settings" label="설정" onClick={() => setScreen("settings")} />
       </header>
       {incoming}

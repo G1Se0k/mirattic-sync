@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { MediaProvider } from "@mirattic/types";
 import { PROVIDER_NAMES } from "./format";
+import { platform } from "./session";
 import youtube from "./assets/youtube.png";
 import netflix from "./assets/netflix.png";
 import laftel from "./assets/laftel.png";
@@ -56,6 +57,7 @@ const PATHS = {
     </>
   ),
   refresh: <path d="M21 4v6h-6M3 20v-6h6M5 9a8 8 0 0 1 13.4-3.4L21 10M3 14l2.6 4.4A8 8 0 0 0 19 15" />,
+  dock: <path d="M3 4h18v16H3zM15 4v16" />,
   external: <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />,
   pause: <path d="M8 5v14M16 5v14" />,
   check: <path d="M20 6L9 17l-5-5" />,
@@ -96,6 +98,15 @@ export function IconButton({ icon, label, tone, ...rest }: ButtonHTMLAttributes<
       <Icon name={icon} />
     </button>
   );
+}
+
+/** Out to a window of its own, or back to the side panel (where the platform offers it). */
+export function PanelWindowButton() {
+  const w = platform.panelWindow;
+  if (!w) return null;
+  return w.detached
+    ? <IconButton icon="dock" label="사이드 패널로 돌아가기" onClick={() => w.toggle()} />
+    : <IconButton icon="external" label="창으로 분리" onClick={() => w.toggle()} />;
 }
 
 /** A streaming site's logo (square, transparent; the mock player gets a plain mark). */

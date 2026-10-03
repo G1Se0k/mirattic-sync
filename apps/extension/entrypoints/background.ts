@@ -45,7 +45,7 @@ export default defineBackground(() => {
   const api = createApi({ baseUrl: API_URL, store, authorize });
   const ports = new Set<Browser.runtime.Port>();
   /** Each panel's window and when it opened (one window has the panel, decision 94). */
-  const panelWindows = new Map<Browser.runtime.Port, { openedAt: number; windowId?: number }>();
+  const panelWindows = new Map<Browser.runtime.Port, { openedAt: number; windowId?: number; detached?: boolean }>();
   /** The latest opened panel, in storage.session: a worker restarting meanwhile still knows which one wins. */
   type LatestPanel = { openedAt: number; windowId?: number };
   let latestPanelMemo: Promise<LatestPanel | null> | null = null;
@@ -57,7 +57,7 @@ export default defineBackground(() => {
   };
   let panelTurn: Promise<unknown> = Promise.resolve();
   /** @returns whether this panel stays: false = an older one than the latest of another window (told to close). */
-  async function arbitrate(port: Browser.runtime.Port, openedAt: number, windowId: number | undefined) {
+  async function arbitrate(port: Browser.runtime.Port, openedAt: number, windowId: number | undefined, detached: boolean) {
     const me = { openedAt, windowId };
     const latest = await latestPanel();
     if (latest && latest.windowId !== windowId && newerPanel(latest, me)) {
@@ -65,7 +65,8 @@ export default defineBackground(() => {
       return false;
     }
     if (!latest || !newerPanel(latest, me)) await setLatestPanel(me);
-    panelWindows.set(port, me);
+    panelWindows.set(port, { ...me, detached });
+    if (detached) dropOffers(); // the panel is its own window: no window is offered it
     for (const [other, p] of panelWindows) {
       if (other !== port && p.windowId !== windowId && newerPanel(me, p)) {
         panelAllowed.set(other, Promise.resolve(false)); // nothing more from it, already (it is closing)
@@ -149,6 +150,8 @@ export default defineBackground(() => {
   const panelOffers = new Map<number, { toast: Omit<ToastMessage, 'seq' | 'ms'>; until: number }>();
   browser.tabs.onRemoved.addListener((id) => void panelOffers.delete(id));
   const onYouTube = (url?: string) => !!url && url.startsWith(new URL(SITE_HOME.youtube).origin + '/');
+  /** A panel in its own window (detached): no window is offered the panel. */
+  const detachedPanel = () => [...panelWindows.values()].some((p) => p.detached);
   /** The offer is only for the host of the room I'm in (a member, or nobody's room: never). */
   const hosting = () => !!room && !room.state.closed
     && !!room.state.room?.members.some((m) => m.user.id === meId && m.role === 'HOST');
@@ -158,7 +161,8 @@ export default defineBackground(() => {
     panelOffers.clear();
   }
   function offerPanelHere(tabId: number, windowId: number) {
-    if (!hosting() || ![...panelWindows.values()].some((p) => p.windowId !== windowId)) return; // not hosting, or no panel elsewhere
+    // Not hosting, a detached panel, or no panel elsewhere.
+    if (!hosting() || detachedPanel() || ![...panelWindows.values()].some((p) => p.windowId !== windowId)) return;
     const toast = {
       type: TOAST, kind: 'panel', target: String(windowId), panelOpen: false, alertId: ++alertIds, total: PANEL_OFFER_MS,
       title: '이 창에서 보시나요?', body: 'Mirattic 패널을 이 창으로 옮기면 이 탭의 영상을 인식합니다.',
@@ -175,14 +179,14 @@ export default defineBackground(() => {
         // The message, numbered (the pages' order; a toast without one is dropped) — or null, once it no longer
         // applies: no longer the tab's latest offer or run out, the tab no longer active and on YouTube (it may have
         // moved on while this waited), signed out, no longer the host of the room I'm in, the active tab no longer
-        // followed, no panel in another window.
+        // followed, no panel in another window, a detached panel.
         const current = async () => {
           const o = panelOffers.get(tabId);
           const t = await browser.tabs.get(tabId).catch(() => null);
           const now = Date.now();
           if (o?.toast.alertId !== alertId || o.until <= now || !t?.active || !onYouTube(t.url)) return null;
           const elsewhere = [...panelWindows.values()].some((p) => p.windowId !== t.windowId);
-          if (!meId || !hosting() || !(platform?.followsActive() ?? !room) || !elsewhere) return null;
+          if (!meId || !hosting() || detachedPanel() || !(platform?.followsActive() ?? !room) || !elsewhere) return null;
           return { ...o.toast, ms: o.until - now, seq: ++seq };
         };
         let offer = await current();
@@ -1006,12 +1010,12 @@ export default defineBackground(() => {
       if (panelOffers.get(tabId)?.toast.alertId !== m.alertId) return;
       panelOffers.delete(tabId);
       // Only while it still applies: the tab still active and on YouTube, still the host of the room I'm in, the active
-      // tab followed, a panel elsewhere.
+      // tab followed, a panel elsewhere (not a detached one).
       const offered = sender.tab.active && onYouTube(url);
       const following = platform?.followsActive() ?? !room;
       const here = sender.tab.windowId;
       const elsewhere = [...panelWindows.values()].some((p) => p.windowId !== here);
-      if (m.accept && offered && hosting() && following && elsewhere) void browser.sidePanel.open({ windowId: here }).catch(() => {});
+      if (m.accept && offered && hosting() && !detachedPanel() && following && elsewhere) void browser.sidePanel.open({ windowId: here }).catch(() => {});
       return;
     }
     if (m?.type !== TOAST_ANSWER || !active(m.kind, m.target, m.alertId)) return; // settled or replaced meanwhile
@@ -1061,7 +1065,8 @@ export default defineBackground(() => {
         // its hello arrives, nor whether it is a reconnect), kept across worker restarts. An older one closes. One
         // hello decided at a time (each sees the one before it), so two arriving together can't both win.
         const openedAt = m.openedAt;
-        panelAllowed.set(port, (panelTurn = panelTurn.then(() => arbitrate(port, openedAt, m.windowId))) as Promise<boolean>);
+        const detached = m.detached === true;
+        panelAllowed.set(port, (panelTurn = panelTurn.then(() => arbitrate(port, openedAt, m.windowId, detached))) as Promise<boolean>);
       }
       // Nothing from a panel that lost (closing), nor before its arbitration ends.
       if (!(await (panelAllowed.get(port) ?? true))) return;
@@ -1070,9 +1075,11 @@ export default defineBackground(() => {
           if (m.hold) break; // a panel still asking for consent: its window is all it says
           {
             // Its window followed only if this panel still has the side panel once that's ready (it may lose meanwhile).
-            const watcher = await ensureWatching(m.windowId, false); // created for its window if none yet
+            // Detached: every browser window's tabs (its own window has none).
+            const watcher = await ensureWatching(m.detached ? undefined : m.windowId, false); // created for its window if none yet
             if (!(await (panelAllowed.get(port) ?? true))) break;
-            if (m.windowId !== undefined) watcher?.follow(m.windowId);
+            if (m.detached) watcher?.detach();
+            else if (m.windowId !== undefined) watcher?.follow(m.windowId);
             const here = m.windowId;
             if (here !== undefined && !m.hold) inTabTurn(() => bringMoved(here)); // the panel a choice moved here
           }

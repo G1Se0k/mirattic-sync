@@ -6,6 +6,9 @@ import { textSizeOf, type Platform, type RoomHandle, type VideoTab } from '@mira
 import { ASK_ON_SWITCH_KEY, experimentKey, TEXT_SIZE_ITEM, UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
 
 const RECONNECT_MS = 500;
+/** This page is the panel in its own window (opened by "창으로 분리"), not the side panel. */
+const DETACHED = new URLSearchParams(location.search).has('detached');
+const DETACHED_SIZE = { width: 420, height: 760 };
 
 
 /**
@@ -179,11 +182,15 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       setTimeout(() => {
         port = browser.runtime.connect({ name: UI_PORT });
         attach();
-        send({ op: 'hello', windowId, openedAt });
+        send({ op: 'hello', windowId, openedAt, detached: DETACHED });
         if (socketHandlers) send({ op: 'socket' });
         if (view?.shown) send({ op: 'room:open', roomId: view.roomId, resume: true });
         dismissed.forEach(seen);
-        if (choosingTab) send({ op: 'tab', tabId: choosingTab.tabId, windowId });
+        if (choosingTab) {
+          const { tabId } = choosingTab;
+          // Detached: the tab's own window, as chosen (this popup has no tabs).
+          send({ op: 'tab', tabId, windowId: DETACHED ? shared.tabs.find((t) => t.id === tabId)?.windowId : windowId });
+        }
       }, RECONNECT_MS);
     });
   };
@@ -198,8 +205,16 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       }),
   });
 
-  send({ op: 'hello', windowId, openedAt });
+  send({ op: 'hello', windowId, openedAt, detached: DETACHED });
   await hello;
+  /** Detached: the browser window focused last, where "패널로 돌아가기" opens the side panel (within the click). */
+  let browserWindow: number | undefined;
+  if (DETACHED) {
+    void browser.windows.getLastFocused({ windowTypes: ['normal'] }).then((w) => (browserWindow ??= w.id), () => {});
+    browser.windows.onFocusChanged.addListener((id) => {
+      if (id !== browser.windows.WINDOW_ID_NONE) browserWindow = id;
+    }, { windowTypes: ['normal'] });
+  }
 
   const actOn = (roomId: string) => (name: RoomAction, ...args: unknown[]) => send({ op: 'room:act', roomId, name, args });
 
@@ -216,9 +231,16 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       list: () => shared.tabs, // every window's video tabs
       followed: () => shared.followedTab,
       auto: () => shared.followActive,
-      openSite: (site) => send({ op: 'site', site, windowId }),
+      openSite: (site) => send({ op: 'site', site, windowId: DETACHED ? undefined : windowId }),
       choose: (tabId) => {
         const there = tabId === null ? undefined : shared.tabs.find((t) => t.id === tabId)?.windowId;
+        if (DETACHED) {
+          // Every window's tabs alike: followed where it is, nothing moved or brought forward.
+          moves++;
+          choosingTab = { tabId };
+          send({ op: 'tab', tabId, windowId: there });
+          return;
+        }
         if (tabId !== null && there !== undefined && there !== windowId) {
           // A tab of another window: chosen for that window (the background takes it even if the panel there says
           // hello first), the panel opened there within this click (Chrome opens one only for a user's gesture; this
@@ -310,6 +332,18 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       },
     },
     open: (url, newTab) => send({ op: 'open', url, newTab }),
+    panelWindow: {
+      detached: DETACHED,
+      toggle: () => {
+        // Out: a popup window with this page; its hello closes this side panel (one panel, decision 94). Back: the side
+        // panel opened in the browser window focused last (within this click), whose hello closes this window.
+        if (!DETACHED) {
+          void browser.windows.create({ url: browser.runtime.getURL('/sidepanel.html?detached'), type: 'popup', ...DETACHED_SIZE });
+        } else if (browserWindow !== undefined) {
+          void browser.sidePanel.open({ windowId: browserWindow }).catch(() => {});
+        }
+      },
+    },
     textSize: {
       get: () => textSize,
       set: (percent) => {

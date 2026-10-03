@@ -32,6 +32,12 @@ const PRESENCE_DELAY_MS = 300; // the server drops presence updates closer than 
 export type Watch = Omit<Platform, 'connect' | 'room'> & {
   /** Follow the video tab of another window (the one whose side panel was opened last). */
   follow(windowId: number): void;
+  /**
+   * The panel is its own window: every browser window's tabs count alike — the active tab is the focused browser
+   * window's, a replacement may come from any window, a tab moving between windows stays followed, and no window
+   * is offered the panel. Until `follow` (a side panel opened).
+   */
+  detach(): void;
   /** The active tab is what is followed now: out of a room (a replaced device too), or following it by choice. */
   followsActive(): boolean;
 };
@@ -61,6 +67,8 @@ export async function watch(opts: {
   onOtherWindow?: (tabId: number, windowId: number) => void;
 } = {}): Promise<Watch> {
   let windowId = opts.windowId ?? (await browser.windows.getCurrent()).id;
+  /** The panel is its own window (see `detach`): `windowId` is then the browser window focused last. */
+  let detached = false;
   let tabId: number | null = null;
   let content: RoomContent | null = null;
   let presence: MediaPresence | null = null;
@@ -304,18 +312,22 @@ export async function watch(opts: {
     adapter.connect(id, provider);
   };
 
-  /** A tab of this window on the same video page as `url` (YouTube: the same `v`). */
+  /** A tab of this window (detached: of any) on the same video page as `url` (YouTube: the same `v`). */
   const tabShowing = async (url: string) => {
     const want = new URL(url);
-    const tabs = await browser.tabs.query({ windowId, url: [`${want.origin}/*`] });
-    return tabs.find((t) => t.url && samePage(new URL(t.url), want));
+    const tabs = await browser.tabs.query(detached ? { url: [`${want.origin}/*`] } : { windowId, url: [`${want.origin}/*`] });
+    const showing = tabs.filter((t) => t.url && samePage(new URL(t.url), want));
+    return showing.find((t) => t.windowId === windowId) ?? showing[0]; // this window's first
   };
 
   /** The active video tab of this window, else any, except one being closed. */
   const pick = async (closing?: number, inWindow = windowId) => {
     const mine = ++choosing;
     const [active] = await browser.tabs.query({ active: true, windowId: inWindow });
-    const all = (await browser.tabs.query({ windowId: inWindow, url: videoUrls() })).filter((t) => t.id !== closing);
+    // Detached: any window's, that window's first.
+    const all = (await browser.tabs.query(detached ? { url: videoUrls() } : { windowId: inWindow, url: videoUrls() }))
+      .filter((t) => t.id !== closing)
+      .sort((a, b) => Number(b.windowId === inWindow) - Number(a.windowId === inWindow));
     const activeOne = ofSite(active?.url) && active?.id !== closing ? [active!] : [];
     // Out of a room (decision 95): the active tab only — not a video tab, nothing is watched (no other tab instead).
     if (!inRoom && !activeOne.length) {
@@ -328,7 +340,7 @@ export async function watch(opts: {
       if (candidate.id === undefined) continue;
       const now = await tabNow(candidate.id); // as it is now: it may have navigated since the query (next one then)
       // Still a video tab of that window (not closed, not moved away meanwhile): followed.
-      if (mine === choosing && now?.id !== undefined && now.windowId === inWindow && ofSite(now.url)) {
+      if (mine === choosing && now?.id !== undefined && (detached || now.windowId === inWindow) && ofSite(now.url)) {
         return void (await bind(now.id, now.url, now.windowId));
       }
     }
@@ -429,22 +441,32 @@ export async function watch(opts: {
 
   /** Another window's active video tab while the active tab is what is followed: the panel can move there. */
   const offerIfOther = async (id: number) => {
-    if (!autoNow() || !opts.onOtherWindow) return;
+    if (!autoNow() || detached || !opts.onOtherWindow) return;
     const tab = await tabNow(id);
     // As things are after the lookup (a room entered meanwhile, the panel moved there).
     // YouTube tabs only: Netflix / Laftel get our script only in the tab followed, so no toast can show in another.
-    if (tab?.id !== undefined && autoNow() && ofSite(tab.url) && providerOf(tab.url) === 'youtube' && tab.active
+    if (tab?.id !== undefined && autoNow() && !detached && ofSite(tab.url) && providerOf(tab.url) === 'youtube' && tab.active
       && tab.windowId !== windowId) {
       opts.onOtherWindow(tab.id, tab.windowId);
     }
   };
-  // Switching windows without switching tabs: that window's active tab counts the same.
+  // Switching windows without switching tabs: that window's active tab counts the same. Detached: that window is
+  // the one followed now. Browser windows only (not the detached panel's own).
   browser.windows.onFocusChanged?.addListener(async (focused) => {
-    if (focused === browser.windows.WINDOW_ID_NONE || focused === windowId || !autoNow()) return;
+    if (focused === browser.windows.WINDOW_ID_NONE || focused === windowId) return;
+    if (detached) return moveTo(focused);
+    if (!autoNow()) return;
     const [active] = await browser.tabs.query({ active: true, windowId: focused }).catch(() => []);
     if (active?.id !== undefined) void offerIfOther(active.id);
-  });
+  }, { windowTypes: ['normal'] });
   browser.tabs.onActivated.addListener(async (info) => {
+    if (info.windowId !== windowId && detached) {
+      // Detached: a tab the user activated in another window (it is focused; a tab closing in a window behind doesn't
+      // count) — that window is followed now, and its active tab as in this one.
+      const w = await browser.windows.get(info.windowId).catch(() => null);
+      if (detached && w?.focused && w.type === 'normal') moveTo(info.windowId);
+      return;
+    }
     if (info.windowId !== windowId) {
       // Another window's video tab, while the active tab is what is followed: the panel can be moved there (the user
       // clicks it — Chrome opens a side panel only for a user's gesture).
@@ -499,6 +521,7 @@ export async function watch(opts: {
     if (!restored) movedWhileRestoring.add(id);
     if (id !== tabId) return;
     tabWindow = attached.newWindowId;
+    if (detached) return keep(); // every window's tabs count alike: still followed
     // The followed tab moved to another window: a chosen one stops being recognized (until the user chooses again);
     // following the active tab, it's that window's tab only while it stays there.
     if (!autoNow() || attached.newWindowId !== windowId) {
@@ -577,14 +600,26 @@ export async function watch(opts: {
     });
   };
 
+  /** `id`'s tabs are the window's from now on (the active one followed, if that's what is followed). */
+  function moveTo(id: number) {
+    if (id === windowId) return;
+    windowId = id;
+    activations++; // an activation of the previous window still being looked at is not this window's
+    if (switching()) void pick();
+    void checkOffSite();
+  }
+
   return {
     followsActive: autoNow,
     follow: (id) => {
-      if (id === windowId) return;
-      windowId = id;
-      activations++; // an activation of the previous window still being looked at is not this window's
-      if (switching()) void pick();
-      void checkOffSite();
+      detached = false;
+      moveTo(id);
+    },
+    detach: () => {
+      detached = true;
+      void browser.windows.getLastFocused({ windowTypes: ['normal'] }).then((w) => {
+        if (detached && w.id !== undefined) moveTo(w.id);
+      }, () => {});
     },
     adapter: (provider) => (provider === 'youtube' || (isExperimental(provider) && on.has(provider)) ? adapter.as(provider) : undefined),
     tabs: {
@@ -593,7 +628,9 @@ export async function watch(opts: {
       auto: () => followActive,
       choose: async (id, chosenIn, opts) => {
         stopped = false;
-        if (chosenIn !== undefined) windowId = chosenIn; // the panel's window, for its active tab and fallbacks
+        // The panel's window, for its active tab and fallbacks. Detached: `chosenIn` is the tab's own window — the
+        // focused browser window stays the one followed (back to the active tab: its, not the chosen tab's window's).
+        if (chosenIn !== undefined && !detached) windowId = chosenIn;
         const mine = ++intent;
         followActive = id === null;
         void browser.storage.local.set({ [followActiveSetting]: followActive });
@@ -628,8 +665,9 @@ export async function watch(opts: {
           if (before && (!isExperimental(before.provider) || on.has(before.provider))) pauseTab(before.tabId);
           // A tab of another window than the panel's: brought forward there (the user sees what they chose).
           // Not if the panel moved to another window meanwhile (the choice still holds; nothing brought forward), nor
-          // for a move (the background brings it forward once the panel is in its window, decision 95).
-          if (!opts?.move && chosenIn !== undefined && tab.windowId !== chosenIn && windowId === chosenIn) {
+          // for a move (the background brings it forward once the panel is in its window, decision 95), nor detached
+          // (every window's tabs alike: nothing brought forward, decision 97).
+          if (!opts?.move && !detached && chosenIn !== undefined && tab.windowId !== chosenIn && windowId === chosenIn) {
             // Its window as activated (it may have moved meanwhile); none if it couldn't be activated.
             // One after another, each only if still the latest choice: an older one finishing late can't leave its tab
             // active over a newer choice.
@@ -729,7 +767,13 @@ export async function watch(opts: {
         ? browser.tabs.update(tabId, { url, active: true })
         : (newTab ? tabShowing(url) : Promise.resolve(undefined)).then((tab) =>
             tab?.id !== undefined ? browser.tabs.update(tab.id, { active: true }) : Promise.reject());
-      void opened.catch(() => browser.tabs.create({ url, windowId })).then((tab) => tab && mine === intent && take(tab), () => {});
+      void opened.catch(() => browser.tabs.create({ url, windowId })).then((tab) => {
+        if (!tab || mine !== intent) return;
+        // Detached: a tab of another window than the one followed is brought forward there — seen, and (following the
+        // active tab) followed, as a tab of the panel's own window would be.
+        if (detached && tab.windowId !== windowId) void browser.windows.update(tab.windowId, { focused: true }).catch(() => {});
+        take(tab);
+      }, () => {});
     },
   };
 }
