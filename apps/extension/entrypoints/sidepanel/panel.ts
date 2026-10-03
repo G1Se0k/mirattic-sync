@@ -344,7 +344,12 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
           return;
         }
         const there = shared.tabs.find((t) => t.id === shared.followedTab)?.windowId ?? browserWindow;
-        if (there !== undefined) void browser.sidePanel.open({ windowId: there }).catch(() => {});
+        // Both within the click, nothing awaited before the open (the gesture), nor after it (this window closes as
+        // the side panel there says hello): that window brought to the front, the side panel opened in it.
+        if (there !== undefined) {
+          void browser.windows.update(there, { focused: true }).catch(() => {});
+          void browser.sidePanel.open({ windowId: there }).catch(() => {});
+        }
       },
     },
     textSize: {
