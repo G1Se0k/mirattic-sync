@@ -26,6 +26,7 @@ let disconnects: number[]; // ports we closed, by tab
 let posted: [number, string][]; // requests sent to the tabs' players (tab, op)
 let created: string[]; // tabs.create URLs
 let activated: number[]; // tabs made active by us
+let navigated: [number, string][]; // tabs we sent to a URL
 let focusedWindows: number[]; // windows brought forward by us
 let heldUpdate: ReturnType<typeof hold<void>> | null = null; // the next tabs.update answers when released
 let lastFocused = 1; // the browser window focused last
@@ -116,6 +117,10 @@ vi.mock('wxt/browser', () => ({
         const held = heldUpdate;
         heldUpdate = null;
         await held?.promise;
+        if (q.url && tab) {
+          navigated.push([id, q.url]);
+          return { ...tab, url: q.url, active: !!q.active };
+        }
         if (q.active && !q.url && tab) {
           activated.push(id);
           return { ...tab, active: true }; // as Chrome answers
@@ -159,6 +164,7 @@ beforeEach(() => {
   posted = [];
   created = [];
   activated = [];
+  navigated = [];
   focusedWindows = [];
   lastFocused = 1;
 });
@@ -1642,6 +1648,15 @@ describe('watch: the panel detached into its own window', () => {
     await w.tabs!.choose(null);
     for (let i = 0; i < 3; i++) await settle();
     expect(w.tabs!.followed()).toBe(1); // window 1's active tab, not window 2's
+  });
+
+  it('"이 영상 열기" with the video open in a playlist tab takes that tab back to the plain video', async () => {
+    tabs = [YT(1, true), { ...YT(5), url: `${YT(5).url}&list=RDaaaaaaaaaa5&index=2` }];
+    const w = await watch();
+    w.open(YT(5).url, true);
+    for (let i = 0; i < 3; i++) await settle();
+    expect(navigated).toEqual([[5, YT(5).url]]);
+    expect(created).toEqual([]);
   });
 
   it('"이 영상 열기" with the video open in another window brings that window forward, and follows the tab there', async () => {

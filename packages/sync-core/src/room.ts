@@ -1,5 +1,5 @@
 import {
-  openUrl,
+  watchUrl,
   PAUSE_REQUEST_COOLDOWN_MS,
   sameSeries,
   type ClientEvent,
@@ -129,7 +129,7 @@ export class RoomSync {
     const r = this.state.room;
     if (this.isHost || !r?.type) return;
     this.switchCheck++; // anything else under way gives up
-    const url = r.content?.provider === r.type ? openUrl(r.content) : this.deps.siteUrl?.(r.type);
+    const url = r.content?.provider === r.type ? watchUrl(r.content) : this.deps.siteUrl?.(r.type);
     if (url) this.deps.open(url);
   }
 
@@ -241,7 +241,7 @@ export class RoomSync {
       }
     }
     const player = this.deps.adapter(content.provider);
-    const url = openUrl(content);
+    const url = watchUrl(content);
     if (!player || !url) return;
     const mine = ++this.switchCheck; // the room may move on again before the tab answers
     if (!before) return this.openOnEnter(content, url, player, mine, 0);
@@ -459,7 +459,7 @@ export class RoomSync {
   /** `always`: "이 방에서 항상 허용" — the host's next videos in this room open without asking. */
   openSwitched(always = false) {
     if (always) this.followAlways = true;
-    const url = this.state.switched && openUrl(this.state.switched);
+    const url = this.state.switched && watchUrl(this.state.switched);
     if (url) this.deps.open(url);
     this.set({ switched: null });
   }

@@ -188,19 +188,9 @@ export function watchUrl(content: { provider: MediaProvider; contentId: string }
   return undefined;
 }
 
-const SERIES = /^[A-Za-z0-9_-]{1,128}$/;
-
 /** The host moved on within the same series: members follow without being asked. */
 export function sameSeries(a: RoomContent | undefined, b: RoomContent | undefined) {
   return !!a?.series && a.provider === b?.provider && a.series === b.series;
-}
-
-/** `watchUrl`, keeping a YouTube playlist so its next video stays in the same series. */
-export function openUrl(content: RoomContent): string | undefined {
-  const url = watchUrl(content);
-  return url && content.provider === "youtube" && content.series && SERIES.test(content.series)
-    ? `${url}&list=${content.series}`
-    : url;
 }
 
 export type RoomRole = "HOST" | "MEMBER";

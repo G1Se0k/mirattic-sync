@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { openUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
+import { watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
@@ -485,7 +485,7 @@ function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite,
     );
   }
   const name = PROVIDER_NAMES[content.provider];
-  const url = openUrl(content);
+  const url = watchUrl(content);
   const snapshot = s.snapshot;
   const here = snapshot?.contentId === content.contentId;
   const cooldown = Math.ceil((s.pauseCooldownUntil - Date.now()) / 1000);

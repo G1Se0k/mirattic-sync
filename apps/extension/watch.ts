@@ -767,7 +767,9 @@ export async function watch(opts: {
       const opened = tabId !== null && !newTab
         ? browser.tabs.update(tabId, { url, active: true })
         : (newTab ? tabShowing(url) : Promise.resolve(undefined)).then((tab) =>
-            tab?.id !== undefined ? browser.tabs.update(tab.id, { active: true }) : Promise.reject());
+            // In a playlist or mix (`list=`): back to the plain video, as opened (a mix differs per person).
+            tab?.id === undefined ? Promise.reject()
+            : browser.tabs.update(tab.id, tab.url && new URL(tab.url).searchParams.has('list') ? { url, active: true } : { active: true }));
       void opened.catch(() => browser.tabs.create({ url, windowId })).then((tab) => {
         if (!tab || mine !== intent) return;
         // Detached: a tab of another window than the one followed is brought forward there — seen, and (following the
