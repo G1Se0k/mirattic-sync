@@ -17,6 +17,7 @@ import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -32,6 +33,7 @@ public class AdminController {
 	private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yy.M.d HH:mm")
 			.withZone(ZoneId.of("Asia/Seoul"));
 	private static final long DAY = 86_400_000L;
+	private static final int PAGE = 50;
 
 	private final JwtDecoder orders;
 	private final JdbcTemplate jdbc;
@@ -57,9 +59,9 @@ public class AdminController {
 		return ResponseEntity.ok(Map.of("facts", facts, "tables", List.of(
 				table("최근 신고", List.of("시각", "사유", "내용", "대상 UID"), """
 						SELECT created_at, reason, COALESCE(detail, ''), target_user_id FROM reports
-						ORDER BY created_at DESC LIMIT 20"""),
+						ORDER BY created_at DESC LIMIT 5"""),
 				table("최근 피드백", List.of("시각", "종류", "내용", "UID"), """
-						SELECT created_at, kind, text, user_id FROM feedback ORDER BY created_at DESC LIMIT 20"""))));
+						SELECT created_at, kind, text, user_id FROM feedback ORDER BY created_at DESC LIMIT 5"""))));
 	}
 
 	@GetMapping(PATH + "/users/{uid}")
@@ -95,6 +97,48 @@ public class AdminController {
 				table("피드백", List.of("시각", "종류", "내용"), """
 						SELECT created_at, kind, text FROM feedback WHERE user_id = ? ORDER BY created_at DESC LIMIT 20""",
 						uid))));
+	}
+
+	/** Every report, newest first, with the reported message as copied at the time. 50 per page. */
+	@GetMapping(PATH + "/reports")
+	ResponseEntity<Map<String, Object>> reports(@RequestParam(defaultValue = "0") int page,
+			@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+		if (!authorized(authorization)) {
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+		}
+		return page("신고", count("SELECT COUNT(*) FROM reports"), page, table("신고", List.of("시각", "사유", "내용",
+				"신고된 메시지", "신고한 사람", "신고자 UID", "대상", "대상 UID"), """
+				SELECT r.created_at, r.reason, COALESCE(r.detail, ''), COALESCE(r.message_text, ''),
+				  COALESCE(a.display_name, ''), r.reporter_id, COALESCE(t.display_name, ''), r.target_user_id
+				FROM reports r LEFT JOIN users a ON a.id = r.reporter_id LEFT JOIN users t ON t.id = r.target_user_id
+				ORDER BY r.created_at DESC, r.id LIMIT ? OFFSET ?""", PAGE + 1, Math.max(page, 0) * PAGE));
+	}
+
+	/** Every feedback / bug report from Settings, newest first. 50 per page. */
+	@GetMapping(PATH + "/feedback")
+	ResponseEntity<Map<String, Object>> feedback(@RequestParam(defaultValue = "0") int page,
+			@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+		if (!authorized(authorization)) {
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+		}
+		return page("피드백 · 버그 리포트", count("SELECT COUNT(*) FROM feedback"), page, table("피드백 · 버그 리포트",
+				List.of("시각", "종류", "내용", "보낸 사람", "UID"), """
+				SELECT f.created_at, CASE f.kind WHEN 'BUG' THEN '버그' ELSE '피드백' END, f.text,
+				  COALESCE(u.display_name, ''), f.user_id
+				FROM feedback f LEFT JOIN users u ON u.id = f.user_id
+				ORDER BY f.created_at DESC, f.id LIMIT ? OFFSET ?""", PAGE + 1, Math.max(page, 0) * PAGE));
+	}
+
+	/** One page of a list fetched with PAGE + 1 rows: the extra row only says there is a next page. */
+	@SuppressWarnings("unchecked")
+	private static ResponseEntity<Map<String, Object>> page(String what, String total, int page,
+			Map<String, Object> table) {
+		List<List<String>> rows = (List<List<String>>) table.get("rows");
+		boolean more = rows.size() > PAGE;
+		Map<String, Object> shown = Map.of("title", table.get("title"), "columns", table.get("columns"),
+				"rows", rows.subList(0, Math.min(rows.size(), PAGE)));
+		return ResponseEntity.ok(Map.of("facts", List.of(fact("전체 " + what, total)), "tables", List.of(shown),
+				"more", more));
 	}
 
 	private boolean authorized(String authorization) {

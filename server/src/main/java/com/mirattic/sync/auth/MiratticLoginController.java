@@ -116,9 +116,7 @@ class MiratticLoginController {
 			// Auth has it now (decision 99).
 			String name = id.getClaimAsString("name");
 			User user = users.findById(id.getSubject()).orElseGet(() -> User.fromAuth(id.getSubject(), User.nameFromAuth(name)));
-			if (name != null) {
-				user.syncName(name); // no name in the token: the one kept stays
-			}
+			user.syncName(name); // no name in the token: the one kept stays
 			user = users.save(user);
 			Instant authTime = id.hasClaim("auth_time") ? id.getClaimAsInstant("auth_time") : Instant.EPOCH;
 			handoff = new Handoffs.Handoff(new AuthTokens(t.access_token(), t.refresh_token(), UserSummary.of(user)), authTime);

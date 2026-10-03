@@ -51,9 +51,11 @@ public class User {
 		return n.length() > 32 ? n.substring(0, 32) : n;
 	}
 
-	/** The name follows Mirattic Auth's (decision 99): Auth owns it, Sync shows it. */
+	/** The name follows Mirattic Auth's (decision 99): Auth owns it, Sync shows it. None (or blank): the kept one stays. */
 	public void syncName(String authName) {
-		this.displayName = nameFromAuth(authName);
+		if (authName != null && !authName.isBlank()) {
+			this.displayName = nameFromAuth(authName);
+		}
 	}
 
 	public String getId() { return id; }

@@ -308,6 +308,17 @@ class SafetyFlowTest extends IntegrationTest {
 			call(HttpMethod.GET, "/api/internal/admin/stats", token, null).andExpect(status().isUnauthorized());
 			call(HttpMethod.GET, "/api/internal/admin/users/" + u.id(), token, null).andExpect(status().isUnauthorized());
 		}
+		// The full lists: newest first, names and both UIDs, paged.
+		report(u, "{\"userId\":\"%s\",\"reason\":\"SPAM\",\"detail\":\"광고\"}".formatted(friend.id()))
+				.andExpect(status().isNoContent());
+		JsonNode reports = body(call(HttpMethod.GET, "/api/internal/admin/reports", admin, null).andExpect(status().isOk()));
+		assertThat(reports.toString()).contains("광고", u.id(), friend.id()).contains("\"more\":false");
+		JsonNode feedback = body(call(HttpMethod.GET, "/api/internal/admin/feedback?page=0", admin, null)
+				.andExpect(status().isOk()));
+		assertThat(feedback.toString()).contains("고장 <b>", "버그", u.id());
+		for (String list : new String[] {"reports", "feedback"}) {
+			call(HttpMethod.GET, "/api/internal/admin/" + list, u.accessToken(), null).andExpect(status().isUnauthorized());
+		}
 		// And an admin order is not a deletion order.
 		deletionOrder(admin).andExpect(status().isUnauthorized());
 	}

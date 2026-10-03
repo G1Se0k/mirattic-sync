@@ -38,6 +38,8 @@ class MiratticLoginTest extends IntegrationTest {
 		// Renamed at Auth (decision 99): /api/me takes UserInfo's name.
 		AuthStub.NAMES.put(uid, "  Alice Kim  ");
 		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.displayName").value("Alice Kim"));
+		AuthStub.NAMES.put(uid, "   ");
+		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.displayName").value("Alice Kim")); // blank: kept
 		AuthStub.NAMES.remove(uid);
 		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.displayName").value("Alice Kim")); // none: kept
 
@@ -45,6 +47,8 @@ class MiratticLoginTest extends IntegrationTest {
 		JsonNode again = body(redeem(signIn(uid, "Renamed", false, Instant.now())).andExpect(status().isOk()));
 		assertThat(again.path("user").path("id").asString()).isEqualTo(uid);
 		assertThat(again.path("user").path("displayName").asString()).isEqualTo("Renamed");
+		JsonNode blank = body(redeem(signIn(uid, " ", false, Instant.now())).andExpect(status().isOk()));
+		assertThat(blank.path("user").path("displayName").asString()).isEqualTo("Renamed"); // a blank name: kept
 	}
 
 	@Test

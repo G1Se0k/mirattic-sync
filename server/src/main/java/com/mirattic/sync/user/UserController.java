@@ -63,8 +63,8 @@ public class UserController {
 	/** With the email and name read live from Auth: a name changed there is taken here (decision 99). */
 	private Me me(User u, Jwt jwt) {
 		MiratticAuth.UserInfo info = auth.userInfo(jwt.getTokenValue());
-		if (info != null && info.name() != null && !User.nameFromAuth(info.name()).equals(u.getDisplayName())) {
-			u.syncName(info.name());
+		if (info != null) {
+			u.syncName(info.name()); // stored only if it changed (none or blank: kept)
 		}
 		return new Me(u.getId(), info == null ? null : info.email(), u.getDisplayName(), u.getFriendCode(),
 				u.getPresenceVisibility(), u.getPositionVisibility());
