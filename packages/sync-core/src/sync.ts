@@ -10,7 +10,7 @@ import type { ServerClock } from "./clock";
 
 /** Where the room's playback is now, extrapolated from the last authoritative state. */
 export function estimatePosition(state: PlaybackState, serverNow: number) {
-  const elapsed = state.playing ? Math.max(0, serverNow - state.capturedAt) : 0;
+  const elapsed = state.playing ? Math.max(0, serverNow - state.capturedAt) * (state.rate ?? 1) : 0;
   const position = state.positionMs + elapsed;
   return state.durationMs === undefined ? position : Math.min(position, state.durationMs);
 }
@@ -49,6 +49,8 @@ export class SyncFollower {
   private running = false;
   /** A check requested while one was running; true if any of them was a host event. */
   private queued: boolean | null = null;
+  /** When the speed was last set: a page that keeps resetting it is tried once a recheck, not on its every event. */
+  private rateAt = -Infinity;
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -71,6 +73,7 @@ export class SyncFollower {
     if (state.version <= this.version) return false;
     this.state = state;
     this.confirming = false;
+    this.rateAt = -Infinity; // the host's own change: followed at once
     void this.check(true);
     return true;
   }
@@ -125,6 +128,15 @@ export class SyncFollower {
       if (this.state !== state) return;
     }
 
+    // The host's speed, like play / pause. Before the position: a wrong speed is what makes it drift.
+    const rate = state.rate ?? 1;
+    if (adapter.setRate && snap.rate !== undefined && snap.rate !== rate && Date.now() - this.rateAt >= (this.opts.recheckMs ?? 1000)) {
+      this.rateAt = Date.now();
+      await adapter.setRate(rate);
+      snap = (await adapter.getSnapshot()) ?? snap;
+      if (this.state !== state) return;
+    }
+
     const target = estimatePosition(state, clock.serverNow());
     const driftMs = snap.positionMs - target;
     const action = classifyDrift(driftMs, { ...DEFAULT_DRIFT, ...adapter.driftOverride });
@@ -149,7 +161,7 @@ export class SyncFollower {
     this.confirming = false;
     // Drift only changes while playing; a paused player is re-checked on the next event. A player that didn't
     // take our play / pause (autoplay refused, still loading) is tried again too.
-    if ((action === "recheck" && state.playing) || snap.playing !== state.playing) this.schedule();
+    if ((action === "recheck" && state.playing) || snap.playing !== state.playing || (adapter.setRate && snap.rate !== undefined && snap.rate !== rate)) this.schedule();
     onStatus?.({ kind: action === "recheck" ? "rechecking" : "synced", driftMs });
   }
 
@@ -201,6 +213,7 @@ export function publishHost(
     const type = fresh ? (s.playing ? "playback:play" : "playback:pause") : "playback:seek";
     const command: PlaybackCommand = { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(s.capturedAt)) };
     if (s.scrubbing !== undefined) command.scrubbing = s.scrubbing;
+    if (s.rate !== undefined) command.rate = s.rate;
     if (send(type, command, s) !== false) last = s;
   };
   const queue = (s: PlayerSnapshot) => {
@@ -222,8 +235,9 @@ export function publishHost(
     dirty = false;
     flushes++; // a flush still reading a snapshot must not send after this
     const now = Date.now();
-    const s = { ...last, positionMs: last.positionMs + Math.max(0, now - last.capturedAt), playing: false, capturedAt: now };
-    const command = { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(now)) };
+    const s = { ...last, positionMs: last.positionMs + Math.max(0, now - last.capturedAt) * (last.rate ?? 1), playing: false, capturedAt: now };
+    const command: PlaybackCommand = { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(now)) };
+    if (s.rate !== undefined) command.rate = s.rate;
     if (send("playback:pause", command, s, true) !== false) last = s;
   };
 

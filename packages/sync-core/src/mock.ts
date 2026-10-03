@@ -11,6 +11,7 @@ export class MockMediaProvider implements MediaProviderAdapter {
   private basePositionMs = 0;
   private baseAt: number;
   private playing = false;
+  private rate = 1;
   private listeners = new Set<(s: PlayerSnapshot) => void>();
 
   constructor(
@@ -25,7 +26,7 @@ export class MockMediaProvider implements MediaProviderAdapter {
   }
 
   positionMs() {
-    const elapsed = this.playing ? this.now() - this.baseAt : 0;
+    const elapsed = this.playing ? (this.now() - this.baseAt) * this.rate : 0;
     return Math.min(this.content.durationMs, this.basePositionMs + elapsed);
   }
 
@@ -39,6 +40,7 @@ export class MockMediaProvider implements MediaProviderAdapter {
       positionMs: this.positionMs(),
       durationMs: this.content.durationMs,
       playing: this.isPlaying(),
+      rate: this.rate,
       capturedAt: this.now(),
     };
   }
@@ -62,6 +64,14 @@ export class MockMediaProvider implements MediaProviderAdapter {
 
   async seek(positionMs: number) {
     this.set(Math.max(0, Math.min(this.content.durationMs, positionMs)), this.playing);
+  }
+
+  async setRate(rate: number) {
+    this.basePositionMs = this.positionMs();
+    this.baseAt = this.now();
+    this.rate = rate;
+    const s = this.snapshot();
+    for (const l of this.listeners) l(s);
   }
 
   onChange(callback: (s: PlayerSnapshot) => void) {

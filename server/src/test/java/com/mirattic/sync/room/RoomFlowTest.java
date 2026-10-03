@@ -97,6 +97,7 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(play.path("userId").asString()).isEqualTo(host.id());
 		assertThat(play.path("payload").path("playing").asBoolean()).isTrue();
 		assertThat(play.path("payload").path("capturedAt").asLong()).isEqualTo(now);
+		assertThat(play.path("payload").path("rate").asDouble()).isEqualTo(1); // absent: normal speed
 
 		// A capture time far in the past is replaced by the server's receive time.
 		hostWs.send(event("playback:seek", roomId, "{\"positionMs\":900000,\"capturedAt\":1}"));
@@ -110,6 +111,14 @@ class RoomFlowTest extends IntegrationTest {
 		JsonNode pause = friendWs.nextOfType("playback:update");
 		assertThat(pause.path("version").asLong()).isEqualTo(3);
 		assertThat(pause.path("payload").path("playing").asBoolean()).isFalse();
+
+		// The host's speed goes to members and stays through commands that carry it; out of range is refused.
+		hostWs.send(event("playback:seek", roomId, "{\"positionMs\":5000,\"capturedAt\":%d,\"rate\":1.5}".formatted(now)));
+		assertThat(friendWs.nextOfType("playback:update").path("payload").path("rate").asDouble()).isEqualTo(1.5);
+		hostWs.send(event("playback:seek", roomId, "{\"positionMs\":5000,\"capturedAt\":%d,\"rate\":20}".formatted(now)));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		hostWs.send(event("playback:seek", roomId, "{\"positionMs\":5000,\"capturedAt\":%d,\"rate\":\"2\"}".formatted(now)));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
 	}
 
 	@Test
@@ -123,8 +132,9 @@ class RoomFlowTest extends IntegrationTest {
 		friendWs.nextOfType("playback:update");
 		Client hostWs = connect(host);
 		hostWs.send(event("room:join", roomId, "{}"));
-		hostWs.send(event("playback:play", roomId, "{\"positionMs\":1000,\"capturedAt\":%d}"
-				.formatted(System.currentTimeMillis())));
+		// Captured 2s ago at 4x: the server extrapolates elapsed × rate (decision 96).
+		hostWs.send(event("playback:play", roomId, "{\"positionMs\":1000,\"capturedAt\":%d,\"rate\":4}"
+				.formatted(System.currentTimeMillis() - 2000)));
 		assertThat(friendWs.nextOfType("playback:update").path("payload").path("playing").asBoolean()).isTrue();
 
 		// The host's connection goes (window closed): members stop where the host was.
@@ -132,7 +142,8 @@ class RoomFlowTest extends IntegrationTest {
 		hostWs.session().close();
 		JsonNode paused = friendWs.nextOfType("playback:update");
 		assertThat(paused.path("payload").path("playing").asBoolean()).isFalse();
-		assertThat(paused.path("payload").path("positionMs").asLong()).isGreaterThan(1000).isLessThan(10_000);
+		assertThat(paused.path("payload").path("positionMs").asLong()).isGreaterThanOrEqualTo(9_800).isLessThan(40_000);
+		assertThat(paused.path("payload").path("rate").asDouble()).isEqualTo(4);
 		assertThat(paused.path("version").asLong()).isEqualTo(2);
 
 		// A host connection that (re)joined before the room lock was taken keeps it playing.

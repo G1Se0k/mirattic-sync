@@ -68,11 +68,11 @@ room 이벤트는 envelope의 `roomId`가 필수. 멤버가 아니면 `not_membe
 | `room:type` | S→C | 없음 | 방 타입이 바뀜 (결정 93) — 다시 보라는 신호: 방장이 `PUT /api/rooms/{id}/type`로 고르거나 다른 사이트 영상이 방 영상이 될 때, 호스트를 뺀 멤버에게. 물을지는 방 정보로 정함(`typeVersion` > 내 `typeSeen`, 호스트 아님) → 오프라인 · 워커 재시작에도 놓치지 않고, 나가거나 내보내진 방은 묻지 않음. 확장은 "확인 / 방 나가기"(패널이 열려 있으면 대화상자, 아니면 토스트), 확인 = `POST /api/rooms/{id}/type/seen`, 나가기 = `DELETE …/members/me?asMember=true` |
 | `room:closed:ack` | C→S | 없음 (`roomId`) | `room:closed`를 받았음 (결정 90): 서버가 그 방의 안내를 더 보내지 않음 패널은 "방이 종료되었습니다" 안내창, 패널이 닫혀 있었으면 다음에 열 때. 호스트가 넘어갔으면 닫지 않음 |
 | `room:update` | S→C | 없음, 또는 `{ muted }` | 참가 / 나감 / 방 닫힘 시 모든 멤버에게. 클라이언트는 `GET /api/rooms/{id}`로 다시 조회 (404면 닫힘). 채팅 알림 설정을 바꾸면 그 사용자의 연결에만 `{ muted }`를 담아 보냄 → 조회 응답 전에 바로 적용 |
-| `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt, scrubbing? }` | HOST만 (`not_host`). `scrubbing`(결정 86): 호스트가 시크바를 누르고 있는지 — 페이지가 알 수 있을 때만(YouTube). `false`인 일시정지는 방 기록에 바로, `true`는 드래그가 끝날 때까지 붙잡음, 없으면 1초 붙잡음. `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회 |
+| `playback:play` `playback:pause` `playback:seek` | C→S | `PlaybackCommand` `{ positionMs, capturedAt, scrubbing?, rate? }` | HOST만 (`not_host`). `scrubbing`(결정 86): 호스트가 시크바를 누르고 있는지 — 페이지가 알 수 있을 때만(YouTube). `false`인 일시정지는 방 기록에 바로, `true`는 드래그가 끝날 때까지 붙잡음, 없으면 1초 붙잡음. `capturedAt`은 호스트가 추정한 **서버 시각**. 미래이거나 5초보다 오래됐으면 서버 수신 시각으로 대체. 세션당 초당 20회. `rate`(결정 96): 호스트의 재생 속도, 숫자 1/16–16 (밖이거나 숫자가 아니면 `bad_payload`), 없으면 1. 속도만 바뀌면 `playback:seek`로 보냄 |
 | `playback:content-change` | C→S | `RoomContent` | HOST만. 호스트 플레이어의 영상이 바뀌었을 때 다음 명령 전에 보냄. 방 콘텐츠를 바꾸고 0초·일시정지로 초기화, version 증가 → `playback:update` + `room:update`. YouTube는 contentId가 11자 영상 ID, Netflix는 1–12자리 숫자, Laftel은 `작품ID/에피소드ID`(각 1–10자리 숫자)여야 함 (`bad_payload`). playback 명령과 같은 초당 예산. `series`가 이전 콘텐츠와 같으면 멤버 클라이언트가 묻지 않고 새 영상을 열고, 다르면 팝업으로 물음 (결정 67) |
 
 호스트 이탈 (결정 67): 호스트 탭의 영상이 사라지면(시청 페이지를 벗어남, 탭 닫힘) 호스트 클라이언트가 재생 중이던 위치로 `playback:pause`를 보냄. 호스트의 연결이 방에서 모두 빠지면(`room:leave`, 연결 끊김 — 창 · side panel 닫기, 방 화면 나가기) 서버가 재생 중인 방을 지금 위치로 일시정지하고 `playback:update`를 보냄.
-| `playback:update` | S→C | `PlaybackState` | 방에 참가한 연결 전부에게. envelope `version` = payload `version`, 방마다 1씩 증가 (DB 행 잠금으로 순서 보장) |
+| `playback:update` | S→C | `PlaybackState` | `rate`(결정 96) 포함 — 위치는 `positionMs + 경과 × rate`로 외삽. 방에 참가한 연결 전부에게. envelope `version` = payload `version`, 방마다 1씩 증가 (DB 행 잠금으로 순서 보장) |
 | `sync:request` | C→S | 없음 (`reqId` 필수) | |
 | `sync:response` | S→C | `{ reqId }` | `serverTime`으로 시계 offset 추정: `offset = serverTime − (보낸 시각 + RTT/2)`, RTT가 가장 작은 샘플 사용 |
 

@@ -489,8 +489,9 @@ function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite,
   const here = snapshot?.contentId === content.contentId;
   const cooldown = Math.ceil((s.pauseCooldownUntil - Date.now()) / 1000);
   // Offered only once the player has been away from the room's video for a moment: never while entering
-  // the room or while the tab is still moving to the next episode.
-  const offerOpen = !!url && (!s.canPlay || s.away);
+  // the room or while the tab is still moving to the next episode. Not once the room's type moved on to another
+  // site (decision 93): the room has no video of its site yet, and the old one isn't what it watches.
+  const offerOpen = !!url && (!s.canPlay || s.away) && (!roomType || roomType === content.provider);
   return (
     <section className="card stack">
       <div className="player">

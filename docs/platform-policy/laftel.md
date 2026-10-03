@@ -34,7 +34,7 @@
 - content script는 manifest에 없음(`registration: 'runtime'`). side panel이 **따라가는 라프텔 탭 하나에만** `scripting.executeScript`
 - 켜는 곳: 설정의 "실험 기능 · Laftel 제어", 라프텔 방 첫 입장 팝업. 개발자 정책이 없고 허용된 기능이 아니며 계정이 제한될 수 있음을 보여줌
 - 읽는 것: URL의 작품·에피소드 ID, 탭 제목, `<video>`의 재생 상태
-- 제어: 재생 / 일시정지 / **seek** (`<video>`). Netflix의 M7375 같은 알려진 차단이 없어 YouTube와 같이 seek함. 실제 플레이어에서 문제가 확인되면 Netflix처럼 `seekable = false`로 전환 (`bridge.ts` `SEEKABLE` 한 줄)
+- 제어: 재생 / 일시정지 / **seek** / 재생 속도(결정 96, `playbackRate`) (`<video>`). Netflix의 M7375 같은 알려진 차단이 없어 YouTube와 같이 seek함. 실제 플레이어에서 문제가 확인되면 Netflix처럼 `seekable = false`로 전환 (`bridge.ts` `SEEKABLE` 한 줄)
 - 광고: 감지하지 않음 (켜기 화면에서 "광고가 나오는 재생은 지원하지 않습니다")
 - 채팅은 side panel 안
 

@@ -1,6 +1,6 @@
 import { watchUrl, type MediaPresence, type MediaProviderAdapter, type PlayerSnapshot } from '@mirattic/types';
 
-const EVENTS = ['play', 'pause', 'seeked', 'playing', 'loadedmetadata'];
+const EVENTS = ['play', 'pause', 'seeked', 'playing', 'loadedmetadata', 'ratechange'];
 
 /**
  * Drives the provider page's own <video> from a content script, like its keyboard shortcuts.
@@ -91,6 +91,7 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
       positionMs: Math.round(video.currentTime * 1000),
       durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined,
       playing: !video.paused && !video.ended,
+      rate: video.playbackRate,
       capturedAt: Date.now(),
       adPlaying: this.adPlaying(),
       scrubbing: this.scrubbing(),
@@ -129,6 +130,12 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
   async seek(positionMs: number) {
     const video = this.controllable();
     if (video) video.currentTime = Math.max(0, positionMs) / 1000;
+  }
+
+  /** The <video>'s own speed, the one the site's speed menu sets. */
+  async setRate(rate: number) {
+    const video = this.controllable();
+    if (video) video.playbackRate = rate;
   }
 
   onChange(callback: (s: PlayerSnapshot) => void) {

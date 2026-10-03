@@ -38,6 +38,8 @@ public class Room {
 	private long roomTypeVersion;
 	private long positionMs;
 	private boolean playing;
+	/** The host's playback speed (1 = normal). */
+	private double playbackRate = 1;
 	private long capturedAt;
 	private String playbackBy;
 	private long playbackVersion;
@@ -106,14 +108,15 @@ public class Room {
 	}
 
 	PlaybackState playback() {
-		return new PlaybackState(provider, contentId, positionMs, durationMs, playing, capturedAt, playbackBy,
-				playbackVersion);
+		return new PlaybackState(provider, contentId, positionMs, durationMs, playing, playbackRate, capturedAt,
+				playbackBy, playbackVersion);
 	}
 
 	/** Every accepted command bumps the version, even if nothing changed, so the order is total. */
-	void applyPlayback(String userId, long positionMs, boolean playing, long capturedAt) {
+	void applyPlayback(String userId, long positionMs, boolean playing, double rate, long capturedAt) {
 		this.positionMs = durationMs == null ? positionMs : Math.min(positionMs, durationMs);
 		this.playing = playing;
+		this.playbackRate = rate;
 		this.capturedAt = capturedAt;
 		this.playbackBy = userId;
 		this.playbackVersion++;
@@ -147,15 +150,19 @@ public class Room {
 		this.canonicalUrl = content.canonicalUrl();
 		this.series = content.series();
 		if (restart) {
-			applyPlayback(userId, 0, false, now);
+			applyPlayback(userId, 0, false, playbackRate, now);
 		}
 		return restart;
 	}
 
 	/** Where playback is at `now`, extrapolated like the clients do. */
 	long positionAt(long now) {
-		long position = positionMs + (playing ? Math.max(0, now - capturedAt) : 0);
+		long position = positionMs + (playing ? Math.round(Math.max(0, now - capturedAt) * playbackRate) : 0);
 		return durationMs == null ? position : Math.min(position, durationMs);
+	}
+
+	double rate() {
+		return playbackRate;
 	}
 
 	boolean isPlaying() {

@@ -10,8 +10,10 @@ export const PORT_NAME = 'mirattic-player';
 
 export type PortRequest = {
   id: number;
-  op: 'snapshot' | 'play' | 'pause' | 'seek' | 'credits';
+  op: 'snapshot' | 'play' | 'pause' | 'seek' | 'rate' | 'credits';
   positionMs?: number;
+  /** 'rate': the speed to play at. */
+  rate?: number;
   /** 'credits': the room's video to stay on the credits of, or null. */
   contentId?: string | null;
 };
@@ -48,6 +50,7 @@ export function serveAdapter(create: () => Served) {
       if (req.op === 'play') await adapter.play();
       else if (req.op === 'pause') await adapter.pause();
       else if (req.op === 'seek' && Number.isFinite(req.positionMs)) await adapter.seek(req.positionMs!);
+      else if (req.op === 'rate' && typeof req.rate === 'number' && req.rate >= 0.0625 && req.rate <= 16) await adapter.setRate?.(req.rate);
       else if (req.op === 'credits') adapter.keepCredits?.(typeof req.contentId === 'string' ? req.contentId : null);
       port.postMessage({ id: req.id, snapshot: await adapter.getSnapshot() } satisfies PortMessage);
     });
@@ -193,6 +196,10 @@ export class RemoteAdapter implements MediaProviderAdapter {
     if (!ok && current()) this.pageSeekFailed = true;
   }
 
+  async setRate(rate: number) {
+    await this.request({ op: 'rate', rate });
+  }
+
   onChange(callback: (s: PlayerSnapshot) => void) {
     this.listeners.add(callback);
     return () => void this.listeners.delete(callback);
@@ -241,6 +248,7 @@ export class RemoteAdapter implements MediaProviderAdapter {
       play: async () => void (mine() && (await this.play())),
       pause: async () => void (mine() && (await this.pause())),
       seek: async (ms) => void (mine() && (await this.seek(ms))),
+      setRate: async (rate) => void (mine() && (await this.setRate(rate))),
       onChange: (callback) => this.onChange((s) => mine() && callback(s)),
       // Not `mine()`: the connection is already gone when a closed tab reports it.
       onGone: (callback) => this.onGone(() => this.provider === provider && callback()),

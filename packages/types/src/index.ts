@@ -34,6 +34,8 @@ export type PlayerSnapshot = {
   positionMs: number;
   durationMs?: number;
   playing: boolean;
+  /** Playback speed (1 = normal); absent where the player can't tell. */
+  rate?: number;
   capturedAt: number;
   adPlaying?: boolean;
   /** The user is holding the page's seek bar (decision 86); absent where the page can't tell. */
@@ -46,6 +48,8 @@ export type PlaybackState = {
   positionMs: number;
   durationMs?: number;
   playing: boolean;
+  /** The host's playback speed (1 = normal): members play at it, positions advance at it. */
+  rate?: number;
   capturedAt: number;
   sourceUserId: string;
   version: number;
@@ -76,6 +80,8 @@ export interface MediaProviderAdapter {
   play(): Promise<void>;
   pause(): Promise<void>;
   seek(positionMs: number): Promise<void>;
+  /** Plays at `rate` (1 = normal). Optional: without it the room's speed isn't followed. */
+  setRate?(rate: number): Promise<void>;
 
   onChange(callback: (snapshot: PlayerSnapshot) => void): () => void;
   /** The video went away (left the watch page, tab closed). Optional: the mock player never goes. */
@@ -234,7 +240,8 @@ export const INCOMING_MS = 30_000;
  * when `positionMs` was read; the server clamps it to the last few seconds.
  */
 /** `scrubbing`: the host holds the seek bar, so a pause may be the start of a drag (decision 86). */
-export type PlaybackCommand = { positionMs: number; capturedAt: number; scrubbing?: boolean };
+/** `rate`: the host's playback speed (1 = normal); absent is normal. */
+export type PlaybackCommand = { positionMs: number; capturedAt: number; scrubbing?: boolean; rate?: number };
 
 // WebSocket envelopes. Clients never send userId; the server stamps it from the authenticated session.
 export type ClientEvent<T = unknown> = {

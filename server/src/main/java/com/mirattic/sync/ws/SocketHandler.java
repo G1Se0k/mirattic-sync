@@ -49,6 +49,8 @@ class SocketHandler extends TextWebSocketHandler {
 	 * gap, so jitter that bunches two legit commands together never drops the latest one.
 	 */
 	private static final int MAX_PLAYBACK_PER_SECOND = 20;
+	private static final double MIN_RATE = 0.0625;
+	private static final double MAX_RATE = 16;
 	private static final String CHAT_WINDOW = "chatWindow";
 	private static final int MAX_CHAT_PER_SECOND = 5;
 	private static final int MAX_REASON = 200;
@@ -277,7 +279,11 @@ class SocketHandler extends TextWebSocketHandler {
 				}
 				JsonNode position = payload.path("positionMs");
 				JsonNode capturedAt = payload.path("capturedAt");
-				if (!position.canConvertToLong() || position.asLong() < 0 || !capturedAt.canConvertToLong()) {
+				// The host's playback speed; absent (an older client): normal. Chrome plays 1/16–16.
+				JsonNode rateNode = payload.path("rate");
+				double rate = rateNode.isMissingNode() ? 1 : rateNode.isNumber() ? rateNode.asDouble() : Double.NaN;
+				if (!position.canConvertToLong() || position.asLong() < 0 || !capturedAt.canConvertToLong()
+						|| !(rate >= MIN_RATE && rate <= MAX_RATE)) {
 					error(session, reqId, "bad_payload");
 					return;
 				}
@@ -290,7 +296,7 @@ class SocketHandler extends TextWebSocketHandler {
 				// transition in version order. Delivery order across threads isn't guaranteed; clients drop
 				// versions they've passed.
 				synchronized (roomLog.order(roomId)) {
-					RoomService.Applied applied = rooms.playback(me, roomId, command, position.asLong(), capturedAt.asLong());
+					RoomService.Applied applied = rooms.playback(me, roomId, command, position.asLong(), rate, capturedAt.asLong());
 					hub.sendToRoom(roomId, playbackEvent(roomId, applied.state()));
 					roomLog.playback(roomId, me, applied, scrubbing);
 				}

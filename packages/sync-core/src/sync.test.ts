@@ -47,6 +47,7 @@ describe("estimatePosition / classifyDrift", () => {
     expect(estimatePosition(s, 1_000)).toBe(10_000);
     expect(estimatePosition({ ...s, playing: true }, 1_000)).toBe(11_000);
     expect(estimatePosition({ ...s, playing: true }, 9_000)).toBe(12_000);
+    expect(estimatePosition({ ...s, playing: true, rate: 1.5 }, 1_000)).toBe(11_500);
   });
 
   it("follows the drift policy and provider overrides", () => {
@@ -59,6 +60,35 @@ describe("estimatePosition / classifyDrift", () => {
 });
 
 describe("SyncFollower", () => {
+  it("plays at the host's speed, undoes a member's own change, and keeps the position at it", async () => {
+    const m = member();
+    m.follower.apply(state({ playing: true, rate: 1.5, capturedAt: Date.now() }));
+    await settle();
+    expect(m.player.snapshot().rate).toBe(1.5);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await m.player.setRate(1); // the member's own change: undone once the speed may be set again
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(m.player.snapshot().rate).toBe(1.5);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(Math.abs(m.player.positionMs() - 9_000)).toBeLessThan(500);
+  });
+
+  it("doesn't fight a page that keeps resetting the speed: at most once a recheck", async () => {
+    const m = member();
+    let sets = 0;
+    m.player.setRate = async () => void sets++; // the page takes nothing
+    m.follower.apply(state({ playing: true, rate: 2, capturedAt: Date.now() }));
+    await settle();
+    for (let i = 0; i < 20; i++) await m.player.play(); // events from the page meanwhile
+    await settle();
+    expect(sets).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sets).toBe(2);
+    m.follower.apply(state({ playing: true, rate: 3, capturedAt: Date.now(), version: 2 })); // the host's change: at once
+    await settle();
+    expect(sets).toBe(3);
+  });
+
   it("undoes a member's own pause: only the host pauses the room", async () => {
     const m = member();
     m.follower.apply(state({ playing: true, capturedAt: Date.now() }));
@@ -235,6 +265,24 @@ describe("host → server → member", () => {
 });
 
 describe("publishHost", () => {
+  it("sends a speed change with the speed, and goes on extrapolating at it", async () => {
+    const clock = new ServerClock();
+    clock.addSample(Date.now(), Date.now(), Date.now());
+    const host: MockMediaProvider & MediaProviderAdapter = new MockMediaProvider(CONTENT);
+    let goneListener = () => {};
+    host.onGone = (cb: () => void) => ((goneListener = cb), () => {});
+    const sent: [string, PlaybackCommand][] = [];
+    publishHost(host, clock, (type, cmd) => void sent.push([type, cmd]));
+    await host.play();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await host.setRate(2);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sent.at(-1)).toEqual(["playback:seek", { positionMs: 1_000, capturedAt: Date.now() - 200, rate: 2 }]);
+    await vi.advanceTimersByTimeAsync(800);
+    goneListener();
+    expect(sent.at(-1)).toEqual(["playback:pause", { positionMs: 3_000, capturedAt: Date.now(), rate: 2 }]);
+  });
+
   it("pauses members where the video was when it goes away, and resumes with a play", async () => {
     const clock = new ServerClock();
     clock.addSample(Date.now(), Date.now(), Date.now());
@@ -250,7 +298,7 @@ describe("publishHost", () => {
     sent.length = 0;
 
     goneListener(); // left the watch page while playing
-    expect(sent).toEqual([["playback:pause", { positionMs: 13_000, capturedAt: Date.now() }, true]]);
+    expect(sent).toEqual([["playback:pause", { positionMs: 13_000, capturedAt: Date.now(), rate: 1 }, true]]);
     goneListener(); // already paused: nothing more
     expect(sent).toHaveLength(1);
 
@@ -277,7 +325,7 @@ describe("publishHost", () => {
 
     publishHost(host, clock, (type, cmd) => void sent.push([type, cmd])); // reconnected
     await settle();
-    expect(sent.at(-1)).toEqual(["playback:pause", { positionMs: 42_000, capturedAt: Date.now() }]);
+    expect(sent.at(-1)).toEqual(["playback:pause", { positionMs: 42_000, capturedAt: Date.now(), rate: 1 }]);
   });
 
   it("says whether the host holds the seek bar, where the page tells (decision 86)", async () => {
@@ -338,7 +386,7 @@ describe("publishHost", () => {
     const at = Date.now();
     await host.seek(5_000); // content resumes
     await vi.advanceTimersByTimeAsync(200);
-    expect(sent).toEqual([["playback:seek", { positionMs: 5_000, capturedAt: at }]]);
+    expect(sent).toEqual([["playback:seek", { positionMs: 5_000, capturedAt: at, rate: 1 }]]);
   });
 
   it("sends the state read at send time: never a queued one from the previous video or a lost player", async () => {

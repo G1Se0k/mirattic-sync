@@ -417,7 +417,7 @@ public class RoomService {
 			return null;
 		}
 		long now = System.currentTimeMillis();
-		room.applyPlayback(me, room.positionAt(now), false, now);
+		room.applyPlayback(me, room.positionAt(now), false, room.rate(), now);
 		return room.playback();
 	}
 
@@ -447,7 +447,7 @@ public class RoomService {
 	}
 
 	@Transactional
-	public Applied playback(String me, String roomId, Command command, long positionMs, long capturedAt) {
+	public Applied playback(String me, String roomId, Command command, long positionMs, double rate, long capturedAt) {
 		Room room = lockAsHost(me, roomId);
 		boolean wasPlaying = room.isPlaying();
 		long now = System.currentTimeMillis();
@@ -458,7 +458,7 @@ public class RoomService {
 			case PAUSE -> false;
 			case SEEK -> room.isPlaying();
 		};
-		room.applyPlayback(me, positionMs, playing, at);
+		room.applyPlayback(me, positionMs, playing, rate, at);
 		return new Applied(room.playback(), command, wasPlaying, expected, room.positionAt(at));
 	}
 

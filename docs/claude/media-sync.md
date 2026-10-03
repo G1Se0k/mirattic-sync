@@ -8,7 +8,7 @@ Use these as authoritative references:
 Key rules:
 - provider adapters return local player snapshots; room layer wraps them into PlaybackState
 - host-authoritative room model for MVP
-- playback state uses positionMs, capturedAt, playing, version
+- playback state uses positionMs, capturedAt, playing, rate (decision 96: positions advance at elapsed × rate), version
 - capturedAt is based on estimated server time
 - late versions are discarded
 - drift behavior follows `docs/protocol/websocket.md`
