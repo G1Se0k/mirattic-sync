@@ -19,7 +19,7 @@ import { ROOM_ACTIONS, UI_PORT, type FromPanel, type Shared, type ToPanel } from
 // every 20 seconds. Only "방 나가기" (or the room closing) takes the user out of the room.
 
 const KEEPALIVE_MS = 20_000;
-const LOOKUP_MS = 1_500; // a lookup for an alert's details, at most (`within`)
+const LOOKUP_MS = 1_500; // a lookup for an alert's details, or a room left on the way out, at most (`within`)
 const ROOM_KEY = 'mirattic.room'; // storage.session: back into the room if the worker restarts
 // storage.local: closure notices not shown yet survive a worker or browser restart (cleared on sign-out)
 const CLOSED_ROOMS_ITEM = 'mirattic.closedRooms';
@@ -886,7 +886,9 @@ export default defineBackground(() => {
   async function turnOff() {
     await browser.storage.local.set({ [OFF_FLAG]: true }).catch(() => {});
     const roomId = room?.state.roomId;
-    if (roomId && meId) await api.leaveRoom(roomId).catch(() => {}); // gone already, offline: the host-left rule closes it
+    // At most `LOOKUP_MS` (turning off never waits on a hanging call): gone already, offline or slow, the host-left rule
+    // closes it (the call may still land).
+    if (roomId && meId) await within(api.leaveRoom(roomId).catch(() => {}), undefined);
     stop();
     broadcast({ kind: 'close' });
   }
@@ -896,7 +898,13 @@ export default defineBackground(() => {
     const fn = (api as unknown as Record<string, unknown>)[name];
     if (typeof fn !== 'function') throw new ApiError(400, `no such call: ${name}`);
     if (name === 'restore' && meId) return true; // already signed in: no second token rotation
-    if (name === 'logout') signOut();
+    if (name === 'logout') {
+      // The host signing out closes the room at once (decision 98), as "방 닫기" — while the token still works.
+      const roomId = room?.state.roomId;
+      // At most `LOOKUP_MS`: gone already, offline or hanging, the host-left rule closes it (the call may still land).
+      if (roomId && hosting()) await within(api.leaveRoom(roomId).catch(() => {}), undefined);
+      signOut();
+    }
     const result = await (fn as (...a: unknown[]) => Promise<unknown>)(...args);
     if ((name === 'loginWithMirattic' || (name === 'restore' && result === true)) && !meId) await signedIn();
     if (name === 'deleteAccount') signOut();
