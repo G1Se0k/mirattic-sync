@@ -1,5 +1,6 @@
 package com.mirattic.sync.room;
 
+import com.mirattic.sync.presence.MediaProvider;
 import com.mirattic.sync.ws.RoomLog;
 import com.mirattic.sync.ws.ServerEvent;
 import com.mirattic.sync.ws.SocketHub;
@@ -408,6 +409,30 @@ class RoomController {
 		rooms.announce(id, kicked.memberIds());
 	}
 
+	record SetType(@NotNull MediaProvider type) {
+	}
+
+	/** The host picks the room's type (decision 93): the members are told (`room:type`) and the room refetched. */
+	@PutMapping("/{id}/type")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void setType(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody SetType body) {
+		List<String> told = rooms.setType(jwt.getSubject(), id, body.type());
+		if (told != null) {
+			rooms.announceType(id);
+			rooms.announce(id, told);
+		}
+	}
+
+	record SeeType(long version) {
+	}
+
+	/** A member confirmed the room's type change up to `version` (decision 93): not asked again. */
+	@PostMapping("/{id}/type/seen")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void seeType(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @RequestBody SeeType body) {
+		rooms.seeType(jwt.getSubject(), id, body.version());
+	}
+
 	/** The host makes another member the host (decision 79); they become a member. */
 	@PostMapping("/{id}/host")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
@@ -441,8 +466,8 @@ class RoomController {
 
 	@DeleteMapping("/{id}/members/me")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
-	void leave(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
-		RoomService.Left left = rooms.leave(jwt.getSubject(), id);
+	void leave(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @RequestParam(defaultValue = "false") boolean asMember) {
+		RoomService.Left left = rooms.leave(jwt.getSubject(), id, asMember);
 		if (left.closed()) {
 			hub.closeRoom(id);
 			rooms.announceClosed(id, jwt.getSubject(), left);

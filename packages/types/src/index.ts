@@ -215,6 +215,11 @@ export type RoomView = {
   code?: string;
   /** An invitation's time left (invitation lists and `room:invite`, decision 87). */
   expiresInMs?: number;
+  /** The room's type (decision 93): the site the host picked, or its video's; null/absent without one. */
+  type?: MediaProvider | null;
+  /** Rises with each type change; `typeSeen` is mine — while lower, a member (not the host) is asked about it. */
+  typeVersion?: number;
+  typeSeen?: number;
 };
 
 /** A friend's watch request to me (`watch:request`, incoming list), with its time left (decision 87). */

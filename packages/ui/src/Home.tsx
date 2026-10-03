@@ -494,6 +494,19 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     </Dialog>
   ) : null;
 
+  // The host changed the room's type (decision 93): confirm, or leave the room — told wherever the panel is.
+  const typeNotice = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.roomTypeNotice?.() ?? null);
+  const typeChanged = typeNotice ? (
+    <Dialog alert title={`방장이 방을 ${PROVIDER_NAMES[typeNotice.type]} 방으로 바꿨습니다`}>
+      {/* No dismissal: one of the two answers (Escape or a click outside don't count). */}
+      <p className="muted">이제 {PROVIDER_NAMES[typeNotice.type]}에서 같이 봅니다. 계속하려면 확인, 아니면 방을 나가세요.</p>
+      <Actions>
+        <button className="link danger" onClick={() => platform.answerRoomType?.(typeNotice.roomId, typeNotice.version, true)}>방 나가기</button>
+        <button onClick={() => platform.answerRoomType?.(typeNotice.roomId, typeNotice.version, false)}>확인</button>
+      </Actions>
+    </Dialog>
+  ) : null;
+
   const incoming = invited ? (
     <Dialog alert title={`${invitingHost?.displayName ?? "친구"}님이 같이 보기에 초대했습니다`} onClose={() => void answerInvitation(invited, false)}>
       <p>{invited.content?.title ?? "아직 고른 영상이 없습니다"}</p>
@@ -544,6 +557,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         {/* After the room: an invitation or watch request shows over its dialogs (same layer, later on top). */}
         {incoming}
         {endedNotice}
+        {typeChanged}
       </div>
     );
   }
@@ -554,6 +568,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <Settings me={me} blocked={blocked} onMeChange={onMeChange} onUnblock={(id) => void act(() => api.unblock(id))()}
           onSignedOut={onSignedOut} onClose={() => setScreen("home")} />
         {endedNotice /* a closure is told wherever the panel is */}
+        {typeChanged}
       </>
     );
   }
@@ -568,6 +583,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       </header>
       {incoming}
       {endedNotice}
+      {typeChanged}
       <main className="container">
         {error && <p className="error" role="alert">{error}</p>}
         {askLine}

@@ -37,6 +37,10 @@ export type FromPanel =
   | { op: 'open'; url: string; newTab?: boolean }
   /** The tab to follow; null = the active one, as the user switches. */
   | { op: 'tab'; tabId: number | null; windowId?: number }
+  /** The room's type change told (decision 93): confirmed, or leave the room. */
+  | { op: 'type:answer'; roomId: string; version: number; leave: boolean }
+  /** The room's type picked: follow that site's tab of this window, or open the site. */
+  | { op: 'site'; site: MediaProvider; windowId?: number }
   /** The notice of this closed room was shown to this account: not again (every panel). */
   | { op: 'closed:seen'; roomId: string; userId: string };
 
@@ -53,6 +57,11 @@ export type Shared = {
   activeRoom: string | null;
   /** When alerts shown before a panel opened run out ("invite:<room>", "request:<friend>"; epoch ms). */
   alertsUntil: Record<string, number>;
+  /**
+   * The host changed my rooms' types (decision 93), one per room, until I confirm or leave (`type:answer`). `version`:
+   * the room's type version — the answer is about that one (a later change is asked again).
+   */
+  typeNotices: { roomId: string; type: MediaProvider; version: number }[];
   /** Rooms of mine their host closed (decision 90), until a panel showed the notice (`closed:seen`). */
   closedRooms: { roomId: string; title: string; userId: string }[];
 };

@@ -263,6 +263,9 @@ class SocketHandler extends TextWebSocketHandler {
 					if (changed != null) {
 						hub.sendToRoom(roomId, playbackEvent(roomId, changed.state()));
 						roomLog.contentChanged(roomId, changed.state().version(), changed.log());
+						if (changed.type() != null) {
+							rooms.announceType(roomId);
+						}
 					}
 				}
 				rooms.announce(roomId, rooms.memberIds(roomId)); // members refetch the room's new content

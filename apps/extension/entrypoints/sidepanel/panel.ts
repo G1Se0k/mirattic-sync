@@ -24,7 +24,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
   const replies = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void }>();
   let nextId = 0;
   let shared: Shared = {
-    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, tabs: [], followedTab: null, followActive: false, experiments: { netflix: false, laftel: false }, activeRoom: null, alertsUntil: {}, closedRooms: [],
+    watching: null, watchingInfo: null, offSite: null, askOnSwitch: true, tabs: [], followedTab: null, followActive: false, experiments: { netflix: false, laftel: false }, activeRoom: null, alertsUntil: {}, closedRooms: [], typeNotices: [],
   };
   let status: SocketStatus = 'closed';
   /**
@@ -92,6 +92,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
           watchingInfo: same(shared.watchingInfo, m.shared.watchingInfo),
           offSite: same(shared.offSite, m.shared.offSite),
           closedRooms: same(shared.closedRooms, m.shared.closedRooms),
+          typeNotices: same(shared.typeNotices, m.shared.typeNotices),
           tabs: same(shared.tabs, m.shared.tabs),
         };
         // This window's tabs only (the background's list has every window's).
@@ -177,6 +178,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
       list: () => windowTabs,
       followed: () => shared.followedTab,
       auto: () => shared.followActive,
+      openSite: (site) => send({ op: 'site', site, windowId }),
       choose: (tabId) => {
         choosingTab = { tabId };
         send({ op: 'tab', tabId, windowId }); // this window's active tab, or a tab of it
@@ -185,6 +187,8 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
     activeRoom: () => shared.activeRoom,
     alertUntil: (kind, target) => shared.alertsUntil[`${kind}:${target}`],
     closedRooms: () => shared.closedRooms,
+    roomTypeNotice: () => shared.typeNotices[0] ?? null, // one at a time, the others after it's answered
+    answerRoomType: (roomId, version, leave) => send({ op: 'type:answer', roomId, version, leave }),
     seenClosed: (roomId) => {
       // The account it was shown to (the one these notices are for), until the background confirms storing it.
       const shown = shared.closedRooms.find((c) => c.roomId === roomId);

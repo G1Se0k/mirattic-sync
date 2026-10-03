@@ -31,6 +31,11 @@ public class Room {
 	private Long durationMs;
 	private String canonicalUrl;
 	private String series;
+	/** The site the host picked, or its video's (decision 93); null: none yet. */
+	@Enumerated(EnumType.STRING)
+	private MediaProvider roomType;
+	/** Rises with every type change (members' notices and answers are about one version). */
+	private long roomTypeVersion;
 	private long positionMs;
 	private boolean playing;
 	private long capturedAt;
@@ -67,6 +72,7 @@ public class Room {
 			this.durationMs = content.durationMs();
 			this.canonicalUrl = content.canonicalUrl();
 			this.series = content.series();
+			this.roomType = content.provider();
 		}
 		this.createdAt = this.capturedAt = System.currentTimeMillis();
 		this.playbackBy = hostId;
@@ -111,6 +117,24 @@ public class Room {
 		this.capturedAt = capturedAt;
 		this.playbackBy = userId;
 		this.playbackVersion++;
+	}
+
+	MediaProvider type() {
+		return roomType;
+	}
+
+	long typeVersion() {
+		return roomTypeVersion;
+	}
+
+	/** @return whether it changed. */
+	boolean setType(MediaProvider type) {
+		if (type == roomType) {
+			return false;
+		}
+		roomType = type;
+		roomTypeVersion++;
+		return true;
 	}
 
 	/** @return false if it is the same video (new metadata such as a playlist only): the playback stays as it is. */

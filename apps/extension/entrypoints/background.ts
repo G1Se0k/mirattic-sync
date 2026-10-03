@@ -2,7 +2,7 @@ import { browser, type Browser } from 'wxt/browser';
 import { ApiError, connectSocket, createApi, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { PAUSE_REQUEST_SHOWN_MS, RoomSync } from '@mirattic/sync-core';
 import {
-  INCOMING_MS, PROVIDER_NAMES, roomToInvite, type IncomingRequest, type RoomContent, type RoomView, type ServerEvent,
+  INCOMING_MS, PROVIDER_NAMES, roomToInvite, type IncomingRequest, type MediaProvider, type RoomContent, type RoomView, type ServerEvent,
 } from '@mirattic/types';
 import { API_URL, SOCKET_URL, authorize, store } from '../session';
 import { hasConsent } from '../consent';
@@ -52,6 +52,12 @@ export default defineBackground(() => {
    * again (the server repeats it until our ack reaches it) isn't shown twice.
    */
   let closedRooms: (Shared['closedRooms'][number] & { userId: string; seen?: boolean })[] = [];
+  /** The host changed my rooms' types (decision 93): one per room, shown (panel or toast) until answered. */
+  let typeNotices: Shared['typeNotices'] = [];
+  const dropTypeNotice = (roomId: string) => {
+    typeNotices = typeNotices.filter((n) => n.roomId !== roomId);
+    dropAlerts((a) => a.kind === 'type' && a.target === roomId);
+  };
   let keepAlive: ReturnType<typeof setInterval> | undefined;
   /** Bumped by every sign-out: a sign-in still finishing after one must not start anything. */
   let session = 0;
@@ -79,6 +85,7 @@ export default defineBackground(() => {
     activeRoom: room && !room.state.closed ? room.state.roomId : null,
     alertsUntil: Object.fromEntries([...alertUntil].filter(([, until]) => until > Date.now())),
     closedRooms: closedRooms.filter((c) => c.userId === meId && !c.seen).map(({ roomId, title, userId }) => ({ roomId, title, userId })),
+    typeNotices,
   });
   const pushShared = () => broadcast({ kind: 'shared', shared: shared() });
 
@@ -237,6 +244,9 @@ export default defineBackground(() => {
         else openRoom(await watchTogether(target), true);
         // Answered: an open panel's banner goes, as when the friend takes it back.
         broadcast({ kind: 'event', event: { type: 'watch:cancel', userId: target, serverTime: Date.now(), payload: null } });
+      } else if (kind === 'type') {
+        // The toast is the room's latest change (a newer one replaces it): its version is the notice's.
+        await answerType(target, typeNotices.find((n) => n.roomId === target)?.version ?? 0, !accept);
       } else if (kind === 'pause' && room?.state.roomId === target && room.state.pauseRequest) {
         if (accept) room.pauseAll();
         else room.dismissPauseRequest();
@@ -245,6 +255,71 @@ export default defineBackground(() => {
       // Still open (nothing watched, offline): answerable again for its time left. Gone (404): nothing to redo.
       const left = answered.until - Date.now();
       if (!(e instanceof ApiError && e.status === 404) && left > 0) alert(kind, target, left, answered.title, answered.toast.body, answered.toast.meta);
+    }
+  }
+
+  /**
+   * The rooms whose type changed since I saw it (decision 93): from my rooms as the server has them (`typeVersion`
+   * above my `typeSeen`, not hosted by me) — so nothing is lost while offline or across a worker restart, and a room
+   * I'm out of (left, kicked, closed) asks nothing. New ones (or newer versions) alert while no panel is open.
+   */
+  let typeChecks = 0;
+  /** The latest check applied: an earlier one answering later is older news; a newer one failing doesn't void it. */
+  let typeApplied = 0;
+  async function checkTypes() {
+    const mine = ++typeChecks;
+    const me = meId;
+    if (!me) return;
+    const list = await api.rooms().catch(() => null);
+    if (me !== meId || mine <= typeApplied) return;
+    if (!list) {
+      if (mine === typeChecks) setTimeout(() => mine === typeChecks && void checkTypes(), 2_000); // the latest failed: again
+      return;
+    }
+    typeApplied = mine;
+    const next = list.flatMap((r) => r.type && (r.typeVersion ?? 0) > (r.typeSeen ?? 0)
+      && !r.members.some((m) => m.user.id === me && m.role === 'HOST')
+      ? [{ roomId: r.id, type: r.type, version: r.typeVersion ?? 0 }] : []);
+    for (const old of typeNotices) {
+      if (!next.some((n) => n.roomId === old.roomId)) dropAlerts((a) => a.kind === 'type' && a.target === old.roomId);
+    }
+    for (const n of next) {
+      if (!typeNotices.some((o) => o.roomId === n.roomId && o.version >= n.version)) toastType(n); // new or newer
+    }
+    typeNotices = next;
+    pushShared();
+  }
+  /** Over the videos while no panel is open (a panel open asks itself; closed unanswered, it toasts again). */
+  function toastType(n: Shared['typeNotices'][number]) {
+    const off = (n.type === 'netflix' || n.type === 'laftel') && !platform?.experimental?.enabled(n.type);
+    alert('type', n.roomId, INCOMING_MS, `방장이 방을 ${PROVIDER_NAMES[n.type]} 방으로 바꿨습니다`,
+      off ? `${PROVIDER_NAMES[n.type]} 제어(실험)가 꺼져 있습니다. 패널에서 켜거나 방을 나가세요.` : '');
+  }
+  /** Many room updates in a moment (a hand-over, members coming and going): one look. */
+  let typeCheckTimer: ReturnType<typeof setTimeout> | undefined;
+  function checkTypesSoon() {
+    clearTimeout(typeCheckTimer);
+    typeCheckTimer = setTimeout(() => void checkTypes(), 500);
+  }
+
+  /**
+   * The room's type change answered (decision 93): confirmed up to `version`, or the room left — as a member only:
+   * handed the host meanwhile, the server refuses (409) instead of closing the room. Then looked at again (a failure
+   * leaves it to answer again).
+   */
+  async function answerType(roomId: string, version: number, leave: boolean) {
+    try {
+      if (!leave) await api.seeRoomType(roomId, version);
+      else {
+        const left = await api.leaveRoom(roomId, true).then(() => true, (e) => {
+          if (e instanceof ApiError && e.status === 404) return true; // gone already: left
+          if (e instanceof ApiError && e.status === 409) return false; // the host now: stays
+          throw e;
+        });
+        if (left && room?.state.roomId === roomId) closeRoom();
+      }
+    } finally {
+      void checkTypes();
     }
   }
 
@@ -307,6 +382,7 @@ export default defineBackground(() => {
           pushShared();
         }
         if (next === 'open') void backIntoRoom(); // after a resume: the room it was in, if it still is
+        if (next === 'open') void checkTypes(); // type changes while away (decision 93)
         broadcast({ kind: 'status', status: next });
         if (next === 'closed' && socket === s) signOut(); // the session is gone (the ticket answered 401)
       },
@@ -331,6 +407,9 @@ export default defineBackground(() => {
   }
 
   function alertFor(event: ServerEvent) {
+    // A room's type changed (decision 93), or a room of mine changed (hand-over, kicked, closed): looked at again.
+    if (event.type === 'room:type') void checkTypes();
+    else if (event.type === 'room:update') checkTypesSoon();
     if (event.type === 'room:invite') {
       const view = event.payload as RoomView;
       const host = view.members.find((m) => m.role === 'HOST');
@@ -435,6 +514,8 @@ export default defineBackground(() => {
   }
 
   function closeRoom() {
+    const roomId = room?.state.roomId;
+    if (roomId) dropTypeNotice(roomId); // out of it: nothing to answer
     room?.dispose();
     room = null;
     void browser.storage.session.remove(ROOM_KEY);
@@ -502,6 +583,8 @@ export default defineBackground(() => {
   function signOut() {
     session++;
     alertUntil.clear(); // another account may sign in next (shared with the panel by closeRoom below)
+    typeNotices = []; // the same (and a check still running is stale)
+    typeApplied = ++typeChecks;
     void setClosedRooms([]).catch(() => {}); // the same: their notices aren't the next account's
     void markReplaced(false); // the next sign-in connects
     clearAlerts();
@@ -648,7 +731,7 @@ export default defineBackground(() => {
     }
     if (m?.type !== TOAST_ANSWER || !active(m.kind, m.target, m.alertId)) return; // settled or replaced meanwhile
     // First, while the click may still count as the user's gesture; entering a room shows in it.
-    if (m.accept && m.kind !== 'pause') void browser.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
+    if (m.accept && m.kind !== 'pause' && m.kind !== 'type') void browser.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
     void answerAlert(m);
   });
 
@@ -717,6 +800,14 @@ export default defineBackground(() => {
             (await ensureWatching())?.tabs?.choose(m.tabId, m.windowId); // a restarted worker: once it follows tabs again
           }
           break;
+        case 'type:answer':
+          if (typeof m.roomId === 'string' && typeof m.version === 'number') void answerType(m.roomId, m.version, m.leave === true).catch(() => {});
+          break;
+        case 'site':
+          if (typeof m.site === 'string' && (m.windowId === undefined || typeof m.windowId === 'number')) {
+            (await ensureWatching())?.tabs?.openSite(m.site, m.windowId);
+          }
+          break;
         case 'open':
           console.info('[mirattic] opening from the panel', m.url);
           platform?.open(m.url, m.newTab);
@@ -728,6 +819,7 @@ export default defineBackground(() => {
       if (viewers.has(port)) markRead(); // the panel closed while showing the room
       ports.delete(port);
       viewers.delete(port);
+      if (!ports.size) typeNotices.forEach(toastType); // closed without answering: asked over the videos again
     });
   });
 

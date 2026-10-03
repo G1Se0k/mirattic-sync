@@ -126,6 +126,10 @@ input.code::placeholder { font-family: inherit; letter-spacing: normal; }
   padding: 6px 8px; font-weight: 500; border-radius: 6px; }
 .menu-items button:hover { background: var(--hover); }
 .menu-items button.danger { color: var(--danger); background: none; }
+.menu-items.left { left: 0; right: auto; }
+.menu-items.left button { white-space: nowrap; }
+.type-button { padding: 2px; background: none; border-radius: 6px; line-height: 0; }
+.type-button:hover { background: var(--hover); }
 
 /* Room: the page is the window; the chat takes what the header and player leave. */
 .room-page { height: 100vh; display: flex; flex-direction: column; }
@@ -138,6 +142,7 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .member .avatar { width: 20px; height: 20px; font-size: calc(10px * var(--text-scale)); }
 .tab-picker summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-picker .stack { margin-top: 8px; }
+.tab-picker summary { font-size: calc(12px * var(--text-scale)); }
 /* A radio drawn as the app's secondary button: the input itself hidden (still focusable, arrow keys move). */
 .tab-option { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 12px; border-radius: 7px;
   border: 1px solid var(--line); color: var(--fg); font-weight: 550; cursor: pointer; }

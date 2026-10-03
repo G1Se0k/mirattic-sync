@@ -34,6 +34,13 @@ export type Watch = Omit<Platform, 'connect' | 'room'> & {
   follow(windowId: number): void;
 };
 
+/** Each site's first page, opened when the room's type is picked and no tab of it is open (decision 93). */
+const SITE_HOME = {
+  youtube: YOUTUBE,
+  netflix: 'https://www.netflix.com/browse',
+  laftel: 'https://laftel.net/',
+} as const;
+
 /** storage.session: the tab followed, so a service worker restart keeps a chosen tab. */
 const followedTabEntry = 'mirattic.followedTab';
 
@@ -535,6 +542,33 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
           // another video tab of its window (the panel's, if it's gone) takes over.
           release(tab?.windowId ?? tabWindow);
         } else if (isVideoTab(tab.url)) await bind(id, tab.url, tab.windowId);
+      },
+      openSite: async (site, chosenIn) => {
+        // The room's type picked (decision 93): that site's tab of the panel's window is followed (fixed, even if
+        // following the active tab before), else its home opens in a new tab, followed once it loads. Looked up here
+        // and now, not from the panel's list (a site just turned on may not be listed yet).
+        if (!(site in SITE_HOME)) return;
+        const mine = ++intent;
+        stopped = false;
+        if (chosenIn !== undefined) windowId = chosenIn;
+        followActive = false;
+        void browser.storage.local.set({ [followActiveSetting]: false });
+        changed();
+        const home = SITE_HOME[site as keyof typeof SITE_HOME];
+        const [found] = await browser.tabs.query({ windowId, url: [`${new URL(home).origin}/*`] }).catch(() => []);
+        if (mine !== intent) return; // the user said otherwise since
+        if (found?.id !== undefined) {
+          activations++;
+          choosing++;
+          binding++;
+          select(found.id, found.windowId);
+          tabProvider = null;
+          // Bound now if its site is on; one turned on a moment ago is bound when that lands (setOn).
+          if (isVideoTab(found.url)) await bind(found.id, found.url, found.windowId);
+          return;
+        }
+        const created = await browser.tabs.create({ url: home, windowId }).catch(() => null);
+        if (created && mine === intent) take(created);
       },
     },
     nowWatching: () => content,

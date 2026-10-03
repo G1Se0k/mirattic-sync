@@ -1351,6 +1351,80 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(memberWs.nextOfType("room:closed").path("payload").path("title").asString()).isEmpty();
 	}
 
+	@Test
+	void theHostSetsTheRoomTypeAndTheMembersAreAskedUntilTheyConfirm() throws Exception {
+		// Decision 93: the host's pick, and a video of another site, change the type; a member is asked while the room's
+		// typeVersion is above their typeSeen (room:type is a hint to look again).
+		TestUser host = signup();
+		TestUser member = signup();
+		JsonNode created = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"content":{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"First"},"inviteIds":[]}"""));
+		String roomId = created.path("id").asString();
+		assertThat(created.path("type").asString()).isEqualTo("youtube");
+		call(HttpMethod.POST, "/api/rooms/join", member.accessToken(), "{\"code\":\"%s\"}".formatted(created.path("code").asString()))
+				.andExpect(status().isOk());
+		Client memberWs = connect(member);
+		memberWs.send(event("room:join", roomId, "{}"));
+		memberWs.nextOfType("playback:update");
+		Client hostWs = connect(host);
+
+		call(HttpMethod.PUT, "/api/rooms/" + roomId + "/type", member.accessToken(), "{\"type\":\"netflix\"}")
+				.andExpect(status().isForbidden());
+		call(HttpMethod.PUT, "/api/rooms/" + roomId + "/type", host.accessToken(), "{\"type\":\"netflix\"}")
+				.andExpect(status().isNoContent());
+		assertThat(memberWs.nextOfType("room:type")).isNotNull();
+		assertThat(hostWs.nextOfType("room:type")).isNull(); // not the host
+		JsonNode seen = body(call(HttpMethod.GET, "/api/rooms/" + roomId, member.accessToken(), null));
+		assertThat(seen.path("type").asString()).isEqualTo("netflix");
+		assertThat(seen.path("typeVersion").asLong()).isEqualTo(1);
+		assertThat(seen.path("typeSeen").asLong()).isZero(); // asked
+		call(HttpMethod.PUT, "/api/rooms/" + roomId + "/type", host.accessToken(), "{\"type\":\"netflix\"}")
+				.andExpect(status().isNoContent());
+		assertThat(memberWs.nextOfType("room:type")).isNull(); // unchanged: nothing
+
+		// A video of another site (laftel) changes it too.
+		hostWs.send(event("playback:content-change", roomId, """
+				{"provider":"laftel","contentId":"40522/40523","title":"Other"}"""));
+		assertThat(memberWs.nextOfType("room:type")).isNotNull();
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, member.accessToken(), null)).path("typeVersion").asLong())
+				.isEqualTo(2);
+
+		// Confirming an older version leaves the newer asked; confirming it, no more.
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/type/seen", member.accessToken(), "{\"version\":1}")
+				.andExpect(status().isNoContent());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, member.accessToken(), null)).path("typeSeen").asLong()).isEqualTo(1);
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/type/seen", member.accessToken(), "{\"version\":9}")
+				.andExpect(status().isNoContent()); // not beyond the room's
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, member.accessToken(), null)).path("typeSeen").asLong()).isEqualTo(2);
+
+		// The host's own changes are seen by them: handed over, they aren't asked about them.
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, host.accessToken(), null)).path("typeSeen").asLong()).isEqualTo(2);
+
+		// Someone joining now comes in knowing the type: not asked.
+		TestUser late = signup();
+		call(HttpMethod.POST, "/api/rooms/join", late.accessToken(), "{\"code\":\"%s\"}".formatted(created.path("code").asString()))
+				.andExpect(status().isOk());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, late.accessToken(), null)).path("typeSeen").asLong()).isEqualTo(2);
+	}
+
+	@Test
+	void aMemberHandedTheHostCantCloseTheRoomByLeavingAsAMember() throws Exception {
+		// Decision 93: a type notice's "방 나가기" leaves as a member only; promoted meanwhile, 409 and the room stays.
+		TestUser host = signup();
+		TestUser member = signup();
+		JsonNode created = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), "{\"inviteIds\":[]}"));
+		String roomId = created.path("id").asString();
+		call(HttpMethod.POST, "/api/rooms/join", member.accessToken(), "{\"code\":\"%s\"}".formatted(created.path("code").asString()))
+				.andExpect(status().isOk());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/host", host.accessToken(), "{\"userId\":\"%s\"}".formatted(member.id()))
+				.andExpect(status().is2xxSuccessful());
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/me?asMember=true", member.accessToken(), null)
+				.andExpect(status().isConflict());
+		call(HttpMethod.GET, "/api/rooms/" + roomId, host.accessToken(), null).andExpect(status().isOk());
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/me?asMember=true", host.accessToken(), null)
+				.andExpect(status().isNoContent()); // a member now: leaves
+	}
+
 	private static String event(String type, String roomId, String payload) {
 		return "{\"type\":\"%s\",\"roomId\":\"%s\",\"payload\":%s}".formatted(type, roomId, payload);
 	}

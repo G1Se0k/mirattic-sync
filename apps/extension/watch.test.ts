@@ -23,6 +23,7 @@ let injected: string[][]; // files injected per call
 let dropConnection: (() => void) | null; // closes the latest port, as a tab without a live script does
 let injectFails = false; // a page we have no access to
 let disconnects: number[]; // ports we closed, by tab
+let created: string[]; // tabs.create URLs
 
 const on = (name: string) => ({ addListener: (l: Listener) => void (listeners[name] ??= []).push(l) });
 const fire = (name: string, ...args: unknown[]) => Promise.all((listeners[name] ?? []).map((l) => l(...args)));
@@ -95,7 +96,10 @@ vi.mock('wxt/browser', () => ({
       onDetached: on('tabs.onDetached'),
       onMoved: on('tabs.onMoved'),
       update: async () => { throw new Error('no such tab'); },
-      create: async () => (globalThis as any).__created,
+      create: async (q: { url: string }) => {
+        created.push(q.url);
+        return (globalThis as any).__created;
+      },
     },
   },
 }));
@@ -124,6 +128,7 @@ beforeEach(() => {
   dropConnection = null;
   injectFails = false;
   disconnects = [];
+  created = [];
 });
 
 describe('watch: a YouTube tab without a live script', () => {
@@ -1157,4 +1162,37 @@ it('fixed: a saved tab found in another window after a restart (moved while no w
   const again = await watch();
   expect(again.tabs!.followed()).toBe(null);
   expect(connects).toEqual([]);
+});
+
+describe('watch: the room type picked (decision 93)', () => {
+  it('no tab of the site: its first page opens and is followed, fixed even if following the active tab before', async () => {
+    tabs = [OTHER(1, true)]; // automatic (followActive on)
+    const w = await watch();
+    const opened = { id: 7, url: '', pendingUrl: 'https://www.youtube.com/', active: true, windowId: 1, status: 'loading' };
+    (globalThis as any).__created = opened;
+    tabs.push(opened as Tab);
+    await w.tabs!.openSite('youtube', 1);
+    await settle();
+    expect(created).toEqual(['https://www.youtube.com/']);
+    expect(w.tabs!.auto()).toBe(false);
+    expect(w.tabs!.followed()).toBe(7);
+    tabs = [{ ...YT(9, true) }, { ...opened, url: 'https://www.youtube.com/', status: 'complete' } as Tab];
+    await fire('tabs.onActivated', { tabId: 9, windowId: 1 }); // another tab: not followed (fixed)
+    expect(w.tabs!.followed()).toBe(7);
+  });
+
+  it('a site turned on a moment ago: its existing tab is followed (no second tab), bound once the site is on', async () => {
+    delete stored['mirattic.followActive'];
+    delete stored['mirattic.experiment.netflix'];
+    tabs = [YT(1, true), NF(2)];
+    const w = await watch();
+    await w.tabs!.openSite('netflix', 1); // the panel's turning on hasn't reached the background yet
+    expect(created).toEqual([]);
+    expect(w.tabs!.followed()).toBe(2);
+    connects = [];
+    stored['mirattic.experiment.netflix'] = true;
+    await fire('storage.onChanged', { 'mirattic.experiment.netflix': { oldValue: undefined, newValue: true } }, 'local');
+    for (let i = 0; i < 3; i++) await settle();
+    expect(followed()).toBe(2);
+  });
 });

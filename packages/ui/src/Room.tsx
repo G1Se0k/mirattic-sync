@@ -1,13 +1,13 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { openUrl, type FriendView, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
+import { openUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
 import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
-import { Avatar, IconButton } from "./Icons";
+import { Avatar, IconButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 
 /** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
@@ -40,7 +40,9 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   const room = s.room;
   const content = room?.content;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
-  const experiment = isExperiment(content?.provider) ? content.provider : undefined;
+  // The room's type (decision 93): the host's pick, else its video's site; the warning below is about it.
+  const roomType: MediaProvider | null = room?.type ?? content?.provider ?? null;
+  const experiment = isExperiment(roomType ?? undefined) ? (roomType as Experiment) : undefined;
   const experimentOn = useExperiment(experiment);
 
   /**
@@ -79,11 +81,27 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   }, [s.closed, handle, onClose]);
 
   // Asked on every entry while the control is off (and when the room moves to such a site). Which provider it
-  // asks about: the room may switch to another provider while it is open.
+  // asks about: the room may switch to another provider while it is open, or the host may pick one (`pending`).
   const [asking, setAsking] = useState<Experiment | null>(null);
   useEffect(() => {
     if (experiment && experimentOn === false) setAsking(experiment);
   }, [experiment, experimentOn]);
+
+  /** The host picks a site: the room's type changes (members told), and its tab here is followed or it opens. */
+  const [pendingSite, setPendingSite] = useState<Site | null>(null);
+  const typeWrites = useRef<Promise<void>>(Promise.resolve());
+  /** `turnedOn`: its control was just turned on here (the shared state saying so may not be back yet). */
+  function pickSite(site: Site, turnedOn = false) {
+    if (isExperiment(site) && !turnedOn && !platform.experimental?.enabled(site)) {
+      setPendingSite(site); // turned on first (asked), then picked
+      return setAsking(site);
+    }
+    platform.tabs?.openSite(site); // the extension looks its tab up (or opens the site) and follows it
+    // Always told (the view may be behind a pick still in flight), one after another so the last pick lands last;
+    // the same type changes nothing on the server.
+    typeWrites.current = typeWrites.current.then(() => api.setRoomType(roomId, site))
+      .catch(() => void asker.tell("방 플랫폼을 바꾸지 못했습니다", "다시 시도해 주세요."));
+  }
 
   if (!room) {
     return (
@@ -137,6 +155,23 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     onClose();
   }
 
+  /**
+   * A member not agreeing to the room's site leaves (the dialog asked): as a member only — handed the host meanwhile,
+   * the server refuses (409) instead of closing the room for everyone. Back to the list once left.
+   */
+  async function leaveNow() {
+    try {
+      await api.leaveRoom(roomId, true);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        return void asker.tell("방장이 되어 방에 남았습니다", "방을 닫으려면 방 닫기를 누르세요.");
+      }
+      if (!(e instanceof ApiError && e.status === 404)) return void asker.tell("방을 나가지 못했습니다", "다시 시도해 주세요.");
+    }
+    handle.exit();
+    onClose();
+  }
+
   const position = async () => {
     const snap = handle.state().snapshot;
     if (!content || !snap || snap.adPlaying || snap.contentId !== content.contentId) return undefined;
@@ -175,8 +210,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
           ))}
         </div>
         <PlayerStatus content={content ?? null} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
-          onRequestPause={() => setAskingPause(true)} />
-        {isHost && <TabPicker />}
+          roomType={roomType} onPickSite={pickSite} onRequestPause={() => setAskingPause(true)} />
       </div>
 
       <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
@@ -184,9 +218,19 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
 
       {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
       {asker.dialog}
-      {asking && asking === experiment && (
-        <Dialog title={`${PROVIDER_NAMES[experiment]} 제어 (실험)`} onClose={() => setAsking(null)}>
-          <ExperimentControl provider={experiment} onDone={() => setAsking(null)} />
+      {asking && (asking === experiment || asking === pendingSite) && (
+        // A member answers it (agree, or leave); the host may just close it.
+        <Dialog title={`${PROVIDER_NAMES[asking]} 제어 (실험)`}
+          onClose={isHost ? () => { setAsking(null); setPendingSite(null); } : undefined}>
+          {/* A member who doesn't agree leaves the room (it is on that site now); the host's own pick just stops. */}
+          <ExperimentControl provider={asking} declineLabel={isHost ? "켜지 않고 계속" : "동의하지 않음"} onDone={(turnedOn) => {
+            // A member not agreeing leaves; the warning stays until that succeeds (a failure leaves it to answer again).
+            if (!turnedOn && !isHost && asking === experiment) return void leaveNow();
+            const site = pendingSite;
+            setAsking(null);
+            setPendingSite(null);
+            if (turnedOn && site === asking) pickSite(site, true);
+          }} />
         </Dialog>
       )}
       {s.switched && s.switched.provider === content?.provider && s.switched.contentId === content.contentId
@@ -330,17 +374,21 @@ function RequestPause({ handle, onClose }: { handle: RoomHandle; onClose: () => 
 const noSubscribe = () => () => {};
 const NO_TABS: VideoTab[] = [];
 
-/** The host picks the tab the room follows: one tab (stays, whichever is active), or the active one as they switch. */
-function TabPicker() {
+/**
+ * The host picks the tab the room follows — one tab (stays, whichever is active), or the active one as they switch —
+ * among the tabs of the room's type (all video tabs while it has none).
+ */
+function TabPicker({ type }: { type: MediaProvider | null }) {
   const tabs = platform.tabs;
   const subscribe = platform.subscribe ?? noSubscribe;
-  const list = useSyncExternalStore(subscribe, () => tabs?.list() ?? NO_TABS);
+  const all = useSyncExternalStore(subscribe, () => tabs?.list() ?? NO_TABS);
+  const list = useMemo(() => (type ? all.filter((t) => t.provider === type) : all), [all, type]);
   const followed = useSyncExternalStore(subscribe, () => tabs?.followed() ?? null);
   const auto = useSyncExternalStore(subscribe, () => tabs?.auto() ?? false);
   if (!tabs) return null;
   const current = list.find((t) => t.id === followed);
   return (
-    <details className="card tab-picker">
+    <details className="tab-picker">
       <summary>
         인식할 탭 <span className="muted">· {auto ? "활성 탭 자동 따라가기" : current?.title ?? (followed !== null ? "영상이 없는 탭 또는 다른 창의 탭" : "없음")}</span>
       </summary>
@@ -350,12 +398,11 @@ function TabPicker() {
         {list.map((t) => (
           <label key={t.id} title={t.title} className="tab-option">
             <input type="radio" name="followed-tab" checked={!auto && t.id === followed} onChange={() => tabs.choose(t.id)} />
-            <span className="pill">{PROVIDER_NAMES[t.provider]}</span>
             <span className="ellipsis grow">{t.title}</span>
             {t.id === followed && <span className="muted">인식 중</span>}
           </label>
         ))}
-        {list.length === 0 && <p className="muted">YouTube · 켜진 실험 사이트의 탭이 없습니다.</p>}
+        {list.length === 0 && <p className="muted">{type ? `${PROVIDER_NAMES[type]} 탭이 없습니다.` : "YouTube · 켜진 실험 사이트의 탭이 없습니다."}</p>}
         <label className="tab-option">
           <input type="radio" name="followed-tab" checked={auto} onChange={() => tabs.choose(null)} />
           <span className="grow">활성 탭 자동 따라가기</span>
@@ -365,25 +412,63 @@ function TabPicker() {
   );
 }
 
+type Site = Exclude<MediaProvider, "mock">;
+const SITES: Site[] = ["youtube", "netflix", "laftel"];
+/** The room's type as its site's icon; the host's opens the list of sites to switch the room to. */
+function RoomType({ type, onPick }: { type: MediaProvider | null; onPick?: (site: Site) => void }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open]);
+  const icon = type ? <ProviderIcon provider={type} /> : <span className="provider mock" title="플랫폼 없음">·</span>;
+  if (!onPick) return icon;
+  return (
+    <span className="menu">
+      <button type="button" className="type-button" title="방 플랫폼 바꾸기" aria-label="방 플랫폼 바꾸기" aria-haspopup="menu"
+        aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>
+        {icon}
+      </button>
+      {open && (
+        <div className="menu-items left" role="menu">
+          {SITES.map((site) => (
+            <button key={site} role="menuitem" onClick={() => { setOpen(false); onPick(site); }}>
+              <ProviderIcon provider={site} /> {PROVIDER_NAMES[site]}
+              {site === type && <span className="muted">· 지금</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
 /** A provider plays in the user's own page (e.g. a YouTube tab); this only shows where it stands. */
-function PlayerStatus({ content, s, isHost, experimentOff, onRequestPause }: {
+function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite, onRequestPause }: {
   /** null: no video yet (decision 92). */
   content: RoomContent | null;
   s: RoomSyncState;
   isHost: boolean;
   experimentOff: boolean;
+  roomType: MediaProvider | null;
+  onPickSite: (site: Site) => void;
   onRequestPause: () => void;
 }) {
   const followed = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.tabs?.followed() ?? null);
+  const type = <RoomType type={roomType} onPick={isHost ? onPickSite : undefined} />;
   if (!content) {
     // No "이 영상 열기": there is no video to open.
     return (
       <section className="card stack">
-        <p className="muted">
-          {isHost
-            ? "아직 방 영상이 없습니다. 인식할 탭에서 영상을 열면 방 영상이 됩니다(사이트는 상관없습니다)."
-            : "아직 방 영상이 없습니다. 방장이 영상을 열면 시작됩니다."}
-        </p>
+        <div className="player">
+          {type}
+          <span className="muted grow">
+            {isHost ? "아직 방 영상이 없습니다. 인식할 탭에서 영상을 열면 방 영상이 됩니다." : "아직 방 영상이 없습니다. 방장이 영상을 열면 시작됩니다."}
+          </span>
+        </div>
+        {isHost && <TabPicker type={roomType} />}
       </section>
     );
   }
@@ -398,7 +483,7 @@ function PlayerStatus({ content, s, isHost, experimentOff, onRequestPause }: {
   return (
     <section className="card stack">
       <div className="player">
-        <span className="pill">{name}</span>
+        {type}
         {!s.canPlay && experimentOff ? (
           <span className="muted grow">{name} 제어(실험)가 꺼져 있어 동기화하지 않습니다. 설정에서 켤 수 있습니다.</span>
         ) : !s.canPlay ? (
@@ -418,10 +503,11 @@ function PlayerStatus({ content, s, isHost, experimentOff, onRequestPause }: {
         {offerOpen && <IconButton icon="external" label={`${name}에서 이 영상 열기`} onClick={() => platform.open(url!, true)} />}
         {!isHost && <IconButton icon="pause" label="일시정지 요청" disabled={cooldown > 0} onClick={onRequestPause} />}
       </div>
-      {s.canPlay && (
+      {isHost && <TabPicker type={roomType} />}
+      {s.canPlay && !isHost && (
         <p className="muted">
-          {isHost ? "탭에서 재생·일시정지·이동하면 멤버에게 전달됩니다." : describeSync(s.sync, s.clockReady)}
-          {!isHost && cooldown > 0 && ` · 일시정지 요청은 ${cooldown}초 후에 다시 보낼 수 있습니다`}
+          {describeSync(s.sync, s.clockReady)}
+          {cooldown > 0 && ` · 일시정지 요청은 ${cooldown}초 후에 다시 보낼 수 있습니다`}
         </p>
       )}
     </section>

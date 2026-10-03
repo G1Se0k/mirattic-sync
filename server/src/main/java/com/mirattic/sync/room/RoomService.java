@@ -38,10 +38,14 @@ public class RoomService {
 
 	/** `unread` and `muted` are the viewer's own (0 / false in a view sent to someone else). */
 	/** `expiresInMs`: an invitation's time left (in invitation lists and `room:invite`), else absent. */
+	/**
+	 * `type`: the room's type (decision 93), null without one; `typeVersion` rises with each change, `typeSeen` is the
+	 * viewer's seen one — a member (not the host) is asked about the change while it is lower.
+	 */
 	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, long unread,
-			boolean muted, String code, Long expiresInMs) {
+			boolean muted, String code, Long expiresInMs, MediaProvider type, long typeVersion, long typeSeen) {
 		RoomView expiring(long ms) {
-			return new RoomView(id, content, members, createdAt, unread, muted, code, ms);
+			return new RoomView(id, content, members, createdAt, unread, muted, code, ms, type, typeVersion, typeSeen);
 		}
 	}
 
@@ -159,7 +163,7 @@ public class RoomService {
 		for (String id : invitees) {
 			room.unban(id); // the host asked them back
 			if (joinIds.contains(id)) {
-				members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER));
+				members.save(new RoomMember(roomId, id, RoomMember.Role.MEMBER, room.typeVersion()));
 				room.uninvite(id); // an earlier invitation to it is answered too
 			} else {
 				room.invite(id, System.currentTimeMillis());
@@ -238,7 +242,7 @@ public class RoomService {
 			if (before.size() > MAX_INVITES) {
 				throw new ResponseStatusException(HttpStatus.CONFLICT, "room full"); // rolled back: still invited
 			}
-			members.save(new RoomMember(roomId, me, RoomMember.Role.MEMBER));
+			members.save(new RoomMember(roomId, me, RoomMember.Role.MEMBER, room.typeVersion()));
 		}
 		return new Invited(view(room, members.findByRoomId(roomId), me), before);
 	}
@@ -295,10 +299,22 @@ public class RoomService {
 	/** Leaving as host closes the room for everyone. */
 	@Transactional
 	public Left leave(String me, String roomId) {
+		return leave(me, roomId, false);
+	}
+
+	/**
+	 * `asMember`: leaving as a member only (decision 93: a member's answer to a type change) — if the caller hosts the
+	 * room by now (handed over meanwhile), 409 and nothing changes, instead of closing it for everyone.
+	 */
+	@Transactional
+	public Left leave(String me, String roomId, boolean asMember) {
 		// Roles read under the room lock: a hand-over in progress decides first whether this closes the room.
 		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		RoomMember self = requireMember(me, roomId);
 		List<String> everyone = memberIds(roomId);
+		if (self.getRole() == RoomMember.Role.HOST && asMember) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "the host now");
+		}
 		if (self.getRole() == RoomMember.Role.HOST) {
 			rooms.deleteById(roomId);
 			return new Left(withInvited(everyone, room), true, new Ended(everyone, titleOf(room)));
@@ -413,7 +429,21 @@ public class RoomService {
 	}
 
 	/** A content change's new state and its "content" line. */
-	public record Changed(PlaybackState state, ChatMessage.View log) {
+	/** `type`: the room's new type when the video's site changed it (decision 93), else null. */
+	public record Changed(PlaybackState state, ChatMessage.View log, MediaProvider type) {
+	}
+
+	/**
+	 * The host picks the room's type (decision 93). @return the members to tell (`room:type`), or null if unchanged.
+	 */
+	@Transactional
+	public List<String> setType(String me, String roomId, MediaProvider type) {
+		Room room = lockAsHost(me, roomId);
+		if (!room.setType(type)) {
+			return null;
+		}
+		members.seeType(roomId, me, room.typeVersion()); // their own change: never asked about it (even after handing over)
+		return memberIds(roomId);
 	}
 
 	@Transactional
@@ -572,7 +602,7 @@ public class RoomService {
 			if (before.size() > MAX_INVITES) {
 				throw new ResponseStatusException(HttpStatus.CONFLICT, "room full");
 			}
-			members.save(new RoomMember(found.getId(), me, RoomMember.Role.MEMBER));
+			members.save(new RoomMember(found.getId(), me, RoomMember.Role.MEMBER, found.typeVersion()));
 			found.uninvite(me); // in by the code: an invitation to it is answered
 		}
 		return new Invited(view(found, members.findByRoomId(found.getId()), me), before);
@@ -634,7 +664,11 @@ public class RoomService {
 		if (!room.changeContent(me, content, System.currentTimeMillis())) {
 			return null;
 		}
-		return new Changed(room.playback(), messages.save(new ChatMessage(roomId, me, content.title(), null, "content")).view());
+		MediaProvider type = room.setType(content.provider()) ? content.provider() : null; // a video of another site
+		if (type != null) {
+			members.seeType(roomId, me, room.typeVersion()); // the host's own change (see setType)
+		}
+		return new Changed(room.playback(), messages.save(new ChatMessage(roomId, me, content.title(), null, "content")).view(), type);
 	}
 
 	/**
@@ -685,6 +719,26 @@ public class RoomService {
 		announce(roomId, left.memberIds());
 	}
 
+	/**
+	 * The room's type changed (decision 93): its members but the host are told to look again (`room:type`, a hint —
+	 * what they are asked comes from their room view: `typeVersion` above their `typeSeen`, so nothing is lost while
+	 * offline and nothing stays once they're out of the room).
+	 */
+	public void announceType(String roomId) {
+		ServerEvent event = new ServerEvent("room:type", roomId, null, null, System.currentTimeMillis(), null);
+		members.findByRoomId(roomId).stream()
+				.filter(m -> m.getRole() != RoomMember.Role.HOST)
+				.forEach(m -> hub.sendEvent(m.getUserId(), event));
+	}
+
+	/** The member confirmed the room's type change up to `version` (decision 93): not asked about it again. */
+	@Transactional
+	public void seeType(String me, String roomId, long version) {
+		Room room = rooms.findById(roomId).orElseThrow(RoomService::notFound);
+		requireMember(me, roomId);
+		members.seeType(roomId, me, Math.min(version, room.typeVersion()));
+	}
+
 	public void announce(String roomId, Collection<String> memberIds) {
 		ServerEvent event = new ServerEvent("room:update", roomId, null, null, System.currentTimeMillis(), null);
 		for (String id : memberIds) {
@@ -711,7 +765,8 @@ public class RoomService {
 				: messages.countByRoomIdAndUserIdNotAndKindIsNullAndDeletedFalseAndSeqGreaterThan(room.getId(), viewer,
 						self.getLastReadSeq());
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), unread,
-				self != null && self.isMuted(), room.getCode(), null);
+				self != null && self.isMuted(), room.getCode(), null, room.type(), room.typeVersion(),
+				self == null ? room.typeVersion() : self.getTypeSeenVersion());
 	}
 
 	private static ResponseStatusException notFound() {

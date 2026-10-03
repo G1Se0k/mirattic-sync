@@ -63,6 +63,8 @@ export type Platform = {
     auto(): boolean;
     /** null: follow the active tab. `windowId`: the window it was chosen in (the extension's panel adds it). */
     choose(tabId: number | null, windowId?: number): void;
+    /** The room's type picked (decision 93): that site's tab here is followed (fixed), else its first page opens. */
+    openSite(site: MediaProvider, windowId?: number): void;
   };
   subscribe?(onChange: () => void): () => void;
   /** The socket went up (or down: null). The extension publishes presence through it. */
@@ -77,6 +79,10 @@ export type Platform = {
   closedRooms?(): { roomId: string; title: string }[];
   /** Its notice was shown: not again (in any panel). */
   seenClosed?(roomId: string): void;
+  /** The host changed the type of the room I'm in (decision 93): to confirm or leave; the same object until it changes. */
+  roomTypeNotice?(): { roomId: string; type: MediaProvider; version: number } | null;
+  /** That change (`version`) confirmed, or leave the room (the extension leaves it; its screen goes back). */
+  answerRoomType?(roomId: string, version: number, leave: boolean): void;
   /** The room the app is still in (the extension keeps it when the panel closes). */
   activeRoom?(): string | null;
   /** Provider control the user turns on at their own risk (Netflix, Laftel). Absent = not offered in this app. */

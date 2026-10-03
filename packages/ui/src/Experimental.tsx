@@ -49,7 +49,12 @@ export function useExperiment(provider?: Experiment) {
  * Shown in the settings and, as a dialog, on first entering a room of that provider.
  */
 /** `onDone(true)` once it was turned on (saved), `onDone(false)` when left off or closed. */
-export function ExperimentControl({ provider, onDone }: { provider: Experiment; onDone?: (turnedOn: boolean) => void }) {
+/** `declineLabel`: the "not now" button's label where declining means something more (e.g. leaving a room). */
+export function ExperimentControl({ provider, onDone, declineLabel }: {
+  provider: Experiment;
+  onDone?: (turnedOn: boolean) => void;
+  declineLabel?: string;
+}) {
   const on = useExperiment(provider);
   const [failed, setFailed] = useState(false);
   if (on === undefined) return null;
@@ -67,7 +72,7 @@ export function ExperimentControl({ provider, onDone }: { provider: Experiment; 
       <RiskDetails provider={provider} />
       {failed && <p className="error">켜지 못했습니다. 다시 시도하세요.</p>}
       <Actions>
-        {onDone && <button className="link" onClick={() => onDone(!!on)}>{on ? "닫기" : "켜지 않고 계속"}</button>}
+        {onDone && <button className="link" onClick={() => onDone(!!on)}>{on ? "닫기" : declineLabel ?? "켜지 않고 계속"}</button>}
         {on ? (
           <button onClick={() => void set(false)}>{name} 제어 끄기</button>
         ) : (

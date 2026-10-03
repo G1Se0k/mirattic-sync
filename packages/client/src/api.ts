@@ -4,6 +4,7 @@ import type {
   FriendRequests,
   FriendView,
   Me,
+  MediaProvider,
   RoomContent,
   ReportReason,
   ReportTarget,
@@ -190,6 +191,10 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     block: (userId: string) => authed<void>("PUT", `/api/blocks/${userId}`),
     unblock: (userId: string) => authed<void>("DELETE", `/api/blocks/${userId}`),
 
+    /** Host only: the room's type (decision 93); the members get `room:type`. */
+    setRoomType: (id: string, type: MediaProvider) => authed<void>("PUT", `/api/rooms/${id}/type`, { type }),
+    /** A member confirmed the room's type change up to `version`: not asked again. */
+    seeRoomType: (id: string, version: number) => authed<void>("POST", `/api/rooms/${id}/type/seen`, { version }),
     /** Creates a room you host (`content` null: no video yet); invitees must be friends and get `room:invite`. */
     createRoom: (content: RoomContent | null, inviteIds: string[]) =>
       authed<RoomView>("POST", "/api/rooms", { content, inviteIds }),
@@ -224,7 +229,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** 404 once the room is closed or you left it. */
     room: (id: string) => authed<RoomView>("GET", `/api/rooms/${id}`),
     /** Leave or decline. The host leaving closes the room. */
-    leaveRoom: (id: string) => authed<void>("DELETE", `/api/rooms/${id}/members/me`),
+    /** `asMember`: only as a member — 409 if I host it by now (it isn't closed then). */
+    leaveRoom: (id: string, asMember = false) => authed<void>("DELETE", `/api/rooms/${id}/members/me${asMember ? "?asMember=true" : ""}`),
     /**
      * Back from the room screen (decision 90): the host's closes the room (`closed`) once `confirmed` (409 before),
      * a member's does nothing.
