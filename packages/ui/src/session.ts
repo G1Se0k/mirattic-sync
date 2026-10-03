@@ -65,6 +65,12 @@ export type Platform = {
     choose(tabId: number | null, windowId?: number): void;
     /** The room's type picked (decision 93): that site's tab here is followed (fixed), else its first page opens. */
     openSite(site: MediaProvider, windowId?: number): void;
+    /**
+     * In a room or not, and its site (null: none) — the extension's: in one, the chosen tab is followed and tabs taken
+     * over by themselves are of its site only; out of one, the active tab is followed.
+     */
+    /** `site` undefined: not known yet (a room just opened). */
+    setRoom?(room: { inRoom: boolean; site: MediaProvider | null | undefined }): void;
   };
   subscribe?(onChange: () => void): () => void;
   /** The socket went up (or down: null). The extension publishes presence through it. */

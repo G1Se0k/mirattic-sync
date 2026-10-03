@@ -23,7 +23,12 @@ export const ROOM_ACTIONS = ['requestPause', 'dismissPauseRequest', 'pauseAll', 
 export type RoomAction = (typeof ROOM_ACTIONS)[number];
 
 export type FromPanel =
-  | { op: 'hello'; windowId?: number }
+  /**
+   * `openedAt`: when this panel opened (taken before anything else, sent with every hello, reconnects too): the
+   * latest opened panel's window has the side panel (decision 94), an older one closes. `hold`: only that (a panel
+   * still asking for consent: nothing else starts for it).
+   */
+  | { op: 'hello'; windowId?: number; openedAt?: number; hold?: boolean }
   | { op: 'api'; id: number; name: string; args: unknown[] }
   | { op: 'socket' }
   | { op: 'socket:resume' }
@@ -72,6 +77,8 @@ export type ToPanel =
   | { kind: 'event'; event: ServerEvent }
   | { kind: 'shared'; shared: Shared }
   | { kind: 'room'; state: RoomSyncState }
+  /** The side panel was opened in another window (one window has it, the latest opened): this one closes. */
+  | { kind: 'close' }
   /** The background has stored that this room's closure notice was shown: not shown again. */
   | { kind: 'closed:recorded'; roomId: string; userId: string };
 

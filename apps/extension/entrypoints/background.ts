@@ -33,6 +33,8 @@ type Alert = { kind: AlertKind; target: string; title: string; toast: Omit<Toast
 
 /** storage.local (+ ".<userId>"): rooms whose type changes are confirmed without asking (decision 93, "이 방에서는 항상 허용하기"). */
 const TYPE_ALWAYS_ITEM = 'mirattic.typeAlways';
+const latestPanelEntry = 'mirattic.latestPanel'; // storage.session: the latest opened side panel (decision 94)
+const roomSiteEntry = 'mirattic.roomSite'; // storage.session: the room's site while in one (decision 94)
 const TYPE_RETRY_MS = 60_000; // a failed confirmation: asked instead, automatic again after this
 
 export default defineBackground(() => {
@@ -41,6 +43,63 @@ export default defineBackground(() => {
 
   const api = createApi({ baseUrl: API_URL, store, authorize });
   const ports = new Set<Browser.runtime.Port>();
+  /** Each panel's window and when it opened (one window has the panel, decision 94). */
+  const panelWindows = new Map<Browser.runtime.Port, { openedAt: number; windowId?: number }>();
+  /** The latest opened panel, in storage.session: a worker restarting meanwhile still knows which one wins. */
+  type LatestPanel = { openedAt: number; windowId?: number };
+  let latestPanelMemo: Promise<LatestPanel | null> | null = null;
+  const latestPanel = () => (latestPanelMemo ??= browser.storage.session.get(latestPanelEntry)
+    .then((v) => (v[latestPanelEntry] as LatestPanel | undefined) ?? null, () => null));
+  const setLatestPanel = async (p: LatestPanel) => {
+    latestPanelMemo = Promise.resolve(p);
+    await browser.storage.session.set({ [latestPanelEntry]: p }).catch(() => {});
+  };
+  let panelTurn: Promise<unknown> = Promise.resolve();
+  /** @returns whether this panel stays: false = an older one than the latest of another window (told to close). */
+  async function arbitrate(port: Browser.runtime.Port, openedAt: number, windowId: number | undefined) {
+    const me = { openedAt, windowId };
+    const latest = await latestPanel();
+    if (latest && latest.windowId !== windowId && newerPanel(latest, me)) {
+      post(port, { kind: 'close' });
+      return false;
+    }
+    if (!latest || !newerPanel(latest, me)) await setLatestPanel(me);
+    panelWindows.set(port, me);
+    for (const [other, p] of panelWindows) {
+      if (other !== port && p.windowId !== windowId && newerPanel(me, p)) {
+        panelAllowed.set(other, Promise.resolve(false)); // nothing more from it, already (it is closing)
+        post(other, { kind: 'close' });
+      }
+    }
+    return true;
+  }
+  /** Opened later — the same millisecond decided by the window id, so two windows never both win. */
+  const newerPanel = (a: LatestPanel, b: LatestPanel) =>
+    a.openedAt > b.openedAt || (a.openedAt === b.openedAt && (a.windowId ?? 0) > (b.windowId ?? 0));
+  /** Each panel's arbitration: its other messages wait for it, and do nothing if it lost (it is closing). */
+  const panelAllowed = new Map<Browser.runtime.Port, Promise<boolean>>();
+  /**
+   * Replaced by another device (decision 89): not following a room here any more (the saved room stays, for "여기서
+   * 계속") — what is watched is the active tab again (decision 95).
+   */
+  function outOfRoomMode() {
+    roomKnown = true;
+    platform?.tabs?.setRoom?.({ inRoom: false, site: null });
+  }
+  /** A room was opened or closed in this worker (before that, the saved room says whether it is in one). */
+  let roomKnown = false;
+  /** The room's site for the tabs taken over by themselves, kept for a worker restart (decision 94). */
+  let roomSite: MediaProvider | null | undefined;
+  /** Which room `roomSite` is of: another room opened starts with its site unknown until it loads. */
+  let roomSiteOf: string | null = null;
+  function setRoomSite(site: MediaProvider | null, of: string | null) {
+    platform?.tabs?.setRoom?.({ inRoom: room !== null, site });
+    if (site === roomSite && of === roomSiteOf) return;
+    roomSiteOf = of;
+    roomSite = site;
+    // With its room: a restart restores it only for that same room.
+    void browser.storage.session.set({ [roomSiteEntry]: { roomId: of, site } }).catch(() => {});
+  }
   /** Panels showing a room, and which one. */
   const viewers = new Map<Browser.runtime.Port, string>();
   let readTimer: ReturnType<typeof setTimeout> | undefined;
@@ -405,9 +464,29 @@ export default defineBackground(() => {
   clearAlerts();
 
   /** Tabs are looked at only after the user's consent (Chrome Web Store user data policy). */
-  async function ensureWatching(windowId?: number) {
+  /** `follow`: also follow `windowId` if the watcher exists already (a panel's hello decides that itself). */
+  async function ensureWatching(windowId?: number, follow = true) {
     if (!(await hasConsent())) return null;
-    watching ??= watch({ windowId }).then((p) => {
+    // The room's site as kept (decision 94): a restarted worker picks no other site's tab before its room is back.
+    // In a room (kept for a restart too): the chosen tab is followed; out of one, the active tab (decision 95).
+    watching ??= browser.storage.session.get([roomSiteEntry, ROOM_KEY])
+      // Its site: kept (a site, or null for a room without one), else unknown (undefined: nothing taken until known).
+      .then((v) => {
+        const savedRoom = typeof v[ROOM_KEY] === 'string' ? (v[ROOM_KEY] as string) : null;
+        const kept = v[roomSiteEntry] as { roomId?: unknown; site?: unknown } | undefined;
+        // The kept site only if it is that room's (a site, or null for a room without one); else unknown.
+        const site = savedRoom && kept?.roomId === savedRoom && (typeof kept.site === 'string' || kept.site === null)
+          ? (kept.site as MediaProvider | null) : undefined;
+        return { site, inRoom: savedRoom !== null, savedRoom };
+      }, () => ({ site: undefined, inRoom: false, savedRoom: null }))
+      .then(({ site, inRoom, savedRoom }) => {
+        if (inRoom && roomSite === undefined) {
+          roomSite = site; // the room's site as kept, until its room says
+          roomSiteOf = savedRoom;
+        }
+        return watch({ windowId, site, inRoom });
+      })
+      .then((p) => {
       platform = p;
       p.subscribe?.(() => {
         pushShared();
@@ -415,10 +494,15 @@ export default defineBackground(() => {
         room?.watchingChanged();
       });
       if (status === 'open') p.connected?.(socket);
+      // A room entered or left while it was being created: as things are now — once known (a restarted worker keeps
+      // its saved room's mode until that room is reopened or closed).
+      if (roomKnown) {
+        p.tabs?.setRoom?.({ inRoom: room !== null, site: room && roomSiteOf === room.state.roomId ? roomSite : room ? undefined : null });
+      }
       return p;
     });
     const p = await watching;
-    if (windowId !== undefined) p.follow(windowId);
+    if (windowId !== undefined && follow) p.follow(windowId);
     return p;
   }
 
@@ -439,6 +523,7 @@ export default defineBackground(() => {
           markReplaced(true);
           room?.dispose();
           room = null;
+          outOfRoomMode();
           clearAlerts();
           pushShared();
         }
@@ -544,11 +629,20 @@ export default defineBackground(() => {
       },
       onChange: (state) => {
         broadcast({ kind: 'room', state });
+        // Replacements stay on the room's site — known once the room is loaded (kept as it was meanwhile), and for a
+        // member only once they confirmed a type change (until then the site they agreed to holds).
+        const r = state.room;
+        const pending = !!r?.type && (r.typeVersion ?? 0) > (r.typeSeen ?? 0)
+          && !r.members.some((m) => m.user.id === meId && m.role === 'HOST');
+        if (room === sync && r && !pending) setRoomSite(r.type ?? null, sync.state.roomId);
         if (!state.pauseRequest) dropAlerts((a) => a.kind === 'pause'); // answered or expired (30 s)
         if (state.closed && room === sync) closeRoom();
       },
     });
     room = sync;
+    roomKnown = true;
+    // In a room: the chosen tab is followed; its site as known for this room (restored), else unknown until it loads.
+    platform?.tabs?.setRoom?.({ inRoom: true, site: roomSiteOf === roomId ? roomSite : undefined });
     sync.setConnected(status === 'open');
     void browser.storage.session.set({ [ROOM_KEY]: roomId });
     pushShared();
@@ -580,6 +674,8 @@ export default defineBackground(() => {
     if (roomId) dropTypeNotice(roomId); // out of it: nothing to answer
     room?.dispose();
     room = null;
+    roomKnown = true;
+    setRoomSite(null, null);
     void browser.storage.session.remove(ROOM_KEY);
     pushShared();
   }
@@ -631,6 +727,7 @@ export default defineBackground(() => {
     status = 'replaced';
     room?.dispose(); // opened before the stored mark was read
     room = null;
+    outOfRoomMode(); // (a restarted worker's watcher starts in its saved room's mode)
     pushShared();
     broadcast({ kind: 'status', status });
   }
@@ -803,9 +900,24 @@ export default defineBackground(() => {
     ports.add(port);
     clearAlerts(); // the panel shows them now
     port.onMessage.addListener(async (m: FromPanel) => {
+      if (m.op === 'hello' && typeof m.openedAt === 'number') {
+        // The side panel lives in one window, the latest opened (decision 94): by when each panel opened (not by when
+        // its hello arrives, nor whether it is a reconnect), kept across worker restarts. An older one closes. One
+        // hello decided at a time (each sees the one before it), so two arriving together can't both win.
+        const openedAt = m.openedAt;
+        panelAllowed.set(port, (panelTurn = panelTurn.then(() => arbitrate(port, openedAt, m.windowId))) as Promise<boolean>);
+      }
+      // Nothing from a panel that lost (closing), nor before its arbitration ends.
+      if (!(await (panelAllowed.get(port) ?? true))) return;
       switch (m.op) {
         case 'hello':
-          await ensureWatching(m.windowId);
+          if (m.hold) break; // a panel still asking for consent: its window is all it says
+          {
+            // Its window followed only if this panel still has the side panel once that's ready (it may lose meanwhile).
+            const watcher = await ensureWatching(m.windowId, false); // created for its window if none yet
+            if (!(await (panelAllowed.get(port) ?? true))) break;
+            if (m.windowId !== undefined) watcher?.follow(m.windowId);
+          }
           post(port, { kind: 'shared', shared: shared() });
           post(port, { kind: 'status', status });
           if (room) post(port, { kind: 'room', state: room.state });
@@ -833,6 +945,7 @@ export default defineBackground(() => {
           break;
         case 'room:open':
           await replacedLoaded; // replaced in an earlier worker: known before any room opens
+          if (!(await (panelAllowed.get(port) ?? true))) break; // lost meanwhile (a newer panel opened)
           openRoom(m.roomId, !m.resume);
           viewers.set(port, m.roomId);
           if (room) post(port, { kind: 'room', state: room.state });
@@ -859,7 +972,8 @@ export default defineBackground(() => {
           break;
         case 'tab':
           if ((m.tabId === null || typeof m.tabId === 'number') && (m.windowId === undefined || typeof m.windowId === 'number')) {
-            (await ensureWatching())?.tabs?.choose(m.tabId, m.windowId); // a restarted worker: once it follows tabs again
+            const watcher = await ensureWatching(); // a restarted worker: once it follows tabs again
+            if (await (panelAllowed.get(port) ?? true)) watcher?.tabs?.choose(m.tabId, m.windowId); // still the panel
           }
           break;
         case 'type:answer':
@@ -869,7 +983,8 @@ export default defineBackground(() => {
           break;
         case 'site':
           if (typeof m.site === 'string' && (m.windowId === undefined || typeof m.windowId === 'number')) {
-            (await ensureWatching())?.tabs?.openSite(m.site, m.windowId);
+            const watcher = await ensureWatching();
+            if (await (panelAllowed.get(port) ?? true)) watcher?.tabs?.openSite(m.site, m.windowId); // still the panel
           }
           break;
         case 'open':
@@ -883,6 +998,8 @@ export default defineBackground(() => {
       if (viewers.has(port)) markRead(); // the panel closed while showing the room
       ports.delete(port);
       viewers.delete(port);
+      panelWindows.delete(port);
+      panelAllowed.delete(port);
       if (!ports.size) typeNotices.forEach(toastType); // closed without answering: asked over the videos again
     });
   });

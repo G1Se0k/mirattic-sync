@@ -50,7 +50,8 @@ const followedTabEntry = 'mirattic.followedTab';
  * window's active video tab as the user switches; with none chosen yet, the active one, else any — and exposes it as the room player, "now watching"
  * and the user's presence. Runs in the background, so it goes on while the side panel is closed.
  */
-export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
+/** `site`: the room's site already (a restarted worker back in a room): what is taken over by itself is of it from the start. */
+export async function watch(opts: { windowId?: number; site?: MediaProvider | null; inRoom?: boolean } = {}): Promise<Watch> {
   let windowId = opts.windowId ?? (await browser.windows.getCurrent()).id;
   let tabId: number | null = null;
   let content: RoomContent | null = null;
@@ -64,17 +65,23 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
   const on = new Set(EXPERIMENTS.filter((p) => stored[experimentKey(p)] === true));
   let askOnSwitch = stored[ASK_ON_SWITCH_KEY] !== false;
   let followActive = stored[followActiveSetting] === true;
+  /**
+   * In a room (decision 95): the chosen tab is followed (fixed, unless "활성 탭 자동 따라가기"). Out of one, what I
+   * watch is the active tab, as I switch — the home screen's "now watching" follows it.
+   */
+  let inRoom = opts.inRoom ?? false;
+  const autoNow = () => followActive || !inRoom;
   /** Whether a tab switch may change the followed tab: following the active one, or none followed yet. */
   // Fixed: the chosen tab stays even when its video is gone (left the site, player dead); only the user choosing
   // another, the room's video opened in a tab (take), or the tab closing changes it.
-  const switching = () => followActive || (tabId === null && settling === 0 && !stopped);
+  const switching = () => autoNow() || (tabId === null && settling === 0 && !stopped);
   /** The chosen tab moved to another window: recognition stopped until the user chooses a tab (or opens a room video). */
   let stopped = false;
   /**
    * The fixed tab being settled — a restarted worker restoring its saved one, or a closed one's replacement picked
    * from its own window: tab switches (activations, loads elsewhere) don't take its place meanwhile.
    */
-  let settling = followActive ? 0 : 1;
+  let settling = 1; // the restore below (ended once by endRestore, whatever mode this starts in)
   let restored = false;
   /** Tabs moved to another window while the saved fixed tab is being read: if it is one, recognition stops. */
   const movedWhileRestoring = new Set<number>();
@@ -185,6 +192,13 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
   const providerOf = (url?: string): MediaProvider | null =>
     url?.startsWith(YOUTUBE) ? 'youtube' : ([...on].find((p) => url?.startsWith(EXPERIMENTAL[p].site)) ?? null);
   const isVideoTab = (url?: string) => providerOf(url) !== null;
+  /**
+   * The room's site (its type, decision 93), while in a room: tabs taken over by themselves (a replacement, an
+   * activation, a load) are of it only — its tabs all closed, none of another site is taken (the user chooses).
+   */
+  // undefined: in a room whose type isn't known yet — nothing is taken over by itself until it is.
+  let site: MediaProvider | null | undefined = opts.site !== undefined ? opts.site : opts.inRoom ? undefined : null;
+  const ofSite = (url?: string) => isVideoTab(url) && (!inRoom || (site !== undefined && (!site || providerOf(url) === site)));
   const videoUrls = () => [`${YOUTUBE}*`, ...[...on].map((p) => `${EXPERIMENTAL[p].site}*`)];
 
   /** Changes per tab (URL, load, moved to another window): a lookup that saw one happen meanwhile is stale. */
@@ -222,10 +236,23 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
   let choosing = 0; // bumped by every pick() and every bind: a pick() whose lookups finish after that is stale
   let activations = 0; // tabs.onActivated order: a late lookup of an earlier activation is stale
   let intent = 0; // the user's latest say on the tab (a choice, back to automatic, a video opened): earlier ones give up
+  /** Bringing chosen tabs of other windows forward, one after another (decision 94). */
+  let activating: Promise<void> = Promise.resolve();
   /** The site of the followed tab as last bound (null: still loading), apart from the adapter connecting to it. */
   let tabProvider: MediaProvider | null = null;
   /** The followed tab's window (kept current as it moves): a replacement comes from there, without a lookup. */
   let tabWindow: number | undefined;
+  /** Nothing followed (out of a room, the active tab isn't a video one): no player, nothing watched. */
+  const unbind = () => {
+    choosing++; // a pick still looking up tabs gives up too (also with nothing followed)
+    if (tabId === null) return;
+    binding++;
+    tabId = null;
+    void browser.storage.session.set({ [followedTabEntry]: null }); // nor restored after a restart
+    tabProvider = null;
+    adapter.disconnect();
+    changed();
+  };
   /** The followed tab from now on: the previous one's player is let go at once, and the choice kept for a restart. */
   const select = (id: number, inWindow: number | undefined) => {
     stopped = false;
@@ -281,16 +308,24 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     const mine = ++choosing;
     const [active] = await browser.tabs.query({ active: true, windowId: inWindow });
     const all = (await browser.tabs.query({ windowId: inWindow, url: videoUrls() })).filter((t) => t.id !== closing);
-    const candidates = [...(isVideoTab(active?.url) && active?.id !== closing ? [active!] : []), ...all];
+    const activeOne = ofSite(active?.url) && active?.id !== closing ? [active!] : [];
+    // Out of a room (decision 95): the active tab only — not a video tab, nothing is watched (no other tab instead).
+    if (!inRoom && !activeOne.length) {
+      if (mine === choosing) unbind();
+      return;
+    }
+    const candidates = [...activeOne, ...(inRoom ? all.filter((t) => ofSite(t.url)) : [])];
     for (const candidate of candidates) {
       if (mine !== choosing) return;
       if (candidate.id === undefined) continue;
       const now = await tabNow(candidate.id); // as it is now: it may have navigated since the query (next one then)
       // Still a video tab of that window (not closed, not moved away meanwhile): followed.
-      if (mine === choosing && now?.id !== undefined && now.windowId === inWindow && isVideoTab(now.url)) {
+      if (mine === choosing && now?.id !== undefined && now.windowId === inWindow && ofSite(now.url)) {
         return void (await bind(now.id, now.url, now.windowId));
       }
     }
+    // Out of a room and no active video tab after all (it moved on while looked at): nothing watched.
+    if (!inRoom && mine === choosing) unbind();
   };
 
   /** Whether the window's active tab is on a site whose control is off: the panel then offers to turn it on. */
@@ -320,12 +355,12 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
    * since (chose a tab, went automatic, opened a video).
    */
   const replace = (inWindow: number | undefined, closing?: number) => {
-    if (followActive) return void pick(closing, windowId);
+    if (autoNow()) return void pick(closing, windowId);
     settling++;
     const said = intent;
     void pick(closing, inWindow).finally(() => {
       settling--;
-      if (tabId === null && settling === 0 && !followActive && intent === said) void pick(closing, inWindow);
+      if (tabId === null && settling === 0 && !autoNow() && intent === said) void pick(closing, inWindow);
     });
   };
   const release = (inWindow: number | undefined) => {
@@ -393,7 +428,12 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     // The user activated another tab meanwhile: its own handler decides. Only a video tab is a choice, so
     // switching to any other tab doesn't cancel a pending handover (pick() after the synced tab closed).
     // A tab chosen meanwhile (choose(), take() bump `activations`) wins over this activation.
-    if (mine !== activations || !switching() || !isVideoTab(tab?.url)) return;
+    // Still this window's (the panel may have moved to another meanwhile: that one's tabs count now).
+    if (mine !== activations || !switching() || info.windowId !== windowId) return;
+    if (!ofSite(tab?.url)) {
+      if (!inRoom) unbind(); // out of a room, what is watched is the active tab: not a video one, nothing
+      return;
+    }
     await bind(info.tabId, tab!.url, tab!.windowId);
   });
   browser.tabs.onUpdated.addListener((id, change, tab) => {
@@ -405,11 +445,15 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     // back on a video site. On to another video site: still ours (bound below once it loads).
     if (id === tabId && change.url) {
       tabProvider = providerOf(change.url); // the site it is on now: turning off the one it left doesn't concern it
-      if (!tabProvider && followActive) void pick();
+      if (!tabProvider && autoNow()) void pick();
     }
     // A reload or a fresh navigation to a video site starts without our script: reconnect (and reinject).
     if (change.status === 'complete') reinjected.delete(id);
-    if (change.status === 'complete' && isVideoTab(tab.url) && (id === tabId || (switching() && tab.active && tab.windowId === windowId))) {
+    if (change.status === 'complete' && isVideoTab(tab.url)
+      // The followed tab reloading: bound again — out of a room only while it is the active one (the active tab is
+      // what is followed there; a pick of it may be under way).
+      && ((id === tabId && (inRoom || (tab.active && tab.windowId === windowId)))
+        || (switching() && tab.active && tab.windowId === windowId && ofSite(tab.url)))) {
       if (id !== tabId || !adapter.connected || providerOf(tab.url) !== adapter.provider) {
         tabId = null;
         void bind(id, tab.url, tab.windowId);
@@ -425,8 +469,8 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     tabWindow = attached.newWindowId;
     // The followed tab moved to another window: a chosen one stops being recognized (until the user chooses again);
     // following the active tab, it's that window's tab only while it stays there.
-    if (!followActive || attached.newWindowId !== windowId) {
-      stopped = !followActive;
+    if (!autoNow() || attached.newWindowId !== windowId) {
+      stopped = !autoNow();
       binding++;
       tabId = null;
       tabProvider = null;
@@ -434,7 +478,7 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
       // Stopped is kept for a restart too (a restarted worker mustn't pick a tab by itself).
       void browser.storage.session.set({ [followedTabEntry]: stopped ? 'stopped' : null });
       changed();
-      if (followActive) void pick();
+      if (autoNow()) void pick();
     }
   });
   // Tabs reordered: the list follows the tab strip's order.
@@ -456,7 +500,7 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
   // After the listeners: a tab switch during the first (possibly injecting) bind must not be missed. A tab chosen
   // before a service worker restart stays chosen.
   const before = choosing; // a choice or a room video opened while these are read is newer than the saved tab
-  const last = followActive ? undefined : (await browser.storage.session.get(followedTabEntry))[followedTabEntry];
+  const last = autoNow() ? undefined : (await browser.storage.session.get(followedTabEntry))[followedTabEntry];
   // { tabId, windowId } (a bare id from before windows were kept, or 'stopped')
   const saved = typeof last === 'number' ? { tabId: last, windowId: undefined }
     : last && typeof last === 'object' && typeof (last as { tabId?: unknown }).tabId === 'number'
@@ -488,7 +532,7 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
 
   /** A tab the user opened the room's video in (fixed mode): followed from now on, once it has loaded. */
   const take = (tab: Browser.tabs.Tab) => {
-    if (followActive || tab.id === undefined || tab.id === tabId) return; // the active one is followed anyway
+    if (autoNow() || tab.id === undefined || tab.id === tabId) return; // the active one is followed anyway
     activations++;
     choosing++; // a pick() still looking up tabs (the followed one closed meanwhile) mustn't replace it
     binding++;
@@ -505,6 +549,7 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
     follow: (id) => {
       if (id === windowId) return;
       windowId = id;
+      activations++; // an activation of the previous window still being looked at is not this window's
       if (switching()) void pick();
       void checkOffSite();
     },
@@ -541,7 +586,43 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
           // Closed before the click arrived (its onRemoved may have come already), or its site turned off meanwhile:
           // another video tab of its window (the panel's, if it's gone) takes over.
           release(tab?.windowId ?? tabWindow);
-        } else if (isVideoTab(tab.url)) await bind(id, tab.url, tab.windowId);
+        } else {
+          // A tab of another window than the panel's: brought forward there (the user sees what they chose).
+          // Not if the panel moved to another window meanwhile (the choice still holds; nothing brought forward).
+          if (chosenIn !== undefined && tab.windowId !== chosenIn && windowId === chosenIn) {
+            // Its window as activated (it may have moved meanwhile); none if it couldn't be activated.
+            // One after another, each only if still the latest choice: an older one finishing late can't leave its tab
+            // active over a newer choice.
+            const latest = () => mine === intent && tabId === id && windowId === chosenIn;
+            activating = activating.then(async () => {
+              if (!latest()) return;
+              const t = await browser.tabs.update(id, { active: true }).catch(() => undefined);
+              if (t && latest()) await browser.windows.update(t.windowId, { focused: true }).catch(() => {});
+            });
+          }
+          if (isVideoTab(tab.url)) await bind(id, tab.url, tab.windowId);
+        }
+      },
+      setRoom: (room) => {
+        // undefined: unknown (a room opened and not loaded yet): nothing taken over by itself until it is known.
+        const siteChanged = room.site !== undefined && room.site !== site;
+        site = room.site;
+        if (room.inRoom && !inRoom) {
+          // Into a room: a lookup still under way from out of one (the active tab) mustn't change its tab after.
+          choosing++;
+          activations++;
+        }
+        if (room.inRoom === inRoom) {
+          // Another site for the room with nothing followed: a tab of it (the active one first) is taken.
+          if (siteChanged && tabId === null && switching()) void pick();
+          return;
+        }
+        inRoom = room.inRoom;
+        // Out of the room: back to the active tab at once (the home screen shows what is watched now).
+        if (!inRoom) {
+          stopped = false;
+          void pick();
+        } else if (tabId === null && site !== undefined && switching()) void pick(); // into one, its site known: a tab of it
       },
       openSite: async (site, chosenIn) => {
         // The room's type picked (decision 93): that site's tab of the panel's window is followed (fixed, even if

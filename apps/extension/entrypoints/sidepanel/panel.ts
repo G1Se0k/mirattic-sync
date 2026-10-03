@@ -1,4 +1,4 @@
-import { browser } from 'wxt/browser';
+import { browser, type Browser } from 'wxt/browser';
 import { ApiError, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { emptyRoomState, type RoomSyncState } from '@mirattic/sync-core';
 import type { MediaProvider, ServerEvent } from '@mirattic/types';
@@ -12,7 +12,41 @@ const RECONNECT_MS = 500;
  * The side panel's view of the background (ui-port.ts): an API client whose calls run there, its socket,
  * what it follows and the room it keeps in sync. Closing the panel only closes this view.
  */
-export async function connectPanel(): Promise<{ api: ApiClient; platform: Platform }> {
+/**
+ * Before consent (decision 94): this panel takes part in which window has the side panel, and nothing else — closed
+ * when another window's opens later. Released once the panel connects for real. ponytail: not redone if the worker
+ * restarts meanwhile (the consent screen is short-lived).
+ */
+export function holdWindow(openedAt: number) {
+  let released = false;
+  let port: Browser.runtime.Port | null = null;
+  const windowId = browser.windows.getCurrent().then((w) => w.id);
+  // Connected again after a worker restart (the background forgets ports), until released.
+  const connect = () => {
+    if (released) return;
+    const p = browser.runtime.connect({ name: UI_PORT });
+    port = p;
+    p.onMessage.addListener((m: ToPanel) => m.kind === 'close' && window.close());
+    p.onDisconnect.addListener(() => void (port === p && setTimeout(connect, RECONNECT_MS)));
+    void windowId.then((id) => {
+      try {
+        p.postMessage({ op: 'hello', windowId: id, openedAt, hold: true } satisfies FromPanel);
+      } catch {
+        // gone already: the reconnect says it
+      }
+    });
+  };
+  connect();
+  return {
+    release: () => {
+      released = true;
+      port?.disconnect();
+    },
+  };
+}
+
+/** `openedAt`: when the panel page started (which of two panels opened last wins the side panel, decision 94). */
+export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; platform: Platform }> {
   let port = browser.runtime.connect({ name: UI_PORT });
   const send = (message: FromPanel) => {
     try {
@@ -70,6 +104,9 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
 
   const onMessage = (m: ToPanel) => {
     switch (m.kind) {
+      case 'close':
+        window.close(); // opened in another window since
+        return;
       case 'closed:recorded':
         dismissed.delete(`${m.userId}|${m.roomId}`);
         return;
@@ -138,7 +175,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
       setTimeout(() => {
         port = browser.runtime.connect({ name: UI_PORT });
         attach();
-        send({ op: 'hello', windowId });
+        send({ op: 'hello', windowId, openedAt });
         if (socketHandlers) send({ op: 'socket' });
         if (view?.shown) send({ op: 'room:open', roomId: view.roomId, resume: true });
         dismissed.forEach(seen);
@@ -157,7 +194,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
       }),
   });
 
-  send({ op: 'hello', windowId });
+  send({ op: 'hello', windowId, openedAt });
   await hello;
 
   const actOn = (roomId: string) => (name: RoomAction, ...args: unknown[]) => send({ op: 'room:act', roomId, name, args });
