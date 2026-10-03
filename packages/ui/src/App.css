@@ -158,7 +158,8 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .chat > :first-child { margin-top: auto; }
 .chat li { padding: 3px 6px; border-radius: 6px; }
 .chat li .author { font-weight: 600; margin-right: 4px; }
-.chat li .tools { visibility: hidden; }
+/* No height of its own: a row with the delete button is as tall as one without (the button overflows, centered). */
+.chat li .tools { visibility: hidden; display: flex; align-items: center; height: 0; }
 .chat li:hover .tools { visibility: visible; }
 .chat li.log { align-self: center; text-align: center; font-size: calc(12px * var(--text-scale)); color: var(--muted); }
 .chat li.fresh { animation: flash 1.6s ease-out; }

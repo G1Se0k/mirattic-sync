@@ -48,6 +48,12 @@ public class ChatMessage {
 		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted);
 	}
 
+	/** A "content" line: the title read late. */
+	ChatMessage retitle(String title) {
+		this.text = title;
+		return this;
+	}
+
 	/** Deleted for everyone: the text is gone, a placeholder keeps its place in the chat. */
 	void delete() {
 		this.deleted = true;

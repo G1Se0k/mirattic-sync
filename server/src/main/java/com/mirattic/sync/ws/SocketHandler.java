@@ -262,7 +262,9 @@ class SocketHandler extends TextWebSocketHandler {
 				}
 				synchronized (roomLog.order(roomId)) { // logged in the order applied
 					RoomService.Changed changed = rooms.changeContent(me, roomId, content);
-					if (changed != null) {
+					if (changed != null && changed.state() == null) {
+						roomLog.post(roomId, changed.log()); // the same line, retitled: shown in its place
+					} else if (changed != null) {
 						hub.sendToRoom(roomId, playbackEvent(roomId, changed.state()));
 						roomLog.contentChanged(roomId, changed.state().version(), changed.log());
 						if (changed.type() != null) {

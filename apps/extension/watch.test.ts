@@ -1084,21 +1084,23 @@ describe('watch: a release replaces from the tab\'s own window', () => {
   });
 });
 
-it('fixed: a chosen tab moved to another window stops being recognized until a tab is chosen', async () => {
+it('fixed: a chosen tab moved to another window stays recognized there', async () => {
   delete stored['mirattic.followActive'];
   tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }, { ...YT(6), windowId: 2 }];
   const w = await watch();
   await w.tabs!.choose(5, 2);
   tabs[1] = { ...tabs[1]!, windowId: 1 };
+  expect(followed()).toBe(5);
+  connects = [];
   await fire('tabs.onAttached', 5, { newWindowId: 1 });
-  expect(w.tabs!.followed()).toBe(null);
-  tabs[2] = { ...tabs[2]!, active: true }; // a tab switch in the panel's window doesn't start it again
+  expect(w.tabs!.followed()).toBe(5);
+  expect(session['mirattic.followedTab']).toEqual({ tabId: 5, windowId: 1 });
+  tabs[2] = { ...tabs[2]!, active: true }; // a tab switch in the panel's window doesn't take its place
   await fire('tabs.onActivated', { tabId: 6, windowId: 2 });
   await fire('tabs.onUpdated', 6, { status: 'complete' }, tabs[2]);
   await settle();
-  expect(w.tabs!.followed()).toBe(null);
-  await w.tabs!.choose(5, 1);
   expect(w.tabs!.followed()).toBe(5);
+  expect(connects).toEqual([]); // never let go
 });
 
 it('lists the tabs in each window\'s tab strip order, and follows a reorder', async () => {
@@ -1158,7 +1160,7 @@ it('fixed: a chosen tab gone to a site already off is still chosen after a resta
   expect(followed()).toBe(1);
 });
 
-it('fixed: recognition stopped by a window move stays stopped after a worker restart', async () => {
+it('fixed: a chosen tab moved to another window is still the one after a worker restart', async () => {
   delete stored['mirattic.followActive'];
   tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }];
   const w = await watch();
@@ -1166,13 +1168,12 @@ it('fixed: recognition stopped by a window move stays stopped after a worker res
   tabs[1] = { ...tabs[1]!, windowId: 1, active: false };
   await fire('tabs.onAttached', 5, { newWindowId: 1 });
   listeners = {};
-  connects = [];
-  const again = await watch(); // restarted: window 1's active video tab must not be picked by itself
-  expect(again.tabs!.followed()).toBe(null);
-  expect(connects).toEqual([]);
+  const again = await watch(); // restarted: window 1's active video tab doesn't take its place
+  await settle();
+  expect(again.tabs!.followed()).toBe(5);
 });
 
-it('fixed: the saved tab moved to another window while a restarted worker reads it: stopped', async () => {
+it('fixed: the saved tab moved to another window while a restarted worker reads it: still followed', async () => {
   delete stored['mirattic.followActive'];
   tabs = [YT(1), YT(2, true)];
   session['mirattic.followedTab'] = 1;
@@ -1184,11 +1185,11 @@ it('fixed: the saved tab moved to another window while a restarted worker reads 
   heldGet.get(1)!.resolve();
   const w = await started;
   await settle();
-  expect(w.tabs!.followed()).toBe(null);
-  expect(session['mirattic.followedTab']).toBe('stopped');
+  expect(w.tabs!.followed()).toBe(1);
+  expect(session['mirattic.followedTab']).toEqual({ tabId: 1, windowId: 2 });
 });
 
-it('fixed: a saved tab found in another window after a restart (moved while no worker ran): stopped', async () => {
+it('fixed: a saved tab found in another window after a restart (moved while no worker ran): still followed', async () => {
   delete stored['mirattic.followActive'];
   tabs = [YT(1), YT(2, true)];
   const w = await watch();
@@ -1198,8 +1199,8 @@ it('fixed: a saved tab found in another window after a restart (moved while no w
   tabs[0] = { ...tabs[0]!, windowId: 2 };
   connects = [];
   const again = await watch();
-  expect(again.tabs!.followed()).toBe(null);
-  expect(connects).toEqual([]);
+  await settle();
+  expect(again.tabs!.followed()).toBe(1);
 });
 
 describe('watch: the room type picked (decision 93)', () => {

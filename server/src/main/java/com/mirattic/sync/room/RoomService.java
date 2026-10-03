@@ -430,6 +430,7 @@ public class RoomService {
 
 	/** A content change's new state and its "content" line. */
 	/** `type`: the room's new type when the video's site changed it (decision 93), else null. */
+	/** `state` null: the same video, only its line retitled. */
 	public record Changed(PlaybackState state, ChatMessage.View log, MediaProvider type) {
 	}
 
@@ -655,14 +656,25 @@ public class RoomService {
 
 	/**
 	 * The host moved on to another content (e.g. the next video): the room restarts paused at 0 on it.
-	 * @return the new playback state and its "content" log line, or null if it is the same video with new metadata
+	 * @return the new playback state and its "content" log line; for the same video with a new title, no state and
+	 *         its "content" line retitled; null if nothing to tell
 	 */
 	@Transactional
 	public Changed changeContent(String me, String roomId, RoomContent content) {
 		requireKnownId(content);
 		Room room = lockAsHost(me, roomId);
+		RoomContent before = room.content();
 		if (!room.changeContent(me, content, System.currentTimeMillis())) {
-			return null;
+			// The title read late (YouTube's tab says "YouTube" until the page catches up): the line follows, if it is
+			// still this video's (the room's last "content" line, saying the title it had).
+			String was = before == null ? null : before.title();
+			if (was == null || was.equals(content.title())) {
+				return null;
+			}
+			return messages.findFirstByRoomIdAndKindOrderBySeqDesc(roomId, "content")
+					.filter(m -> !m.view().deleted() && was.equals(m.view().text()))
+					.map(m -> new Changed(null, m.retitle(content.title()).view(), null))
+					.orElse(null);
 		}
 		MediaProvider type = room.setType(content.provider()) ? content.provider() : null; // a video of another site
 		if (type != null) {

@@ -90,17 +90,13 @@ export async function watch(opts: {
   /** Whether a tab switch may change the followed tab: following the active one, or none followed yet. */
   // Fixed: the chosen tab stays even when its video is gone (left the site, player dead); only the user choosing
   // another, the room's video opened in a tab (take), or the tab closing changes it.
-  const switching = () => autoNow() || (tabId === null && settling === 0 && !stopped);
-  /** The chosen tab moved to another window: recognition stopped until the user chooses a tab (or opens a room video). */
-  let stopped = false;
+  const switching = () => autoNow() || (tabId === null && settling === 0);
   /**
    * The fixed tab being settled — a restarted worker restoring its saved one, or a closed one's replacement picked
    * from its own window: tab switches (activations, loads elsewhere) don't take its place meanwhile.
    */
   let settling = 1; // the restore below (ended once by endRestore, whatever mode this starts in)
   let restored = false;
-  /** Tabs moved to another window while the saved fixed tab is being read: if it is one, recognition stops. */
-  const movedWhileRestoring = new Set<number>();
   /** Sites turned off while the saved fixed tab is being read: a saved tab on one of them isn't restored. */
   const offWhileRestoring = new Set<MediaProvider>();
   const endRestore = () => {
@@ -271,7 +267,6 @@ export async function watch(opts: {
   };
   /** The followed tab from now on: the previous one's player is let go at once, and the choice kept for a restart. */
   const select = (id: number, inWindow: number | undefined) => {
-    stopped = false;
     if (id === tabId) {
       if (inWindow !== undefined && inWindow !== tabWindow) {
         tabWindow = inWindow;
@@ -518,23 +513,18 @@ export async function watch(opts: {
   browser.tabs.onAttached.addListener((id, attached) => {
     changedTab(id);
     void listTabs();
-    if (!restored) movedWhileRestoring.add(id);
     if (id !== tabId) return;
     tabWindow = attached.newWindowId;
-    if (detached) return keep(); // every window's tabs count alike: still followed
-    // The followed tab moved to another window: a chosen one stops being recognized (until the user chooses again);
-    // following the active tab, it's that window's tab only while it stays there.
-    if (!autoNow() || attached.newWindowId !== windowId) {
-      stopped = !autoNow();
-      binding++;
-      tabId = null;
-      tabProvider = null;
-      adapter.disconnect();
-      // Stopped is kept for a restart too (a restarted worker mustn't pick a tab by itself).
-      void browser.storage.session.set({ [followedTabEntry]: stopped ? 'stopped' : null });
-      changed();
-      if (autoNow()) void pick();
-    }
+    // Detached, or a chosen tab: still followed in its new window (pulled out into one of its own, or into another).
+    // Following the active tab: it's that window's tab only while it stays there.
+    if (detached || !autoNow() || attached.newWindowId === windowId) return keep();
+    binding++;
+    tabId = null;
+    tabProvider = null;
+    adapter.disconnect();
+    void browser.storage.session.set({ [followedTabEntry]: null });
+    changed();
+    void pick();
   });
   // Tabs reordered: the list follows the tab strip's order.
   browser.tabs.onMoved.addListener(() => void listTabs());
@@ -556,20 +546,13 @@ export async function watch(opts: {
   // before a service worker restart stays chosen.
   const before = choosing; // a choice or a room video opened while these are read is newer than the saved tab
   const last = autoNow() ? undefined : (await browser.storage.session.get(followedTabEntry))[followedTabEntry];
-  // { tabId, windowId } (a bare id from before windows were kept, or 'stopped')
+  // { tabId, windowId } (a bare id from before windows were kept; 'stopped' from an older version: none)
   const saved = typeof last === 'number' ? { tabId: last, windowId: undefined }
     : last && typeof last === 'object' && typeof (last as { tabId?: unknown }).tabId === 'number'
       ? (last as { tabId: number; windowId?: number }) : null;
   const lastTab = saved ? await tabNow(saved.tabId) : null;
-  // Moved to another window while this was read, or while no worker ran (its window isn't the saved one).
-  const movedAway = !!saved && (movedWhileRestoring.has(saved.tabId)
-    || (!!lastTab && saved.windowId !== undefined && lastTab.windowId !== saved.windowId));
-  if (choosing === before && (last === 'stopped' || movedAway)) {
-    // Recognition stopped before the restart, or the saved tab moved to another window while it was read: stopped
-    // (and kept so), until a choice.
-    stopped = true;
-    if (movedAway) void browser.storage.session.set({ [followedTabEntry]: 'stopped' });
-  } else if (choosing === before) {
+  // In whatever window it is now (moved while this was read, or while no worker ran): still the chosen one.
+  if (choosing === before) {
     if (lastTab?.id !== undefined && isVideoTab(lastTab.url)) await bind(lastTab.id, lastTab.url, lastTab.windowId);
     // Not on a video page now (its video died, or it went to a site that's off): kept, bound once it is — unless its
     // site was turned off while this was read (the user let it go): another takes over.
@@ -627,7 +610,6 @@ export async function watch(opts: {
       followed: () => tabId,
       auto: () => followActive,
       choose: async (id, chosenIn, opts) => {
-        stopped = false;
         // The panel's window, for its active tab and fallbacks. Detached: `chosenIn` is the tab's own window — the
         // focused browser window stays the one followed (back to the active tab: its, not the chosen tab's window's).
         if (chosenIn !== undefined && !detached) windowId = chosenIn;
@@ -698,10 +680,7 @@ export async function watch(opts: {
         }
         inRoom = room.inRoom;
         // Out of the room: back to the active tab at once (the home screen shows what is watched now).
-        if (!inRoom) {
-          stopped = false;
-          void pick();
-        } else if (tabId === null && site !== undefined && switching()) void pick(); // into one, its site known: a tab of it
+        if (!inRoom) void pick(); else if (tabId === null && site !== undefined && switching()) void pick(); // into one, its site known: a tab of it
       },
       openSite: async (site, chosenIn) => {
         // The room's type picked (decision 93): that site's tab of the panel's window is followed (fixed, even if
@@ -709,7 +688,6 @@ export async function watch(opts: {
         // and now, not from the panel's list (a site just turned on may not be listed yet).
         if (!(site in SITE_HOME)) return;
         const mine = ++intent;
-        stopped = false;
         if (chosenIn !== undefined) windowId = chosenIn;
         followActive = false;
         void browser.storage.local.set({ [followActiveSetting]: false });

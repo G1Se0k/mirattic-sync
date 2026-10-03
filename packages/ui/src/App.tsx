@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Me } from "@mirattic/types";
 import { api } from "./session";
 import { Login } from "./Login";
@@ -34,6 +34,14 @@ function App() {
     return () => window.removeEventListener("focus", again);
   }, [signedIn]);
 
+  // The same function across renders: Home's socket depends on it, and a re-read (above) must not restart that.
+  const signOut = useCallback(async () => {
+    meVersion.current++; // a re-read under way isn't shown over signing out
+    await api.logout();
+    meVersion.current++;
+    setMe(null);
+  }, []);
+
   // The site prompt is mounted once, beside every screen (signed in or not): a dismissed arrival stays dismissed.
   return (
     <>
@@ -46,11 +54,7 @@ function App() {
         <Home
           me={me}
           onMeChange={showMe}
-          onSignedOut={async () => {
-            meVersion.current++; // a re-read under way isn't shown over signing out
-            await api.logout();
-            showMe(null);
-          }}
+          onSignedOut={signOut}
         />
       )}
     </>

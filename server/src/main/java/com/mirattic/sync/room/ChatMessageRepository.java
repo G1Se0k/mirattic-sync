@@ -19,6 +19,8 @@ interface ChatMessageRepository extends JpaRepository<ChatMessage, String> {
 
 	Optional<ChatMessage> findByIdAndRoomId(String id, String roomId);
 
+	Optional<ChatMessage> findFirstByRoomIdAndKindOrderBySeqDesc(String roomId, String kind);
+
 	long countByRoomIdAndUserIdNotAndKindIsNullAndDeletedFalseAndSeqGreaterThan(String roomId, String userId, long seq);
 
 	@Query("select coalesce(max(m.seq), 0) from ChatMessage m where m.roomId = :roomId")

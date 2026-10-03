@@ -7,6 +7,7 @@ import com.mirattic.sync.IntegrationTest;
 import com.mirattic.sync.presence.MediaProvider;
 import com.mirattic.sync.ws.RoomLog;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -496,6 +497,13 @@ class RoomFlowTest extends IntegrationTest {
 		JsonNode content = friendWs.nextOfType("chat:log").path("payload");
 		assertThat(content.path("kind").asString()).isEqualTo("content");
 		assertThat(content.path("text").asString()).isEqualTo("Next one");
+		// Its title read late (YouTube's tab said "YouTube" first): the same line, retitled, no new one.
+		hostWs.send(event("playback:content-change", roomId,
+				"{\"provider\":\"youtube\",\"contentId\":\"abcdefghijk\",\"title\":\"Next one, the real title\"}"));
+		JsonNode retitled = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(retitled.path("id").asString()).isEqualTo(content.path("id").asString());
+		assertThat(retitled.path("text").asString()).isEqualTo("Next one, the real title");
+		assertThat(Collections.frequency(loggedKinds(host, roomId), "content")).isEqualTo(1);
 		// Dragging the seek bar: pause, move, play within the hold is one "seek" line, no "pause" / "play".
 		hostWs.send(event("playback:play", roomId, command.formatted(0, System.currentTimeMillis())));
 		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("play");
@@ -542,12 +550,27 @@ class RoomFlowTest extends IntegrationTest {
 		JsonNode scrubbed = friendWs.nextOfType("chat:log").path("payload");
 		assertThat(scrubbed.path("kind").asString()).isEqualTo("seek");
 		assertThat(scrubbed.path("mediaPositionMs").asLong()).isEqualTo(50_000);
-		// let go and still paused is a pause and a move, at once.
+		// Let go a moment before the page plays again (YouTube reports the release while still paused): one "seek" line,
+		Thread.sleep(1_000);
+		long tr = System.currentTimeMillis();
+		hostWs.send(event("playback:pause", roomId, flagged.formatted(50_100, tr, true)));
+		hostWs.send(event("playback:seek", roomId, flagged.formatted(60_000, tr, true)));
+		hostWs.send(event("playback:seek", roomId, flagged.formatted(60_000, tr, false)));
+		hostWs.send(event("playback:play", roomId, flagged.formatted(60_000, System.currentTimeMillis(), false)));
+		JsonNode released = friendWs.nextOfType("chat:log").path("payload");
+		assertThat(released.path("kind").asString()).isEqualTo("seek");
+		assertThat(released.path("mediaPositionMs").asLong()).isEqualTo(60_000);
+		// let go and still paused past the hold time is a pause and a move.
 		Thread.sleep(1_000);
 		long tq = System.currentTimeMillis();
-		hostWs.send(event("playback:pause", roomId, flagged.formatted(50_100, tq, true)));
+		hostWs.send(event("playback:pause", roomId, flagged.formatted(60_100, tq, true)));
 		hostWs.send(event("playback:seek", roomId, flagged.formatted(70_000, tq, true)));
 		hostWs.send(event("playback:seek", roomId, flagged.formatted(70_000, tq, false)));
+		int pauses = Collections.frequency(loggedKinds(host, roomId), "pause");
+		for (int i = 0; i < 100 && Collections.frequency(loggedKinds(host, roomId), "pause") == pauses; i++) {
+			roomLog.flushHeld(System.currentTimeMillis() + 2_000); // past the hold time, once the release has landed
+			Thread.sleep(20);
+		}
 		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
 		JsonNode moved = friendWs.nextOfType("chat:log").path("payload");
 		assertThat(moved.path("kind").asString()).isEqualTo("seek");
@@ -586,7 +609,7 @@ class RoomFlowTest extends IntegrationTest {
 		List<String> kinds = new ArrayList<>();
 		history.forEach(m -> kinds.add(m.path("kind").asString()));
 		assertThat(kinds).containsExactly("join", "join", "play", "seek", "seek", "pause", "seek", "content", "play", "seek", "seek",
-				"seek", "pause", "play", "seek", "pause", "seek", "play", "pause", "seek", "leave");
+				"seek", "pause", "play", "seek", "seek", "pause", "seek", "play", "pause", "seek", "leave");
 		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/messages/" + play.path("id").asString(), host.accessToken(), null)
 				.andExpect(status().isNotFound());
 		assertThat(myRoom(friend).path("unread").asLong()).isZero();

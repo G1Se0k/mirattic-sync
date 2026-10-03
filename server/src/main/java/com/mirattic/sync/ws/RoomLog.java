@@ -16,8 +16,8 @@ import org.springframework.stereotype.Component;
  * The host's playback: play / pause when the state flips, a seek when the position jumps. Dragging the seek bar
  * pauses, moves and plays again, so that pause is held: a play after it makes one "seek" line (if it moved)
  * instead of "pause" + "play". Where the host's page says whether the seek bar is held (`scrubbing`, decision 86:
- * YouTube), a pause without it is written at once and one with it is held until the drag ends; elsewhere every
- * pause is held a moment.
+ * YouTube), a pause without it is written at once and one with it is held until the drag ends, then a moment more
+ * (the page lets go just before it plays again); elsewhere every pause is held a moment.
  * ponytail: in memory, single instance; after a server restart everyone reconnecting is logged as joining again.
  * Lines are written under one lock (a few per minute), so a leave can't land after a newer join.
  */
@@ -51,7 +51,7 @@ public class RoomLog {
 		long lastAt;
 		boolean moved;
 		/** Held because the host's page says the seek bar is held: waits for the drag to end, not the hold time. */
-		final boolean scrubbing;
+		boolean scrubbing;
 		/** When the hold started: a drag's hold ends SCRUB_HOLD_MS after it, however long the moves go on. */
 		final long since;
 
@@ -163,8 +163,10 @@ public class RoomLog {
 				if (h.moved) {
 					post(roomId, rooms.log(roomId, me, "seek", "", a.landed()));
 				}
-			} else if (Boolean.FALSE.equals(scrubbing)) { // the bar let go and still paused: a real pause (+ move)
-				writeHeld(roomId, held.remove(roomId));
+			} else if (Boolean.FALSE.equals(scrubbing)) {
+				// The bar let go, still paused: YouTube plays again a moment later, so held the hold time from now
+				// like any pause — a real pause (+ move) is written once it passes.
+				h.scrubbing = false;
 			}
 			return;
 		}
