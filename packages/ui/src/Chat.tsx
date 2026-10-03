@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Socket, SocketStatus } from "@mirattic/client";
 import type { ChatDeleted, ChatMessage, RoomMemberView, ServerEvent } from "@mirattic/types";
 import { api } from "./session";
@@ -32,6 +32,8 @@ const STAMP_WAIT_MS = 5000;
 
 export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, videoMs }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /** What the chat shows: the host's play / pause / seek lines are kept (history, server) but not shown. */
+  const shownLines = useMemo(() => messages.filter(visible), [messages]);
   const [text, setText] = useState("");
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -93,8 +95,8 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   useLayoutEffect(() => {
     const el = list.current;
     const prev = shown.current;
-    const first = messages[0]?.id;
-    const last = messages[messages.length - 1];
+    const first = shownLines[0]?.id;
+    const last = shownLines[shownLines.length - 1];
     if (el) {
       if (first !== prev.first && last?.id === prev.last) el.scrollTop += el.scrollHeight - prev.height;
       else if (last?.id !== prev.last) {
@@ -103,7 +105,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
       }
     }
     shown.current = { first, last: last?.id, height: el?.scrollHeight ?? 0 };
-  }, [messages, meId]);
+  }, [shownLines, meId]);
 
   function onScroll() {
     const el = list.current!;
@@ -111,16 +113,27 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     if (atBottom.current) setUnseen(false);
   }
 
+  // Pages of hidden lines only (a long playback stretch): the older ones are read until a shown line (or the start).
+  // A failed read stops it (no retry loop); "이전 메시지" still retries.
+  const autoOlderFailed = useRef(false);
+  useEffect(() => {
+    if (shownLines.length === 0 && messages.length > 0 && hasOlder && !loadingOlder && !autoOlderFailed.current) {
+      void loadOlder().then((ok) => void (autoOlderFailed.current = !ok));
+    }
+  }, [shownLines, messages, hasOlder, loadingOlder]);
+
+  /** @returns whether the page was read. */
   async function loadOlder() {
     const oldest = messages[0];
-    if (!oldest) return;
+    if (!oldest) return false;
     setLoadingOlder(true);
     try {
       const page = await api.messages(roomId, oldest.id);
       setMessages((list) => tombstone(merge(list, page), deleted.current));
       setHasOlder(page.length === PAGE);
+      return true;
     } catch {
-      // stays offered: the next click retries
+      return false; // stays offered: the next click retries
     } finally {
       setLoadingOlder(false);
     }
@@ -212,8 +225,8 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
             </button>
           </li>
         )}
-        {messages.length === 0 && <li className="muted">아직 메시지가 없습니다.</li>}
-        {messages.map((item) =>
+        {shownLines.length === 0 && !hasOlder && <li className="muted">아직 메시지가 없습니다.</li>}
+        {shownLines.map((item) =>
           item.kind ? (
             <li key={item.id} className={`log${fresh.has(item.id) ? " fresh" : ""}`}>
               {item.kind === "stamp" && item.mediaPositionMs !== undefined ? (
@@ -325,6 +338,11 @@ export function tombstone(messages: ChatMessage[], deleted: ChatDeleted[]) {
   return messages
     .filter((m) => !deleted.some((d) => d.userId === m.userId))
     .map((m) => (deleted.some((d) => d.id === m.id) && !m.deleted ? { ...m, text: "", mediaPositionMs: undefined, deleted: true } : m));
+}
+
+/** Shown in the chat: everything but the host's playback lines (play / pause / seek), which are still logged. */
+export function visible(m: ChatMessage) {
+  return m.kind !== "play" && m.kind !== "pause" && m.kind !== "seek";
 }
 
 /** A room log line as shown (decision 78). */

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ChatMessage } from "@mirattic/types";
-import { logText, merge, receive, reconcile, tombstone, without } from "./Chat";
+import { logText, merge, receive, reconcile, tombstone, visible, without } from "./Chat";
 import { parseClock } from "./format";
 
 const msg = (id: string, createdAt: number): ChatMessage => ({ id, roomId: "r", userId: "u", text: id, createdAt });
@@ -69,4 +69,9 @@ it("a stamp's time as typed", () => {
   expect(parseClock(" 1:02:03 ")).toBe(3_723_000);
   expect(parseClock("0:00")).toBe(0);
   for (const bad of ["", "3", "3:7", "3:60", "1:60:00", "a:bc", "-1:00", "1:02:03:04"]) expect(parseClock(bad)).toBeNull();
+});
+
+it("the host's playback lines aren't shown; the rest are", () => {
+  for (const kind of ["play", "pause", "seek"] as const) expect(visible({ ...msg("p", 1), kind })).toBe(false);
+  for (const kind of [null, "join", "content", "stamp"] as const) expect(visible({ ...msg("o", 1), kind })).toBe(true);
 });
