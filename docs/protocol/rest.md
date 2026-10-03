@@ -31,7 +31,7 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 |---|---|---|
 | GET | `/api/me` | `Me` `{ id(UID), email?, displayName, friendCode, presenceVisibility, positionVisibility }`. `email`은 Mirattic Auth UserInfo에서 매번 읽음(실패하면 없음) |
 | POST | `/api/me/friend-code` | 친구 코드 재발급 (이전 코드는 즉시 무효) → `Me`. UI에서는 뺐음 (2026-09-29 사용자 요청) |
-| PUT | `/api/me/privacy` | `{ presenceVisibility, positionVisibility }` → `Me` |
+| PUT | `/api/me/privacy` | `{ presenceVisibility, positionVisibility }` → `Me` (`positionVisibility`는 저장만 되고 쓰이지 않음, 결정 98) |
 | DELETE | `/api/me` | `{ code, verifier }` → 204. Sync 프로필과 데이터 삭제 (Phase 9, 결정 82). `reauth=true` 로그인의 handoff여야 하고 같은 UID, `auth_time` 5분 이내가 아니면 **403** (401이면 클라이언트가 refresh 후 재시도하므로). 그 재인증 로그인은 Auth에서 바로 폐기. Mirattic 계정은 Auth에 남음. IP당 분당 제한은 `/api/auth/**`와 같음 (429). 삭제 후: 호스트인 방은 닫히고 나머지 방에서는 빠짐 (멤버들에게 `room:update`, 남은 방에는 `chat:delete { userId }`), 친구·요청 상대에게 `friend:update`, 내 WebSocket 연결은 모두 닫힘, 기존 access token은 즉시 401 |
 
 삭제 이후 access token은 만료 전이라도 서버가 계정 존재를 확인해 401로 거절한다 (요청마다 기본 키 조회 한 번).
@@ -88,6 +88,7 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 | Method | Path | 설명 |
 |---|---|---|
 | POST | `/api/reports` | `{ messageId \| userId, reason, detail? }` → 204. `messageId`와 `userId` 중 **하나만** (아니면 400). `reason` = `SPAM` · `HARASSMENT` · `INAPPROPRIATE` · `OTHER`, `detail` ≤ 500자 |
+| POST | `/api/feedback` | `{ kind: FEEDBACK\|BUG, text(1–2000, 앞뒤 공백 제거) }` → 204. 하루 10건(사용자 행 잠금으로 직렬화), 넘으면 429. 운영자가 DB `feedback`에서 확인, 계정 삭제 시 함께 삭제 (결정 98) |
 
 - 신고할 수 있는 것은 신고자가 볼 수 있던 것만: 내가 멤버인 방의 다른 사람 메시지, 또는 친구 · 같은 방 멤버 · 내가 차단한 사용자. 그 밖은 404 (사용자 ID 탐색 방지), 나 자신은 400
 - 메시지 신고는 방 ID와 내용을 복사해 저장 (원래 메시지가 지워져도 남음). 같은 메시지를 다시 신고하면 저장하지 않고 204 (한도에 닿아 있어도)

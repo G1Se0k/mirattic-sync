@@ -289,6 +289,14 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   };
 
   /** Leaving (or closing, as the host) from the list; the extension stops syncing it if it is the active one. */
+  async function turnOff() {
+    if (await asker.ask("동기화를 끌까요?", {
+      body: "서버 연결을 끊어 친구에게 오프라인으로 보이고, 참여 중인 방에서 나갑니다(내가 방장인 방은 닫힙니다). 패널을 다시 열면 켜집니다.",
+      ok: "끄기",
+      danger: true,
+    })) platform.turnOff?.();
+  }
+
   async function leaveRoom(id: string) {
     const hosting = rooms.find((r) => r.id === id)?.members.some((m) => m.user.id === me.id && m.role === "HOST");
     const yes = hosting
@@ -586,6 +594,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <span className="wordmark grow">Mirattic <span>Sync</span></span>
         <span className={`dot ${status === "open" ? "on" : ""}`} title={status === "open" ? "연결됨" : "연결 중"} />
         <PanelWindowButton />
+        {platform.turnOff && <IconButton icon="power" label="동기화 끄기" onClick={() => void turnOff()} />}
         <IconButton icon="settings" label="설정" onClick={() => setScreen("settings")} />
       </header>
       {incoming}

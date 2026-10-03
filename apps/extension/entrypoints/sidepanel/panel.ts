@@ -207,7 +207,7 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
 
   send({ op: 'hello', windowId, openedAt, detached: DETACHED });
   await hello;
-  /** Detached: the browser window focused last, where "패널로 돌아가기" opens the side panel (within the click). */
+  /** Detached: the browser window focused last — "패널로 돌아가기" opens the side panel there without a followed tab's. */
   let browserWindow: number | undefined;
   if (DETACHED) {
     void browser.windows.getLastFocused({ windowTypes: ['normal'] }).then((w) => (browserWindow ??= w.id), () => {});
@@ -332,16 +332,19 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       },
     },
     open: (url, newTab) => send({ op: 'open', url, newTab }),
+    turnOff: () => send({ op: 'off' }),
     panelWindow: {
       detached: DETACHED,
       toggle: () => {
         // Out: a popup window with this page; its hello closes this side panel (one panel, decision 94). Back: the side
-        // panel opened in the browser window focused last (within this click), whose hello closes this window.
+        // panel opened (within this click) in the window of the tab followed, else the browser window focused last;
+        // its hello closes this window.
         if (!DETACHED) {
           void browser.windows.create({ url: browser.runtime.getURL('/sidepanel.html?detached'), type: 'popup', ...DETACHED_SIZE });
-        } else if (browserWindow !== undefined) {
-          void browser.sidePanel.open({ windowId: browserWindow }).catch(() => {});
+          return;
         }
+        const there = shared.tabs.find((t) => t.id === shared.followedTab)?.windowId ?? browserWindow;
+        if (there !== undefined) void browser.sidePanel.open({ windowId: there }).catch(() => {});
       },
     },
     textSize: {

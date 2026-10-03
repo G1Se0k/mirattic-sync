@@ -59,8 +59,8 @@ public class PresenceService {
 		if (current == null || owner.getPresenceVisibility() != Visibility.FRIENDS) {
 			return new PresenceView(PresenceView.Status.ONLINE, null);
 		}
-		MediaPresence shown = owner.getPositionVisibility() == Visibility.FRIENDS ? current : current.withoutPosition();
-		return new PresenceView(PresenceView.Status.WATCHING, shown);
+		// The playback position never goes to friends (decision 98: its setting is gone; room members get the room's).
+		return new PresenceView(PresenceView.Status.WATCHING, current.withoutPosition());
 	}
 
 	private void broadcast(String userId) {

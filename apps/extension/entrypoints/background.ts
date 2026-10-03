@@ -26,6 +26,9 @@ const CLOSED_ROOMS_ITEM = 'mirattic.closedRooms';
 // storage.local: another device took over (decision 89); no connecting (worker or browser restart included) until
 // the user presses "여기서 계속" here.
 const REPLACED_FLAG = 'mirattic.replaced';
+// storage.local: turned off ("동기화 끄기", decision 98): no session starts (worker or browser restart included) until
+// a panel opens again.
+const OFF_FLAG = 'mirattic.off';
 const PROVIDER_ORIGINS = ['https://www.youtube.com/', 'https://www.netflix.com/', 'https://laftel.net/'];
 const PROVIDER_TABS = PROVIDER_ORIGINS.map((o) => `${o}*`);
 /** `until`: when it stops counting. */
@@ -852,12 +855,17 @@ export default defineBackground(() => {
   }
 
   function signOut() {
-    session++;
     alertUntil.clear(); // another account may sign in next (shared with the panel by closeRoom below)
     typeNotices = []; // the same (and a check still running is stale)
     typeApplied = ++typeChecks;
     void setClosedRooms([]).catch(() => {}); // the same: their notices aren't the next account's
     void markReplaced(false); // the next sign-in connects
+    stop();
+  }
+
+  /** The session stopped here (signed out, or turned off): no room, no socket, nothing alerted. */
+  function stop() {
+    session++;
     clearAlerts();
     panelOffers.clear(); // not shown again to the next account's pages (a redraw asks for them)
     closeRoom();
@@ -869,6 +877,18 @@ export default defineBackground(() => {
     platform?.connected?.(null);
     status = 'closed';
     broadcast({ kind: 'status', status });
+  }
+
+  /**
+   * "동기화 끄기" (decision 98): out of the room (a host's closes, as "방 닫기"), offline (friends see it), every panel
+   * closed. Signed in still: the next panel opening turns it on (its sign-in check starts the session again).
+   */
+  async function turnOff() {
+    await browser.storage.local.set({ [OFF_FLAG]: true }).catch(() => {});
+    const roomId = room?.state.roomId;
+    if (roomId && meId) await api.leaveRoom(roomId).catch(() => {}); // gone already, offline: the host-left rule closes it
+    stop();
+    broadcast({ kind: 'close' });
   }
 
   /** The panel's API calls, run by the one client here. Sign-in and sign-out also start or stop the session. */
@@ -1060,6 +1080,8 @@ export default defineBackground(() => {
         const asArrived = panelAllowed.get(port) ?? Promise.resolve(true); // whether it was the panel as it chose
         return inTabTurn(() => chooseTab(port, m, asArrived));
       }
+      // A panel opening turns it on again (decision 98): its sign-in check (`restore`) starts the session.
+      if (m.op === 'hello') void browser.storage.local.remove(OFF_FLAG).catch(() => {});
       if (m.op === 'hello' && typeof m.openedAt === 'number') {
         // The side panel lives in one window, the latest opened (decision 94): by when each panel opened (not by when
         // its hello arrives, nor whether it is a reconnect), kept across worker restarts. An older one closes. One
@@ -1146,6 +1168,9 @@ export default defineBackground(() => {
             if (await (panelAllowed.get(port) ?? true)) watcher?.tabs?.openSite(m.site, m.windowId); // still the panel
           }
           break;
+        case 'off':
+          await turnOff();
+          break;
         case 'open':
           console.info('[mirattic] opening from the panel', m.url);
           platform?.open(m.url, m.newTab);
@@ -1174,6 +1199,8 @@ export default defineBackground(() => {
       void setClosedRooms([...kept.filter((c) => typeof c?.userId === 'string'), ...closedRooms]).catch(() => {});
     }
     if (!(await hasConsent())) return;
+    // Turned off: nothing until a panel opens (its own sign-in check then) — unless one already did meanwhile.
+    if ((await browser.storage.local.get(OFF_FLAG).catch(() => ({})) as Record<string, unknown>)[OFF_FLAG] === true) return;
     if (await api.restore().catch(() => false)) await signedIn().catch(() => {});
   })();
 });

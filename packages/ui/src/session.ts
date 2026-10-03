@@ -114,6 +114,8 @@ export type Platform = {
    * count alike. `toggle`: out to its own window, or back to the side panel. Call from a click.
    */
   panelWindow?: { detached: boolean; toggle(): void };
+  /** "동기화 끄기" (the extension): out of the room, offline, the panel closed — on again when the panel opens. */
+  turnOff?(): void;
 };
 
 /** The text sizes Settings offers, in percent. */

@@ -42,7 +42,7 @@ Extension은 사용자가 동의한 뒤에만 `presence:update`에 시청 중인
 - 오프라인 → `{ status: "OFFLINE" }`
 - 온라인, 시청 안 함 또는 `presenceVisibility != FRIENDS` → `{ status: "ONLINE" }`
 - 시청 중이고 `presenceVisibility == FRIENDS` → `{ status: "WATCHING", media }`
-  - `positionVisibility != FRIENDS`면 `media.positionMs` 제거 (기본값 ROOM_ONLY)
+  - `media.positionMs`는 항상 제거 (결정 98: 재생 위치는 친구에게 보이지 않음, `positionVisibility`는 무시)
 - 차단하면 친구 관계가 삭제되므로 presence가 양방향 모두 끊긴다
 
 ### MediaPresence 검증 (서버)

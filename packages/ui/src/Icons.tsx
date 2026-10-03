@@ -57,6 +57,7 @@ const PATHS = {
     </>
   ),
   refresh: <path d="M21 4v6h-6M3 20v-6h6M5 9a8 8 0 0 1 13.4-3.4L21 10M3 14l2.6 4.4A8 8 0 0 0 19 15" />,
+  power: <path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.8 0" />,
   dock: <path d="M3 4h18v16H3zM15 4v16" />,
   external: <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />,
   pause: <path d="M8 5v14M16 5v14" />,

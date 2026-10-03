@@ -1612,6 +1612,9 @@ describe('watch: the panel detached into its own window', () => {
     w.detach();
     await settle();
     await w.tabs!.choose(5, 2);
+    await settle();
+    expect(activated).toEqual([5]); // the chosen tab shown, in front, as from a side panel
+    expect(focusedWindows).toEqual([2]);
     tabs[1] = { ...tabs[1]!, windowId: 1 };
     await fire('tabs.onAttached', 5, { newWindowId: 1 });
     expect(w.tabs!.followed()).toBe(5);
@@ -1622,16 +1625,20 @@ describe('watch: the panel detached into its own window', () => {
     expect(w.tabs!.followed()).toBe(6);
   });
 
-  it('a tab chosen in another window: nothing brought forward, and back to automatic follows the focused window', async () => {
+  it('a tab chosen in another window is brought forward; back to automatic follows the focused window', async () => {
     delete stored['mirattic.followActive'];
-    tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }];
+    tabs = [YT(1, true), { ...YT(5), windowId: 2 }, { ...YT(6, true), windowId: 2 }];
     const w = await watch();
     w.detach();
     await settle();
     await w.tabs!.choose(5, 2); // from the list, while window 1 is the one in front
+    await settle();
     expect(w.tabs!.followed()).toBe(5);
-    expect(activated).toEqual([]);
-    expect(focusedWindows).toEqual([]);
+    expect(activated).toEqual([5]);
+    expect(focusedWindows).toEqual([2]);
+    // The user goes back to window 1 (the focus change here is the browser's, not a choice): automatic follows it.
+    lastFocused = 1;
+    await fire('windows.onFocusChanged', 1);
     await w.tabs!.choose(null);
     for (let i = 0; i < 3; i++) await settle();
     expect(w.tabs!.followed()).toBe(1); // window 1's active tab, not window 2's

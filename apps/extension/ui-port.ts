@@ -48,6 +48,8 @@ export type FromPanel =
   | { op: 'type:answer'; roomId: string; version: number; leave: boolean; always?: boolean }
   /** The room's type picked: follow that site's tab of this window, or open the site. */
   | { op: 'site'; site: MediaProvider; windowId?: number }
+  /** "동기화 끄기" (decision 98): out of the room, offline, every panel closed — until a panel opens again. */
+  | { op: 'off' }
   /** The notice of this closed room was shown to this account: not again (every panel). */
   | { op: 'closed:seen'; roomId: string; userId: string };
 

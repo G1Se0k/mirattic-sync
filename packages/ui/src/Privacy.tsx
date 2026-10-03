@@ -7,22 +7,16 @@ import { useAsk } from "./Dialog";
 const LABELS: Record<Visibility, string> = { OFF: "공유 안 함", FRIENDS: "친구", ROOM_ONLY: "같은 방에서만" };
 
 export function Privacy({ me, onChange }: { me: Me; onChange: (me: Me) => void }) {
-  const update = (presence: Visibility, position: Visibility) =>
-    api.updatePrivacy(presence, position).then(onChange, () => {});
+  // The playback position isn't a setting any more (decision 98: never shown to friends); the stored one is sent back.
+  const update = (presence: Visibility) => api.updatePrivacy(presence, me.positionVisibility).then(onChange, () => {});
 
   return (
     <section>
       <h2>공개 범위</h2>
       <label className="row between">
         시청 중인 콘텐츠
-        <select value={me.presenceVisibility} onChange={(e) => update(e.target.value as Visibility, me.positionVisibility)}>
+        <select value={me.presenceVisibility} onChange={(e) => update(e.target.value as Visibility)}>
           {(["FRIENDS", "ROOM_ONLY", "OFF"] as const).map((v) => <option key={v} value={v}>{LABELS[v]}</option>)}
-        </select>
-      </label>
-      <label className="row between">
-        재생 위치
-        <select value={me.positionVisibility} onChange={(e) => update(me.presenceVisibility, e.target.value as Visibility)}>
-          {(["ROOM_ONLY", "FRIENDS", "OFF"] as const).map((v) => <option key={v} value={v}>{LABELS[v]}</option>)}
         </select>
       </label>
     </section>
@@ -37,7 +31,7 @@ export function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
 
   async function remove() {
     if (!(await asker.ask("계정을 삭제할까요?", {
-      body: "친구·차단 목록, 내가 보낸 채팅 메시지, 신고 기록이 모두 삭제되고 내가 만든 방은 닫힙니다. 되돌릴 수 없습니다. 확인을 위해 Mirattic 계정 비밀번호를 한 번 더 입력합니다.",
+      body: "친구·차단 목록, 내가 보낸 채팅 메시지, 신고·피드백 기록이 모두 삭제되고 내가 만든 방은 닫힙니다. 되돌릴 수 없습니다. 확인을 위해 Mirattic 계정 비밀번호를 한 번 더 입력합니다.",
       ok: "계정 삭제",
       danger: true,
     }))) return;

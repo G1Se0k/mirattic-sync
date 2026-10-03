@@ -19,7 +19,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.JsonNode;
 
-/** Phase 9: deleting chat messages, reports, account deletion. */
+/** Phase 9: deleting chat messages, reports, account deletion; feedback (decision 98). */
 class SafetyFlowTest extends IntegrationTest {
 
 	@Autowired
@@ -134,6 +134,23 @@ class SafetyFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void feedbackIsKeptWithinADailyLimit() throws Exception {
+		TestUser me = signup();
+		feedback(me, "{\"kind\":\"BUG\",\"text\":\"  the video stops  \"}").andExpect(status().isNoContent());
+		assertThat(jdbc.queryForMap("select kind, text from feedback where user_id = ?", me.id()))
+				.containsEntry("kind", "BUG").containsEntry("text", "the video stops");
+		feedback(me, "{\"kind\":\"FEEDBACK\",\"text\":\"   \"}").andExpect(status().isBadRequest());
+		feedback(me, "{\"kind\":\"PRAISE\",\"text\":\"hi\"}").andExpect(status().isBadRequest());
+		feedback(me, "{\"kind\":\"FEEDBACK\",\"text\":\"%s\"}".formatted("x".repeat(2001))).andExpect(status().isBadRequest());
+		feedback(null, "{\"kind\":\"FEEDBACK\",\"text\":\"hi\"}").andExpect(status().isUnauthorized());
+		for (int i = 1; i < 10; i++) {
+			feedback(me, "{\"kind\":\"FEEDBACK\",\"text\":\"idea %d\"}".formatted(i)).andExpect(status().isNoContent());
+		}
+		feedback(me, "{\"kind\":\"FEEDBACK\",\"text\":\"one more\"}").andExpect(status().isTooManyRequests());
+		assertThat(jdbc.queryForObject("select count(*) from feedback where user_id = ?", Long.class, me.id())).isEqualTo(10);
+	}
+
+	@Test
 	void deletingAnAccountRemovesItsDataAndTellsTheOthers() throws Exception {
 		TestUser leaving = signup();
 		TestUser friend = signup();
@@ -148,6 +165,7 @@ class SafetyFlowTest extends IntegrationTest {
 		say(leaving, joined, "mine");
 		String kept = say(friend, joined, "theirs");
 		report(host, "{\"userId\":\"%s\",\"reason\":\"SPAM\"}".formatted(leaving.id())).andExpect(status().isNoContent());
+		feedback(leaving, "{\"kind\":\"BUG\",\"text\":\"broken\"}").andExpect(status().isNoContent());
 		report(leaving, "{\"messageId\":\"%s\",\"reason\":\"SPAM\"}".formatted(kept)).andExpect(status().isNoContent());
 		Client leavingWs = connect(leaving);
 		Client friendWs = connect(friend);
@@ -189,7 +207,8 @@ class SafetyFlowTest extends IntegrationTest {
 		assertThat(body(call(HttpMethod.GET, "/api/friends/requests", asked.accessToken(), null))
 				.path("incoming")).isEmpty();
 		for (String table : new String[] {"users where id", "room_members where user_id", "chat_messages where user_id",
-				"friendships where requester_id = ? or addressee_id", "reports where reporter_id = ? or target_user_id"}) {
+				"friendships where requester_id = ? or addressee_id", "reports where reporter_id = ? or target_user_id",
+				"feedback where user_id"}) {
 			Object[] args = table.contains("or") ? new Object[] {leaving.id(), leaving.id()} : new Object[] {leaving.id()};
 			assertThat(jdbc.queryForObject("select count(*) from " + table + " = ?", Long.class, args)).as(table).isZero();
 		}
@@ -312,6 +331,10 @@ class SafetyFlowTest extends IntegrationTest {
 
 	private ResultActions report(TestUser u, String jsonBody) throws Exception {
 		return call(HttpMethod.POST, "/api/reports", u.accessToken(), jsonBody);
+	}
+
+	private ResultActions feedback(TestUser u, String jsonBody) throws Exception {
+		return call(HttpMethod.POST, "/api/feedback", u == null ? null : u.accessToken(), jsonBody);
 	}
 
 	private ResultActions deleteAccount(TestUser u, Handoff proof) throws Exception {

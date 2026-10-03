@@ -26,9 +26,11 @@ class PresenceViewTest {
 	}
 
 	@Test
-	void positionSharedOnlyWhenAllowed() {
+	void positionNeverSharedEvenWhenItWasAllowedBefore() {
+		// Decision 98: the setting is gone; a stored FRIENDS no longer shares it.
 		PresenceView v = PresenceService.view(user(Visibility.FRIENDS, Visibility.FRIENDS), true, watching);
-		assertThat(v.media().positionMs()).isEqualTo(1_432_000L);
+		assertThat(v.media().title()).isEqualTo("Title");
+		assertThat(v.media().positionMs()).isNull();
 	}
 
 	@Test

@@ -665,13 +665,14 @@ export async function watch(opts: {
           if (before && (!isExperimental(before.provider) || on.has(before.provider))) pauseTab(before.tabId);
           // A tab of another window than the panel's: brought forward there (the user sees what they chose).
           // Not if the panel moved to another window meanwhile (the choice still holds; nothing brought forward), nor
-          // for a move (the background brings it forward once the panel is in its window, decision 95), nor detached
-          // (every window's tabs alike: nothing brought forward, decision 97).
-          if (!opts?.move && !detached && chosenIn !== undefined && tab.windowId !== chosenIn && windowId === chosenIn) {
+          // for a move (the background brings it forward once the panel is in its window, decision 95). Detached: any
+          // tab chosen, in whichever window (no window has the panel), while still detached.
+          const wasDetached = detached;
+          if (wasDetached || (!opts?.move && chosenIn !== undefined && tab.windowId !== chosenIn && windowId === chosenIn)) {
             // Its window as activated (it may have moved meanwhile); none if it couldn't be activated.
             // One after another, each only if still the latest choice: an older one finishing late can't leave its tab
             // active over a newer choice.
-            const latest = () => mine === intent && tabId === id && windowId === chosenIn;
+            const latest = () => mine === intent && tabId === id && (wasDetached ? detached : windowId === chosenIn);
             activating = activating.then(async () => {
               if (!latest()) return;
               const t = await browser.tabs.update(id, { active: true }).catch(() => undefined);

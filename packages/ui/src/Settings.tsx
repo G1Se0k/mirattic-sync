@@ -2,6 +2,7 @@ import { useRef, useState, useSyncExternalStore } from "react";
 import type { Me, UserSummary } from "@mirattic/types";
 import { DeleteAccount, Privacy } from "./Privacy";
 import { ExperimentalSettings } from "./Experimental";
+import { FeedbackSection } from "./Feedback";
 import { Avatar, IconButton } from "./Icons";
 import { platform, TEXT_SIZE } from "./session";
 
@@ -53,6 +54,7 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
             </ul>
           )}
         </section>
+        <FeedbackSection />
         <DeleteAccount onDeleted={onSignedOut} />
       </main>
     </>

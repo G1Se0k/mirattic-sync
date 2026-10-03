@@ -245,6 +245,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** A message, or a friend / room member / blocked user. 429 after 20 a day. */
     report: (target: ReportTarget, reason: ReportReason, detail?: string) =>
       authed<void>("POST", "/api/reports", { ...target, reason, detail }),
+    /** Feedback or a bug report (Settings), kept for operators. 429 after 10 a day. */
+    feedback: (kind: "FEEDBACK" | "BUG", text: string) => authed<void>("POST", "/api/feedback", { kind, text }),
     /** My chat notifications for the room. */
     muteRoom: (id: string, muted: boolean) => authed<void>("PUT", `/api/rooms/${id}/members/me/muted`, { muted }),
 
