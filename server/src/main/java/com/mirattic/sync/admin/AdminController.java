@@ -111,7 +111,7 @@ public class AdminController {
 				SELECT r.created_at, r.reason, COALESCE(r.detail, ''), COALESCE(r.message_text, ''),
 				  COALESCE(a.display_name, ''), r.reporter_id, COALESCE(t.display_name, ''), r.target_user_id
 				FROM reports r LEFT JOIN users a ON a.id = r.reporter_id LEFT JOIN users t ON t.id = r.target_user_id
-				ORDER BY r.created_at DESC, r.id LIMIT ? OFFSET ?""", PAGE + 1, Math.max(page, 0) * PAGE));
+				ORDER BY r.created_at DESC, r.id LIMIT ? OFFSET ?""", PAGE + 1, (long) Math.max(page, 0) * PAGE)); // long: a huge page is empty, not an overflow
 	}
 
 	/** Every feedback / bug report from Settings, newest first. 50 per page. */
@@ -126,7 +126,7 @@ public class AdminController {
 				SELECT f.created_at, CASE f.kind WHEN 'BUG' THEN '버그' ELSE '피드백' END, f.text,
 				  COALESCE(u.display_name, ''), f.user_id
 				FROM feedback f LEFT JOIN users u ON u.id = f.user_id
-				ORDER BY f.created_at DESC, f.id LIMIT ? OFFSET ?""", PAGE + 1, Math.max(page, 0) * PAGE));
+				ORDER BY f.created_at DESC, f.id LIMIT ? OFFSET ?""", PAGE + 1, (long) Math.max(page, 0) * PAGE)); // long: a huge page is empty, not an overflow
 	}
 
 	/** One page of a list fetched with PAGE + 1 rows: the extra row only says there is a next page. */

@@ -318,6 +318,9 @@ class SafetyFlowTest extends IntegrationTest {
 		assertThat(feedback.toString()).contains("고장 <b>", "버그", u.id());
 		for (String list : new String[] {"reports", "feedback"}) {
 			call(HttpMethod.GET, "/api/internal/admin/" + list, u.accessToken(), null).andExpect(status().isUnauthorized());
+			// A page far past the end (its offset beyond an int): empty, not an error.
+			assertThat(body(call(HttpMethod.GET, "/api/internal/admin/" + list + "?page=42949673", admin, null)
+					.andExpect(status().isOk())).toString()).contains("\"more\":false");
 		}
 		// And an admin order is not a deletion order.
 		deletionOrder(admin).andExpect(status().isUnauthorized());
