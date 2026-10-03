@@ -103,8 +103,11 @@ public class RoomService {
 	 * this answers) become members at once.
 	 */
 	@Transactional
+	/** `content` null: a room without a video yet (decision 92). */
 	public RoomView create(String me, RoomContent content, Collection<String> inviteIds, Collection<String> joinIds) {
-		requireKnownId(content);
+		if (content != null) {
+			requireKnownId(content);
+		}
 		Set<String> invitees = new HashSet<>(inviteIds);
 		invitees.remove(me);
 		if (invitees.size() > MAX_INVITES) {
@@ -298,7 +301,7 @@ public class RoomService {
 		List<String> everyone = memberIds(roomId);
 		if (self.getRole() == RoomMember.Role.HOST) {
 			rooms.deleteById(roomId);
-			return new Left(withInvited(everyone, room), true, new Ended(everyone, room.content().title()));
+			return new Left(withInvited(everyone, room), true, new Ended(everyone, titleOf(room)));
 		}
 		members.delete(self);
 		return new Left(everyone, false, null);
@@ -321,11 +324,16 @@ public class RoomService {
 		}
 		List<String> everyone = memberIds(roomId);
 		rooms.deleteById(roomId);
-		return new Left(withInvited(everyone, room), true, new Ended(everyone, room.content().title()));
+		return new Left(withInvited(everyone, room), true, new Ended(everyone, titleOf(room)));
 	}
 
-	/** A room closed by its host's leaving: who was in it, and what it was called (for their notice). */
+	/** A room closed by its host's leaving: who was in it, and what it was called (for their notice; "" without a video). */
 	public record Ended(List<String> members, String title) {
+	}
+
+	private static String titleOf(Room room) {
+		RoomContent content = room.content();
+		return content == null ? "" : content.title();
 	}
 
 	/**

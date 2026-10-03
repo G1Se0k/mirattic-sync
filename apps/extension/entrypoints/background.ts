@@ -132,7 +132,9 @@ export default defineBackground(() => {
   const within = <T,>(lookup: Promise<T>, fallback: T) =>
     Promise.race([lookup, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), LOOKUP_MS))]);
 
-  async function whereToWatch(content: RoomContent, hostId: string) {
+  /** The alert's line about the room's video; undefined for a room without one yet (decision 92). */
+  async function whereToWatch(content: RoomContent | null, hostId: string) {
+    if (!content) return undefined;
     let channel: string | undefined;
     if (content.provider === 'youtube') {
       const friends = await within(api.friends().catch(() => []), []);
@@ -154,7 +156,7 @@ export default defineBackground(() => {
     const host = view?.members.find((m) => m.role === 'HOST')?.user;
     const meta = view ? await whereToWatch(view.content, host?.id ?? friendId ?? '') : undefined;
     const ms = until - Date.now();
-    if (ms > 0) alert('answered', roomId, ms, `${host?.displayName ?? '친구'}님이 합류 요청을 수락했습니다`, view?.content.title ?? '', meta);
+    if (ms > 0) alert('answered', roomId, ms, `${host?.displayName ?? '친구'}님이 합류 요청을 수락했습니다`, view?.content?.title ?? '', meta);
   }
 
   /** Settled (answered, cancelled, expired): no longer counted, and off every page, so it can't be answered. */
@@ -246,7 +248,7 @@ export default defineBackground(() => {
     }
   }
 
-  /** As the panel's "같이 보기": into my room for what I watch now, or a new room with it. */
+  /** As the panel's "같이 보기": into my room for what I watch now, or a new room with it (or without a video yet). */
   async function watchTogether(friendId: string) {
     const watching = platform?.nowWatching?.() ?? null;
     const hosted = roomToInvite(await api.rooms(), meId!, room?.state.roomId ?? null, watching);
@@ -254,8 +256,7 @@ export default defineBackground(() => {
       await api.inviteToRoom(hosted.id, [friendId]);
       return hosted.id;
     }
-    if (!watching) throw new Error('nothing to watch together');
-    return (await api.createRoom(watching, [friendId])).id;
+    return (await api.createRoom(watching, [friendId])).id; // decision 92: no video yet is fine
   }
 
   /** All of them, and every toast on the pages (a panel opened, signed out, a restarted worker's leftovers). */
@@ -343,7 +344,7 @@ export default defineBackground(() => {
         if (pendingInvites.get(view.id) !== lookup) return; // settled, or invited again since
         pendingInvites.delete(view.id);
         const ms = until - Date.now();
-        if (ms > 0) alert('invite', view.id, ms, title, view.content.title, meta);
+        if (ms > 0) alert('invite', view.id, ms, title, view.content?.title ?? '아직 고른 영상이 없습니다', meta);
       });
     }
     // Answered by me elsewhere (`room:update` to me), or the room closed: the invitation is settled.

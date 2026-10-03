@@ -221,3 +221,95 @@ it("opens the room's video in a new tab when a member enters without it, never o
   expect(movedOpened).toEqual([]);
   sync.dispose();
 });
+
+it("a room without a video takes the host's first one; the host's player is the site they watch now", async () => {
+  // Decision 92: rooms aren't per site. The host's player follows what they watch (any provider).
+  type Watching = { provider: "mock" | "youtube"; contentId: string; title: string };
+  let watching: Watching | null = null;
+  const sent: ClientEvent[] = [];
+  const player = new MockMediaProvider({ contentId: "c1", title: "Fake", durationMs: 600_000 });
+  const asked: string[] = [];
+  const empty = { ...room("me"), content: null };
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => empty, isGone: () => false,
+    send: (e) => (sent.push(e), true),
+    adapter: (provider) => (asked.push(provider), provider === "mock" ? player : undefined),
+    nowWatching: () => watching, open: () => {}, onChange: () => {},
+  });
+  sync.setConnected(true);
+  await measured({ sync, sent, player, event: (e) => sync.handle({ serverTime: Date.now(), payload: null, type: "", ...e } as ServerEvent) });
+  expect(sync.state.canPlay).toBe(false); // nothing watched, no room video: no player
+
+  watching = { provider: "mock", contentId: "c1", title: "Fake" };
+  sync.refreshPlayer(); // the platform says what is watched changed
+  expect(asked.at(-1)).toBe("mock");
+  await player.play();
+  await vi.advanceTimersByTimeAsync(500);
+  expect(sent.filter((e) => e.type === "playback:content-change").map((e) => e.payload)).toEqual([watching]);
+
+  watching = { provider: "youtube", contentId: "dQw4w9WgXcQ", title: "Other site" };
+  sync.refreshPlayer();
+  expect(asked.at(-1)).toBe("youtube"); // the room's video is still "mock": the host's player is the new site's
+  sync.dispose();
+});
+
+it("the host moving to another site's video with the same id announces it (the site is part of the video)", async () => {
+  const watching = { provider: "youtube" as const, contentId: "c1", title: "Same id, other site" };
+  const sent: ClientEvent[] = [];
+  const mock = new MockMediaProvider({ contentId: "c1", title: "Fake", durationMs: 600_000 });
+  const youtube = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => room("me"), isGone: () => false, // the room's video: mock "c1"
+    send: (e) => (sent.push(e), true), adapter: (p) => (p === "youtube" ? youtube : undefined),
+    nowWatching: () => watching, open: () => {}, onChange: () => {},
+  });
+  sync.setConnected(true);
+  await measured({ sync, sent, player: mock, event: (e) => sync.handle({ serverTime: Date.now(), payload: null, type: "", ...e } as ServerEvent) });
+  await youtube.play();
+  await vi.advanceTimersByTimeAsync(500);
+  expect(sent.filter((e) => e.type === "playback:content-change").map((e) => e.payload)).toEqual([watching]);
+  sync.dispose();
+});
+
+it("drops a member's prompt to follow a video once the room moved on to another (another site too)", async () => {
+  let content: RoomView["content"] = { provider: "youtube", contentId: "aaaaaaaaaaa", title: "First" };
+  const mock = new MockMediaProvider({ contentId: "aaaaaaaaaaa", title: "First", durationMs: 600_000 });
+  const youtube = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => ({ ...room("host"), content }), isGone: () => false,
+    send: () => true, adapter: (p) => (p === "youtube" ? youtube : undefined), nowWatching: () => null, open: () => {},
+    onChange: () => {}, askOnSwitch: () => true,
+  });
+  sync.setConnected(true);
+  await settle();
+  content = { provider: "youtube", contentId: "bbbbbbbbbbb", title: "Next" }; // not the same series: asked
+  await sync.reload();
+  await settle();
+  expect(sync.state.switched?.contentId).toBe("bbbbbbbbbbb");
+  content = { provider: "netflix", contentId: "81234567", title: "Other site" }; // no player for it here
+  await sync.reload();
+  await settle();
+  expect(sync.state.switched).toBeNull();
+  sync.dispose();
+});
+
+it("a room entered without a video opens its first one; a restored one (not entered now) opens nothing", async () => {
+  for (const entering of [true, false]) {
+    let content: RoomView["content"] = null;
+    const opened: string[] = [];
+    const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+    const youtube = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+    const sync = new RoomSync({
+      roomId: "r1", meId: "me", loadRoom: async () => ({ ...room("host"), content }), isGone: () => false,
+      send: () => true, adapter: (p) => (p === "youtube" ? youtube : undefined), nowWatching: () => null,
+      open: (url) => void opened.push(url), onChange: () => {}, openOnEnter: entering,
+    });
+    sync.setConnected(true);
+    await settle();
+    content = { provider: "youtube", contentId: "aaaaaaaaaaa", title: "First" };
+    await sync.reload();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(opened).toEqual(entering ? ["https://www.youtube.com/watch?v=aaaaaaaaaaa"] : []);
+    sync.dispose();
+  }
+});

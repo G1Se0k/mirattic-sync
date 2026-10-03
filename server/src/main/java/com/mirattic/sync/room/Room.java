@@ -57,14 +57,17 @@ public class Room {
 	protected Room() {
 	}
 
+	/** `content` null: no video yet (decision 92); the host's first one becomes it. */
 	Room(RoomContent content, String hostId) {
 		this.id = UUID.randomUUID().toString();
-		this.provider = content.provider();
-		this.contentId = content.contentId();
-		this.title = content.title();
-		this.durationMs = content.durationMs();
-		this.canonicalUrl = content.canonicalUrl();
-		this.series = content.series();
+		if (content != null) {
+			this.provider = content.provider();
+			this.contentId = content.contentId();
+			this.title = content.title();
+			this.durationMs = content.durationMs();
+			this.canonicalUrl = content.canonicalUrl();
+			this.series = content.series();
+		}
 		this.createdAt = this.capturedAt = System.currentTimeMillis();
 		this.playbackBy = hostId;
 		this.code = FriendCode.generate();
@@ -88,7 +91,11 @@ public class Room {
 	/** @return whether they were invited (and now aren't). */
 	boolean uninvite(String userId) { return invited.remove(userId) != null; }
 
+	/** null: no video yet. */
 	RoomContent content() {
+		if (provider == null) {
+			return null;
+		}
 		return new RoomContent(provider, contentId, title, durationMs, canonicalUrl, series);
 	}
 
@@ -108,7 +115,7 @@ public class Room {
 
 	/** @return false if it is the same video (new metadata such as a playlist only): the playback stays as it is. */
 	boolean changeContent(String userId, RoomContent content, long now) {
-		boolean restart = provider != content.provider() || !contentId.equals(content.contentId());
+		boolean restart = provider != content.provider() || !content.contentId().equals(contentId);
 		this.provider = content.provider();
 		this.contentId = content.contentId();
 		this.title = content.title();

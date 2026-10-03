@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // A controllable stand-in for the Chrome APIs watch() uses: lookups can be held back to replay races.
-type Tab = { id: number; url: string; active: boolean; windowId: number };
+type Tab = { id: number; url: string; active: boolean; windowId: number; index?: number };
 type Listener = (...args: any[]) => unknown;
 
 const hold = <T>() => {
@@ -93,6 +93,7 @@ vi.mock('wxt/browser', () => ({
       onRemoved: on('tabs.onRemoved'),
       onAttached: on('tabs.onAttached'),
       onDetached: on('tabs.onDetached'),
+      onMoved: on('tabs.onMoved'),
       update: async () => { throw new Error('no such tab'); },
       create: async () => (globalThis as any).__created,
     },
@@ -340,7 +341,7 @@ it('fixed: a pick still looking up tabs does not replace a tab the room video wa
   await removed;
   await settle();
   expect(w.tabs!.followed()).toBe(5);
-  expect(session['mirattic.followedTab']).toBe(5); // kept for a restart while still loading
+  expect(session['mirattic.followedTab']).toMatchObject({ tabId: 5 }); // kept for a restart while still loading
   opened.url = opened.pendingUrl; opened.status = 'complete';
   await fire('tabs.onUpdated', 5, { status: 'complete' }, opened);
   expect(followed()).toBe(5);
@@ -586,7 +587,7 @@ describe('watch: a choice and its surroundings changing meanwhile', () => {
     await choosing;
     await settle();
     expect(w.tabs!.followed()).toBe(1);
-    expect(session['mirattic.followedTab']).not.toBe(2);
+    expect(session['mirattic.followedTab']).not.toMatchObject({ tabId: 2 });
   });
 
   it('a tab activated while a restarted worker reads its saved tab doesn\'t take its place', async () => {
@@ -1040,18 +1041,41 @@ describe('watch: a release replaces from the tab\'s own window', () => {
   });
 });
 
-it('fixed: a chosen tab moved to another window, its site turned off: replaced from where it is now', async () => {
+it('fixed: a chosen tab moved to another window stops being recognized until a tab is chosen', async () => {
   delete stored['mirattic.followActive'];
-  stored['mirattic.experiment.laftel'] = true;
-  tabs = [YT(1, true), { ...LAFTEL(5, true), windowId: 2 }, { ...YT(7, true), windowId: 3 }];
+  tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }, { ...YT(6), windowId: 2 }];
   const w = await watch();
   await w.tabs!.choose(5, 2);
-  tabs[1] = { ...tabs[1]!, windowId: 3, active: false };
-  await fire('tabs.onAttached', 5, { newWindowId: 3 });
-  tabs = tabs.filter((t) => t.id !== 5); // and closed right after: no lookup can tell its window any more
-  await w.experimental!.setEnabled('laftel', false);
-  for (let i = 0; i < 5; i++) await settle();
-  expect(w.tabs!.followed()).toBe(7);
+  tabs[1] = { ...tabs[1]!, windowId: 1 };
+  await fire('tabs.onAttached', 5, { newWindowId: 1 });
+  expect(w.tabs!.followed()).toBe(null);
+  tabs[2] = { ...tabs[2]!, active: true }; // a tab switch in the panel's window doesn't start it again
+  await fire('tabs.onActivated', { tabId: 6, windowId: 2 });
+  await fire('tabs.onUpdated', 6, { status: 'complete' }, tabs[2]);
+  await settle();
+  expect(w.tabs!.followed()).toBe(null);
+  await w.tabs!.choose(5, 1);
+  expect(w.tabs!.followed()).toBe(5);
+});
+
+it('lists the tabs in each window\'s tab strip order, and follows a reorder', async () => {
+  tabs = [{ ...YT(1, true), index: 0 }, { ...YT(2), index: 1 }];
+  const w = await watch();
+  await settle();
+  expect(w.tabs!.list().map((t) => t.id)).toEqual([1, 2]);
+  tabs = [{ ...tabs[0]!, index: 1 }, { ...tabs[1]!, index: 0 }];
+  await fire('tabs.onMoved', 2, { windowId: 1, fromIndex: 1, toIndex: 0 });
+  await settle();
+  expect(w.tabs!.list().map((t) => t.id)).toEqual([2, 1]);
+});
+
+it('fixed: a video site tab without a video (YouTube home) can be chosen and is followed', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), { id: 2, url: 'https://www.youtube.com/', active: false, windowId: 1 }];
+  const w = await watch();
+  await w.tabs!.choose(2);
+  expect(w.tabs!.followed()).toBe(2);
+  expect(followed()).toBe(2); // connected: its miniplayer, or the next video opened there, is read
 });
 
 it('fixed: a tab that becomes a video tab while a site-off replacement is looked up is followed', async () => {
@@ -1089,4 +1113,48 @@ it('fixed: a chosen tab gone to a site already off is still chosen after a resta
   await again.experimental!.setEnabled('netflix', true);
   for (let i = 0; i < 3; i++) await settle();
   expect(followed()).toBe(1);
+});
+
+it('fixed: recognition stopped by a window move stays stopped after a worker restart', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }];
+  const w = await watch();
+  await w.tabs!.choose(5, 2);
+  tabs[1] = { ...tabs[1]!, windowId: 1, active: false };
+  await fire('tabs.onAttached', 5, { newWindowId: 1 });
+  listeners = {};
+  connects = [];
+  const again = await watch(); // restarted: window 1's active video tab must not be picked by itself
+  expect(again.tabs!.followed()).toBe(null);
+  expect(connects).toEqual([]);
+});
+
+it('fixed: the saved tab moved to another window while a restarted worker reads it: stopped', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1), YT(2, true)];
+  session['mirattic.followedTab'] = 1;
+  heldGet.set(1, hold());
+  const started = watch();
+  await settle();
+  tabs[0] = { ...tabs[0]!, windowId: 2 };
+  await fire('tabs.onAttached', 1, { newWindowId: 2 });
+  heldGet.get(1)!.resolve();
+  const w = await started;
+  await settle();
+  expect(w.tabs!.followed()).toBe(null);
+  expect(session['mirattic.followedTab']).toBe('stopped');
+});
+
+it('fixed: a saved tab found in another window after a restart (moved while no worker ran): stopped', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1), YT(2, true)];
+  const w = await watch();
+  await w.tabs!.choose(1, 1);
+  expect(session['mirattic.followedTab']).toEqual({ tabId: 1, windowId: 1 });
+  listeners = {}; // the worker stopped; the tab moved meanwhile (no event seen)
+  tabs[0] = { ...tabs[0]!, windowId: 2 };
+  connects = [];
+  const again = await watch();
+  expect(again.tabs!.followed()).toBe(null);
+  expect(connects).toEqual([]);
 });

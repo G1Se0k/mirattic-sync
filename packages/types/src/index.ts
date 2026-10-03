@@ -205,7 +205,8 @@ export type RoomMemberView = { user: UserSummary; role: RoomRole; present: boole
 /** `unread` (others' messages since I last had the room open) and `muted` are mine: 0 / false in an invite. */
 export type RoomView = {
   id: string;
-  content: RoomContent;
+  /** null: no video yet (decision 92) — the host's first one becomes it. */
+  content: RoomContent | null;
   members: RoomMemberView[];
   createdAt: number;
   unread: number;
@@ -268,6 +269,7 @@ export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string |
     .find(
       (r) =>
         r.members.some((m) => m.user.id === meId && m.role === "HOST") &&
-        (!watching || (r.content.provider === watching.provider && r.content.contentId === watching.contentId)),
+        // (a room without a video yet takes what I watch)
+        (!watching || !r.content || (r.content.provider === watching.provider && r.content.contentId === watching.contentId)),
     );
 }

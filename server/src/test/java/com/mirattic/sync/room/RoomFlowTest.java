@@ -1310,6 +1310,47 @@ class RoomFlowTest extends IntegrationTest {
 		return call(HttpMethod.POST, "/api/rooms/" + roomId + "/invitation", invitee.accessToken(), null);
 	}
 
+	@Test
+	void aRoomStartsWithoutAVideoAndTheHostsFirstOneBecomesIt() throws Exception {
+		// Decision 92: no platform chosen up front; whatever the host opens (any site) becomes the room's video.
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		JsonNode created = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"inviteIds":["%s"]}""".formatted(friend.id())));
+		String roomId = created.path("id").asString();
+		assertThat(created.path("content").isNull() || created.path("content").isMissingNode()).isTrue();
+		accept(friend, roomId).andExpect(status().isOk());
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		Client hostWs = connect(host);
+
+		hostWs.send(event("playback:content-change", roomId, """
+				{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"First"}"""));
+		assertThat(friendWs.nextOfType("playback:update").path("payload").path("contentId").asString()).isEqualTo("dQw4w9WgXcQ");
+		hostWs.send(event("playback:content-change", roomId, """
+				{"provider":"netflix","contentId":"81234567","title":"Other site"}"""));
+		assertThat(friendWs.nextOfType("playback:update").path("payload").path("provider").asString()).isEqualTo("netflix");
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, friend.accessToken(), null))
+				.path("content").path("title").asString()).isEqualTo("Other site");
+	}
+
+	@Test
+	void aRoomWithoutAVideoClosesWithAnEmptyTitle() throws Exception {
+		TestUser host = signup();
+		TestUser member = signup();
+		JsonNode created = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), "{\"inviteIds\":[]}"));
+		String roomId = created.path("id").asString();
+		call(HttpMethod.POST, "/api/rooms/join", member.accessToken(), "{\"code\":\"%s\"}".formatted(created.path("code").asString()))
+				.andExpect(status().isOk());
+		Client memberWs = connect(member);
+		memberWs.send(event("room:join", roomId, "{}"));
+		memberWs.nextOfType("playback:update");
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/me", host.accessToken(), null).andExpect(status().isNoContent());
+		assertThat(memberWs.nextOfType("room:closed").path("payload").path("title").asString()).isEmpty();
+	}
+
 	private static String event(String type, String roomId, String payload) {
 		return "{\"type\":\"%s\",\"roomId\":\"%s\",\"payload\":%s}".formatted(type, roomId, payload);
 	}

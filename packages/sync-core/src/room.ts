@@ -151,7 +151,19 @@ export class RoomSync {
     if (this.state.room) this.set({ room: { ...this.state.room, muted } });
   }
 
-  private contentChanged(before: RoomContent | undefined, content: RoomContent) {
+  private contentChanged(before: RoomContent | null | undefined, content: RoomContent | null) {
+    // Another video (or none): a prompt to follow an earlier one is over.
+    if (this.state.switched && (this.state.switched.provider !== content?.provider || this.state.switched.contentId !== content.contentId)) {
+      this.set({ switched: null });
+    }
+    if (!content) {
+      // No video yet (decision 92): the host's first one becomes it (the publisher sends it, `announced` unset).
+      // Nothing shown to a member yet (`shown` stays unset): its first video opens as on entering only if this
+      // sync entered the room (decision 83 — a restored one opens nothing by itself).
+      this.announced = null;
+      this.refreshPlayer();
+      return;
+    }
     const sameVideo = before?.provider === content.provider && before.contentId === content.contentId;
     if (!sameVideo || before?.series !== content.series) this.announced = content;
     if (!sameVideo) {
@@ -213,9 +225,14 @@ export class RoomSync {
     });
   }
 
-  /** The platform's players changed (a provider turned on or off) or the room's provider did. */
+  /**
+   * The platform's players changed (a provider turned on or off, the followed tab moved to another site) or the
+   * room's provider did. The host's player is the site of what they watch now, whatever the room's video was
+   * (decision 92: rooms aren't per site — the publisher then moves the room to it); a member's, the room's.
+   */
   refreshPlayer() {
-    const provider = this.state.room?.content.provider;
+    const roomProvider = this.state.room?.content?.provider;
+    const provider = this.isHost ? (this.deps.nowWatching()?.provider ?? roomProvider) : roomProvider;
     const player = provider ? this.deps.adapter(provider) : undefined;
     if (player !== this.player) {
       this.player = player;
@@ -304,13 +321,18 @@ export class RoomSync {
       this.stopPublishing = publishHost(engineOf, this.clock, (type, payload, snapshot, gone) => {
         const roomId = this.deps.roomId;
         // The video went away: pause the members on the content they are following, never on a new one.
-        if (gone) return snapshot.contentId === this.announced?.contentId && this.deps.send({ type, roomId, payload });
+        if (gone) {
+          return engineOf.provider === this.announced?.provider && snapshot.contentId === this.announced.contentId
+            && this.deps.send({ type, roomId, payload });
+        }
         // The command is about `snapshot`'s video. Its metadata arrives with the change; until then, skip —
         // that change triggers another send.
         const now = this.deps.nowWatching();
-        if (!now || now.contentId !== snapshot.contentId) return false;
-        // Also the same video joining a playlist (series): the server then keeps the playback as it is.
-        if (now.contentId !== this.announced?.contentId || now.series !== this.announced?.series) {
+        if (!now || now.provider !== engineOf.provider || now.contentId !== snapshot.contentId) return false;
+        // Also the same video joining a playlist (series): the server then keeps the playback as it is. Another site
+        // with the same id is another video (decision 92: the room follows the host across sites).
+        if (now.provider !== this.announced?.provider || now.contentId !== this.announced?.contentId
+          || now.series !== this.announced?.series) {
           this.deps.send({ type: "playback:content-change", roomId, payload: now });
           this.announced = now;
         }
@@ -318,7 +340,7 @@ export class RoomSync {
       });
       return;
     }
-    engineOf.keepCredits?.(this.state.room!.content.contentId); // a member stays on the credits; the host moves on
+    engineOf.keepCredits?.(this.state.room!.content?.contentId ?? null); // a member stays on the credits; the host moves on
     const follower = new SyncFollower({
       adapter: engineOf,
       clock: this.clock,

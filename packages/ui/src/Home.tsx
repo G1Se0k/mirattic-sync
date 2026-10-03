@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
-  MediaProvider,
   ChatDeleted,
   ChatMessage,
   FriendRequests,
@@ -20,7 +19,6 @@ import { MyFriendCode, Settings } from "./Settings";
 import { without } from "./Chat";
 import { latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, ProviderIcon } from "./Icons";
-import { ExperimentControl, isExperiment, useExperiment } from "./Experimental";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
@@ -36,10 +34,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [adding, setAdding] = useState(false);
   const [showCode, setShowCode] = useState(false);
   const asker = useAsk();
-  const [choosing, setChoosing] = useState(false);
   const [joining, setJoining] = useState(false);
   /** A site opened by "방 생성" with nothing watched: the room is made once a video of it plays. */
-  const [pending, setPending] = useState<MediaProvider | null>(null);
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -317,27 +313,24 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   async function watchTogether(friend: UserSummary) {
     setError(null);
     const hosted = roomToInvite(rooms, me.id, openRoom, watching);
-    if (!hosted && !watching) return setError("같이 볼 영상을 먼저 여세요 (YouTube · Netflix · Laftel).");
     try {
       if (hosted) await api.inviteToRoom(hosted.id, [friend.id]);
-      setOpenRoom(hosted?.id ?? (await api.createRoom(watching!, [friend.id])).id);
+      setOpenRoom(hosted?.id ?? (await api.createRoom(watching, [friend.id])).id); // no video yet: a room without one
       changeRequest(friend, false); // answered; kept on failure to retry
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
     }
   }
 
-  /** "방 생성": with what I watch now, else pick a site and the room comes when a video of it is open. */
+  /** "방 생성": at once, with what I watch now or no video yet (decision 92: whatever I open next becomes it). */
   async function createRoom() {
     if (creating.current) return;
     setError(null);
-    // Nothing watched: pick a site, and the room comes once a video of it is open.
-    if (!watching) return setChoosing(true);
     await makeRoom(watching);
   }
   /** One creation at a time; its answer opens the room only if I haven't entered another meanwhile. */
   const creating = useRef(false);
-  async function makeRoom(content: NonNullable<typeof watching>) {
+  async function makeRoom(content: typeof watching) {
     creating.current = true;
     try {
       const room = await api.createRoom(content, []);
@@ -348,19 +341,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       creating.current = false;
     }
   }
-  // A video opened while "어디서 볼까요?" is up answers it: the dialog goes.
-  useEffect(() => {
-    if (watching) setChoosing(false);
-  }, [watching]);
-  // Entering any room drops the wait: it must not later make a room and pull me out of this one.
-  useEffect(() => {
-    if (openRoom) setPending(null);
-  }, [openRoom]);
-  useEffect(() => {
-    if (!pending || openRoom || watching?.provider !== pending || creating.current) return;
-    setPending(null);
-    void makeRoom(watching);
-  }, [pending, watching, openRoom]);
 
   async function requestWatch(friend: UserSummary) {
     setError(null);
@@ -516,7 +496,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   const incoming = invited ? (
     <Dialog alert title={`${invitingHost?.displayName ?? "친구"}님이 같이 보기에 초대했습니다`} onClose={() => void answerInvitation(invited, false)}>
-      <p>{invited.content.title}</p>
+      <p>{invited.content?.title ?? "아직 고른 영상이 없습니다"}</p>
       <Actions>
         <button className="link" onClick={() => void answerInvitation(invited, false)}>거절</button>
         <button onClick={() => void answerInvitation(invited, true)}>입장</button>
@@ -609,12 +589,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           )}
         </div>
 
-        {pending && (
-          <div className="card row">
-            <span className="grow muted">{PROVIDER_NAMES[pending]}에서 영상을 열면 방이 만들어집니다.</span>
-            <button className="secondary" onClick={() => setPending(null)}>취소</button>
-          </div>
-        )}
         <section>
           <div className="row between">
             <h2>방</h2>
@@ -630,10 +604,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 const mine = host?.user.id === me.id;
                 return (
                   <li key={r.id} className={`friend${r.id === activeRoom ? " card active" : ""}`}>
-                    <ProviderIcon provider={r.content.provider} />
+                    {r.content ? <ProviderIcon provider={r.content.provider} /> : <span className="provider mock" title="영상 없음">·</span>}
                     <div className="grow">
                       <div className="ellipsis">
-                        <span className="name">{r.content.title}</span>
+                        <span className="name">{r.content?.title ?? "영상 없음"}</span>
                         {r.unread > 0 && (
                           <span className={`badge ${r.muted ? "quiet" : ""}`} title="읽지 않은 메시지">{r.unread > 99 ? "99+" : r.unread}</span>
                         )}
@@ -651,9 +625,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               })}
             </ul>
         </section>
-        {choosing && (
-          <ChooseSite onPick={(p) => { setChoosing(false); setPending(p); platform.open(SITES[p], true); }} onClose={() => setChoosing(false)} />
-        )}
         {joining && <JoinByCode onJoined={(id) => { setJoining(false); void reload(); enter(id); }} onClose={() => setJoining(false)} />}
 
         <section>
@@ -761,44 +732,6 @@ function Menu({ label, items }: { label: string; items: MenuItem[] }) {
         </div>
       )}
     </span>
-  );
-}
-
-const SITES: Record<Exclude<MediaProvider, "mock">, string> = {
-  youtube: "https://www.youtube.com/",
-  netflix: "https://www.netflix.com/browse",
-  laftel: "https://laftel.net/",
-};
-
-/** Nothing watched yet: which site to watch on (an experiment is turned on first). */
-function ChooseSite({ onPick, onClose }: { onPick: (p: keyof typeof SITES) => void; onClose: () => void }) {
-  const [site, setSite] = useState<keyof typeof SITES | null>(null);
-  const on = useExperiment(site && isExperiment(site) ? site : undefined);
-  const needsTurningOn = !!site && isExperiment(site) && on === false;
-  // Once: turning the control on picks the site at once, and the shared state saying so may come before or after.
-  const picked = useRef(false);
-  const pick = (p: keyof typeof SITES) => {
-    if (picked.current) return;
-    picked.current = true;
-    onPick(p);
-  };
-  useEffect(() => {
-    if (site && !needsTurningOn) pick(site);
-  }, [site, needsTurningOn]);
-  return (
-    <Dialog title="어디서 볼까요?" onClose={onClose}>
-      {needsTurningOn && isExperiment(site) ? (
-        <ExperimentControl provider={site} onDone={(turnedOn) => (turnedOn ? pick(site) : setSite(null))} />
-      ) : (
-        <div className="stack">
-          {(Object.keys(SITES) as (keyof typeof SITES)[]).map((p) => (
-            <button key={p} className="secondary" onClick={() => setSite(p)}>{PROVIDER_NAMES[p]}</button>
-          ))}
-        </div>
-      )}
-      <p className="muted">사이트가 열리면 볼 영상을 고르세요. 영상을 열면 방이 만들어집니다.</p>
-      <Actions><button className="link" onClick={onClose}>취소</button></Actions>
-    </Dialog>
   );
 }
 

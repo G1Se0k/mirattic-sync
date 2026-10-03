@@ -190,8 +190,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     block: (userId: string) => authed<void>("PUT", `/api/blocks/${userId}`),
     unblock: (userId: string) => authed<void>("DELETE", `/api/blocks/${userId}`),
 
-    /** Creates a room you host; invitees must be friends and get `room:invite`. */
-    createRoom: (content: RoomContent, inviteIds: string[]) =>
+    /** Creates a room you host (`content` null: no video yet); invitees must be friends and get `room:invite`. */
+    createRoom: (content: RoomContent | null, inviteIds: string[]) =>
       authed<RoomView>("POST", "/api/rooms", { content, inviteIds }),
     /** Host only: adds friends to an existing room; they get `room:invite`. */
     inviteToRoom: (id: string, userIds: string[]) => authed<RoomView>("POST", `/api/rooms/${id}/invites`, { userIds }),

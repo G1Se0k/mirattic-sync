@@ -35,7 +35,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/rooms")
 class RoomController {
 
-	record CreateRoom(@NotNull @Valid RoomContent content, @NotNull @Size(max = 32) List<String> inviteIds) {
+	/** `content` null: no video yet (decision 92). */
+	record CreateRoom(@Valid RoomContent content, @NotNull @Size(max = 32) List<String> inviteIds) {
 	}
 
 	record Invite(@NotNull @Size(min = 1, max = 32) List<String> userIds) {

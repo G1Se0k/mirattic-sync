@@ -85,7 +85,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     if (experiment && experimentOn === false) setAsking(experiment);
   }, [experiment, experimentOn]);
 
-  if (!room || !content) {
+  if (!room) {
     return (
       <main className="room">
         <header className="topbar">
@@ -139,7 +139,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
 
   const position = async () => {
     const snap = handle.state().snapshot;
-    if (!snap || snap.adPlaying || snap.contentId !== content.contentId) return undefined;
+    if (!content || !snap || snap.adPlaying || snap.contentId !== content.contentId) return undefined;
     return Math.round(snap.positionMs + (snap.playing ? Date.now() - snap.capturedAt : 0));
   };
 
@@ -147,7 +147,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     <main className="room">
       <header className="topbar">
         <IconButton icon="back" label="친구 목록" onClick={() => void back()} />
-        <h1 title={content.title}>{content.title}</h1>
+        <h1 title={content?.title}>{content?.title ?? "새 방"}</h1>
         <IconButton icon="userPlus" label="방에 초대하기" onClick={() => setInviting(true)} />
         <IconButton icon={room.muted ? "bellOff" : "bell"} label={room.muted ? "채팅 알림 켜기" : "채팅 알림 끄기"}
           onClick={() => void toggleMute()} />
@@ -174,7 +174,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
             </span>
           ))}
         </div>
-        <PlayerStatus content={content} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
+        <PlayerStatus content={content ?? null} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
           onRequestPause={() => setAskingPause(true)} />
         {isHost && <TabPicker />}
       </div>
@@ -189,7 +189,8 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
           <ExperimentControl provider={experiment} onDone={() => setAsking(null)} />
         </Dialog>
       )}
-      {s.switched && s.switched.contentId === content.contentId && <Switched content={s.switched} handle={handle} />}
+      {s.switched && s.switched.provider === content?.provider && s.switched.contentId === content.contentId
+        && <Switched content={s.switched} handle={handle} />}
       {inviting && (
         <Invite roomId={roomId} code={room.code} isHost={isHost} memberIds={room.members.map((m) => m.user.id)}
           onClose={() => setInviting(false)} />
@@ -343,20 +344,22 @@ function TabPicker() {
       <summary>
         인식할 탭 <span className="muted">· {auto ? "활성 탭 자동 따라가기" : current?.title ?? (followed !== null ? "영상이 없는 탭 또는 다른 창의 탭" : "없음")}</span>
       </summary>
+      {/* Native radios (arrow keys move between them), drawn as the app's buttons with the chosen one marked; in the
+          tab strip's order, automatic always last. */}
       <div className="stack" role="radiogroup" aria-label="인식할 탭">
-        <label>
-          <input type="radio" name="followed-tab" checked={auto} onChange={() => tabs.choose(null)} />
-          활성 탭 자동 따라가기
-        </label>
         {list.map((t) => (
-          <label key={t.id} title={t.title}>
+          <label key={t.id} title={t.title} className="tab-option">
             <input type="radio" name="followed-tab" checked={!auto && t.id === followed} onChange={() => tabs.choose(t.id)} />
             <span className="pill">{PROVIDER_NAMES[t.provider]}</span>
             <span className="ellipsis grow">{t.title}</span>
             {t.id === followed && <span className="muted">인식 중</span>}
           </label>
         ))}
-        {list.length === 0 && <p className="muted">영상이 열린 탭이 없습니다.</p>}
+        {list.length === 0 && <p className="muted">YouTube · 켜진 실험 사이트의 탭이 없습니다.</p>}
+        <label className="tab-option">
+          <input type="radio" name="followed-tab" checked={auto} onChange={() => tabs.choose(null)} />
+          <span className="grow">활성 탭 자동 따라가기</span>
+        </label>
       </div>
     </details>
   );
@@ -364,12 +367,26 @@ function TabPicker() {
 
 /** A provider plays in the user's own page (e.g. a YouTube tab); this only shows where it stands. */
 function PlayerStatus({ content, s, isHost, experimentOff, onRequestPause }: {
-  content: RoomContent;
+  /** null: no video yet (decision 92). */
+  content: RoomContent | null;
   s: RoomSyncState;
   isHost: boolean;
   experimentOff: boolean;
   onRequestPause: () => void;
 }) {
+  const followed = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.tabs?.followed() ?? null);
+  if (!content) {
+    // No "이 영상 열기": there is no video to open.
+    return (
+      <section className="card stack">
+        <p className="muted">
+          {isHost
+            ? "아직 방 영상이 없습니다. 인식할 탭에서 영상을 열면 방 영상이 됩니다(사이트는 상관없습니다)."
+            : "아직 방 영상이 없습니다. 방장이 영상을 열면 시작됩니다."}
+        </p>
+      </section>
+    );
+  }
   const name = PROVIDER_NAMES[content.provider];
   const url = openUrl(content);
   const snapshot = s.snapshot;
@@ -394,7 +411,9 @@ function PlayerStatus({ content, s, isHost, experimentOff, onRequestPause }: {
         ) : !s.away ? (
           <span className="muted grow">영상 확인 중…</span>
         ) : (
-          <span className="muted grow">{snapshot ? "탭에서 다른 영상을 보고 있습니다." : "영상이 열린 탭이 없습니다."}</span>
+          <span className="muted grow">
+            {snapshot ? "탭에서 다른 영상을 보고 있습니다." : followed !== null ? "인식 중인 탭에 영상이 없습니다." : "인식 중인 탭이 없습니다."}
+          </span>
         )}
         {offerOpen && <IconButton icon="external" label={`${name}에서 이 영상 열기`} onClick={() => platform.open(url!, true)} />}
         {!isHost && <IconButton icon="pause" label="일시정지 요청" disabled={cooldown > 0} onClick={onRequestPause} />}
