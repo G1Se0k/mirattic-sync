@@ -35,9 +35,16 @@ class MiratticLoginTest extends IntegrationTest {
 				.andExpect(jsonPath("$.friendCode").exists());
 		call(HttpMethod.POST, "/api/ws-ticket", access, null).andExpect(status().isOk());
 
-		// Second login of the same UID: same profile, not a new one.
+		// Renamed at Auth (decision 99): /api/me takes UserInfo's name.
+		AuthStub.NAMES.put(uid, "  Alice Kim  ");
+		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.displayName").value("Alice Kim"));
+		AuthStub.NAMES.remove(uid);
+		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.displayName").value("Alice Kim")); // none: kept
+
+		// Second login of the same UID: same profile, not a new one — with the name Auth has now.
 		JsonNode again = body(redeem(signIn(uid, "Renamed", false, Instant.now())).andExpect(status().isOk()));
-		assertThat(again.path("user").path("displayName").asString()).isEqualTo("Alice");
+		assertThat(again.path("user").path("id").asString()).isEqualTo(uid);
+		assertThat(again.path("user").path("displayName").asString()).isEqualTo("Renamed");
 	}
 
 	@Test

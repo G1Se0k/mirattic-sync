@@ -29,7 +29,7 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/me` | `Me` `{ id(UID), email?, displayName, friendCode, presenceVisibility, positionVisibility }`. `email`은 Mirattic Auth UserInfo에서 매번 읽음(실패하면 없음) |
+| GET | `/api/me` | `Me` `{ id(UID), email?, displayName, friendCode, presenceVisibility, positionVisibility }`. `email`은 Mirattic Auth UserInfo에서 매번 읽음(실패하면 없음). `displayName`은 UserInfo의 `name`이 있으면 그것으로 맞춰 저장(결정 99, 로그인 때도 ID 토큰의 `name`) |
 | POST | `/api/me/friend-code` | 친구 코드 재발급 (이전 코드는 즉시 무효) → `Me`. UI에서는 뺐음 (2026-09-29 사용자 요청) |
 | PUT | `/api/me/privacy` | `{ presenceVisibility, positionVisibility }` → `Me` (`positionVisibility`는 저장만 되고 쓰이지 않음, 결정 98) |
 | DELETE | `/api/me` | `{ code, verifier }` → 204. Sync 프로필과 데이터 삭제 (Phase 9, 결정 82). `reauth=true` 로그인의 handoff여야 하고 같은 UID, `auth_time` 5분 이내가 아니면 **403** (401이면 클라이언트가 refresh 후 재시도하므로). 그 재인증 로그인은 Auth에서 바로 폐기. Mirattic 계정은 Auth에 남음. IP당 분당 제한은 `/api/auth/**`와 같음 (429). 삭제 후: 호스트인 방은 닫히고 나머지 방에서는 빠짐 (멤버들에게 `room:update`, 남은 방에는 `chat:delete { userId }`), 친구·요청 상대에게 `friend:update`, 내 WebSocket 연결은 모두 닫힘, 기존 access token은 즉시 401 |

@@ -838,7 +838,7 @@ export default defineBackground(() => {
    */
   async function connect() {
     await replacedLoaded;
-    if (!meId) return;
+    if (!meId || off) return; // turned off (also while a sign-in was finishing): no socket until turned on
     if (!replaced()) return startSocket();
     if (socket) return; // its status says so already
     status = 'replaced';

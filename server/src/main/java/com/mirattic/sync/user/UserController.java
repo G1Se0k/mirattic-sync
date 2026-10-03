@@ -39,6 +39,7 @@ public class UserController {
 	}
 
 	@GetMapping("/me")
+	@Transactional
 	Me me(@AuthenticationPrincipal Jwt jwt) {
 		return me(load(jwt.getSubject()), jwt);
 	}
@@ -59,8 +60,13 @@ public class UserController {
 		return me(me, jwt);
 	}
 
+	/** With the email and name read live from Auth: a name changed there is taken here (decision 99). */
 	private Me me(User u, Jwt jwt) {
-		return new Me(u.getId(), auth.email(jwt.getTokenValue()), u.getDisplayName(), u.getFriendCode(),
+		MiratticAuth.UserInfo info = auth.userInfo(jwt.getTokenValue());
+		if (info != null && info.name() != null && !User.nameFromAuth(info.name()).equals(u.getDisplayName())) {
+			u.syncName(info.name());
+		}
+		return new Me(u.getId(), info == null ? null : info.email(), u.getDisplayName(), u.getFriendCode(),
 				u.getPresenceVisibility(), u.getPositionVisibility());
 	}
 

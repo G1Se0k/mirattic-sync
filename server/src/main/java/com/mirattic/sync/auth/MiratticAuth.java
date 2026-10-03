@@ -133,11 +133,18 @@ public class MiratticAuth {
 		return new AuthTokens(t.access_token(), t.refresh_token(), user);
 	}
 
-	/** The account's current email from Auth's UserInfo (Auth owns it), or null if Auth can't say right now. */
-	public String email(String accessToken) {
+	/** The account's email and name as Auth's UserInfo has them now (Auth owns both); either null if absent. */
+	public record UserInfo(String email, String name) {
+	}
+
+	/** Auth's UserInfo for this access token, or null if Auth can't say right now. */
+	public UserInfo userInfo(String accessToken) {
 		try {
 			Map<?, ?> info = http.get().uri("/userinfo").headers(h -> h.setBearerAuth(accessToken)).retrieve().body(Map.class);
-			return info != null && info.get("email") instanceof String e ? e : null;
+			if (info == null) {
+				return null;
+			}
+			return new UserInfo(info.get("email") instanceof String e ? e : null, info.get("name") instanceof String n ? n : null);
 		} catch (RestClientException e) {
 			log.warn("Mirattic Auth userinfo failed: {}", e.getClass().getSimpleName());
 			return null;

@@ -112,9 +112,14 @@ class MiratticLoginController {
 		try {
 			MiratticAuth.TokenResponse t = auth.exchange(code, p.verifier());
 			Jwt id = auth.decode(t.id_token());
-			// First Auth login of this UID: its Sync profile (product fields only) starts here.
-			User user = users.findById(id.getSubject()).orElseGet(() -> users.save(User.fromAuth(id.getSubject(),
-					displayName(id.getClaimAsString("name")))));
+			// First Auth login of this UID: its Sync profile (product fields only) starts here. Every login: the name as
+			// Auth has it now (decision 99).
+			String name = id.getClaimAsString("name");
+			User user = users.findById(id.getSubject()).orElseGet(() -> User.fromAuth(id.getSubject(), User.nameFromAuth(name)));
+			if (name != null) {
+				user.syncName(name); // no name in the token: the one kept stays
+			}
+			user = users.save(user);
 			Instant authTime = id.hasClaim("auth_time") ? id.getClaimAsInstant("auth_time") : Instant.EPOCH;
 			handoff = new Handoffs.Handoff(new AuthTokens(t.access_token(), t.refresh_token(), UserSummary.of(user)), authTime);
 		} catch (RuntimeException e) {
@@ -131,14 +136,6 @@ class MiratticLoginController {
 			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid handoff");
 		}
 		return h.tokens();
-	}
-
-	private static String displayName(String name) {
-		String n = name == null ? "" : name.strip();
-		if (n.isEmpty()) {
-			return "Mirattic 사용자";
-		}
-		return n.length() > 32 ? n.substring(0, 32) : n;
 	}
 
 	private static URI back(String redirect, String key, String value) {

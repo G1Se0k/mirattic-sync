@@ -42,6 +42,20 @@ public class User {
 		return u;
 	}
 
+	/** Auth's `name` as shown here: trimmed, at most 32 characters, a default when Auth has none. */
+	public static String nameFromAuth(String name) {
+		String n = name == null ? "" : name.strip();
+		if (n.isEmpty()) {
+			return "Mirattic 사용자";
+		}
+		return n.length() > 32 ? n.substring(0, 32) : n;
+	}
+
+	/** The name follows Mirattic Auth's (decision 99): Auth owns it, Sync shows it. */
+	public void syncName(String authName) {
+		this.displayName = nameFromAuth(authName);
+	}
+
 	public String getId() { return id; }
 	public String getDisplayName() { return displayName; }
 	public String getFriendCode() { return friendCode; }

@@ -42,6 +42,8 @@ public final class AuthStub {
 	private static final Map<String, Login> CODES = new ConcurrentHashMap<>();
 	private static final Map<String, String> REFRESH = new ConcurrentHashMap<>(); // token → sub
 	public static final Set<String> REVOKED = ConcurrentHashMap.newKeySet();
+	/** The name UserInfo reports for a UID (none when absent). */
+	public static final Map<String, String> NAMES = new ConcurrentHashMap<>();
 	/** Sending this refresh token makes the stub answer 400 invalid_request (not invalid_grant). */
 	public static final String INVALID_REQUEST = "force-invalid-request";
 
@@ -55,7 +57,8 @@ public final class AuthStub {
 				String bearer = String.valueOf(ex.getRequestHeaders().getFirst("Authorization"));
 				try {
 					String sub = SignedJWT.parse(bearer.replace("Bearer ", "")).getJWTClaimsSet().getSubject();
-					send(ex, 200, "{\"sub\":\"" + sub + "\",\"email\":\"" + email(sub) + "\"}");
+					String name = NAMES.containsKey(sub) ? ",\"name\":\"" + NAMES.get(sub) + "\"" : "";
+					send(ex, 200, "{\"sub\":\"" + sub + "\",\"email\":\"" + email(sub) + "\"" + name + "}");
 				} catch (java.text.ParseException e) {
 					send(ex, 401, "{}");
 				}
