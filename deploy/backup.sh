@@ -1,5 +1,5 @@
 #!/bin/bash
-# Daily MySQL dump, run by launchd (installed by deploy.sh). Keeps 7 days in ~/mirattic-sync-backups.
+# Daily MySQL dump, run by launchd on the Mac host / cron on Linux (installed by deploy.sh). Keeps 7 days in ~/mirattic-sync-backups.
 # Lives outside ~/Documents when installed: launchd jobs can't read TCC-protected folders.
 set -euo pipefail
 export PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:$PATH
