@@ -736,9 +736,9 @@ export default defineBackground(() => {
       askOnSwitch: () => platform?.preferences?.askOnSwitch() ?? true,
       openOnEnter: entering,
       siteUrl: (provider) => (provider in SITE_HOME ? SITE_HOME[provider as keyof typeof SITE_HOME] : undefined),
-      open: (url, newTab) => {
+      open: (url, newTab, quiet) => {
         console.info('[mirattic] following the host to', url); // who moved the tab, when a user reports it
-        platform?.open(url, newTab);
+        platform?.open(url, newTab, quiet);
       },
       onChange: (state) => {
         broadcast({ kind: 'room', state });

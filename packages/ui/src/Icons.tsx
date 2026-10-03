@@ -61,6 +61,12 @@ const PATHS = {
   dock: <path d="M3 4h18v16H3zM15 4v16" />,
   external: <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />,
   pause: <path d="M8 5v14M16 5v14" />,
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </>
+  ),
   check: <path d="M20 6L9 17l-5-5" />,
   ban: (
     <>

@@ -55,7 +55,8 @@ export type RoomSyncDeps = {
   /** The player for a provider here, if any; the same object for the same provider. */
   adapter(provider: MediaProvider): MediaProviderAdapter | undefined;
   nowWatching(): RoomContent | null;
-  open(url: string, newTab?: boolean): void;
+  /** `quiet`: following the host by itself — the tab moves on in the background, not brought forward. */
+  open(url: string, newTab?: boolean, quiet?: boolean): void;
   /** Entered by the user now (not restored): a member without the room's video open gets it in a new tab. */
   openOnEnter?: boolean;
   /** A site's first page (decision 93): where a member goes for a room type whose video isn't of that site yet. */
@@ -248,7 +249,7 @@ export class RoomSync {
     void player.getSnapshot().then((s) => {
       if (mine !== this.switchCheck || this.disposed || this.typePending() || s?.contentId === content.contentId) return;
       // The same series, the setting, or "이 방에서 항상 허용" (decision 81): opened without asking.
-      if (sameSeries(before, content) || this.followAlways || this.deps.askOnSwitch?.() === false) this.deps.open(url);
+      if (sameSeries(before, content) || this.followAlways || this.deps.askOnSwitch?.() === false) this.deps.open(url, false, true);
       else this.set({ switched: content });
     });
   }

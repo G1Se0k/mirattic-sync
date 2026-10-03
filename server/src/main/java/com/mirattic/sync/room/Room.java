@@ -99,6 +99,11 @@ public class Room {
 	/** @return whether they were invited (and now aren't). */
 	boolean uninvite(String userId) { return invited.remove(userId) != null; }
 
+	/** "<provider>:<contentId>", what a chat line's position belongs to; null without a video. */
+	String contentKey() {
+		return provider == null ? null : provider + ":" + contentId;
+	}
+
 	/** null: no video yet. */
 	RoomContent content() {
 		if (provider == null) {

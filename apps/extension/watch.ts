@@ -737,22 +737,25 @@ export async function watch(opts: {
         return true;
       },
     },
-    open: (url, newTab) => {
-      // Reuse the synced tab so the room keeps following it; the user asked for this navigation. A new tab
+    open: (url, newTab, quiet) => {
+      // Reuse the synced tab so the room keeps following it; the user asked for this navigation (quiet: the room
+      // followed the host by itself — only the link changes, the tab isn't brought forward). A new tab
       // (the room's "open" button, entering a room) is followed once it loads, being the window's active video
       // tab — unless a tab of this window already has that video: that one is brought forward instead.
       const mine = ++intent;
       const opened = tabId !== null && !newTab
-        ? browser.tabs.update(tabId, { url, active: true })
+        ? browser.tabs.update(tabId, quiet ? { url } : { url, active: true })
         : (newTab ? tabShowing(url) : Promise.resolve(undefined)).then((tab) =>
             // In a playlist or mix (`list=`): back to the plain video, as opened (a mix differs per person).
             tab?.id === undefined ? Promise.reject()
             : browser.tabs.update(tab.id, tab.url && new URL(tab.url).searchParams.has('list') ? { url, active: true } : { active: true }));
-      void opened.catch(() => browser.tabs.create({ url, windowId })).then((tab) => {
+      // Quiet with a chosen tab (fixed): a new one in the background, followed once it loads (take). Following the
+      // active tab, only the active one can be followed: it opens in front.
+      void opened.catch(() => browser.tabs.create({ url, windowId, active: !(quiet && !autoNow()) })).then((tab) => {
         if (!tab || mine !== intent) return;
         // Detached: a tab of another window than the one followed is brought forward there — seen, and (following the
         // active tab) followed, as a tab of the panel's own window would be.
-        if (detached && tab.windowId !== windowId) void browser.windows.update(tab.windowId, { focused: true }).catch(() => {});
+        if (detached && tab.windowId !== windowId && !quiet) void browser.windows.update(tab.windowId, { focused: true }).catch(() => {});
         take(tab);
       }, () => {});
     },

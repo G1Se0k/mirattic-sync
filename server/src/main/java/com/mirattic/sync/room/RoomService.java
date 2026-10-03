@@ -467,10 +467,11 @@ public class RoomService {
 	@Transactional
 	public ChatMessage.View log(String roomId, String userId, String kind, String text, Long positionMs) {
 		// Under the room lock, like chat: read marks see every line inserted before them.
-		if (rooms.findForUpdate(roomId).isEmpty()) {
+		Room room = rooms.findForUpdate(roomId).orElse(null);
+		if (room == null) {
 			return null;
 		}
-		return messages.save(new ChatMessage(roomId, userId, text, positionMs, kind)).view();
+		return messages.save(new ChatMessage(roomId, userId, text, positionMs, kind, room)).view();
 	}
 
 	/**
@@ -530,17 +531,37 @@ public class RoomService {
 		return users.findById(userId).map(User::getDisplayName).orElse(null);
 	}
 
-	/** Any member may chat; the text is stored trimmed. */
+	/**
+	 * Any member may chat; the text is stored trimmed.
+	 * `contentKey`: the video the sender's position is on. Only one that is the room's video now has it stored with
+	 * the position (a message sent as the host moved on keeps its time, just not as the new video's).
+	 */
 	@Transactional
-	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs) {
+	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs, String contentKey) {
 		// Under the room lock, so a read mark (read(), join()) sees every message inserted before it and none after.
-		rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		requireMember(me, roomId);
 		String trimmed = text == null ? "" : text.strip();
 		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
 		}
-		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null)).view();
+		boolean same = contentKey != null && contentKey.equals(room.contentKey());
+		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null, same ? room : null)).view();
+	}
+
+	/**
+	 * A member's timestamp on the room's video ("stamp" line, text = their name): 400 without a video, on another
+	 * video than the room's now (`contentKey`, the one the member stamped), or with a position before 0 or past its end.
+	 */
+	@Transactional
+	public ChatMessage.View stamp(String me, String roomId, long positionMs, String contentKey) {
+		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+		requireMember(me, roomId);
+		RoomContent content = room.content();
+		if (content == null || !room.contentKey().equals(contentKey) || positionMs < 0 || (content.durationMs() != null && positionMs > content.durationMs())) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid stamp");
+		}
+		return messages.save(new ChatMessage(roomId, me, nameOf(me), positionMs, "stamp", room)).view();
 	}
 
 	/** The author, or the room's host (moderation), deletes a message for everyone. */

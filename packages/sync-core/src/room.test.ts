@@ -123,10 +123,11 @@ it("asks a member before following the host to another video, unless told to alw
   let content = video("aaaaaaaaaaa");
   let ask = true;
   const opened: string[] = [];
+  const quiet: (boolean | undefined)[] = []; // followed by itself: the tab isn't brought forward
   const player = new MockMediaProvider({ contentId: "other", title: "Other", durationMs: 600_000 });
   const sync = new RoomSync({
     roomId: "r1", meId: "me", loadRoom: async () => ({ ...room("host"), content }), isGone: () => false,
-    send: () => true, adapter: () => player, nowWatching: () => null, open: (url) => opened.push(url),
+    send: () => true, adapter: () => player, nowWatching: () => null, open: (url, _newTab, q) => (opened.push(url), quiet.push(q)),
     askOnSwitch: () => ask, onChange: () => {},
   });
   sync.setConnected(true);
@@ -140,14 +141,16 @@ it("asks a member before following the host to another video, unless told to alw
   expect(sync.state.switched?.contentId).toBe("bbbbbbbbbbb"); // asked
   sync.openSwitched(true); // "이 방에서 항상 허용"
   expect(opened).toHaveLength(1);
+  expect(quiet.at(-1)).toBeFalsy(); // the user's click: brought forward
   await moveTo("ccccccccccc");
   expect(opened.at(-1)).toContain("ccccccccccc"); // followed without asking
+  expect(quiet.at(-1)).toBe(true);
   expect(sync.state.switched).toBeNull();
   sync.dispose();
 
   const other = new RoomSync({
     roomId: "r1", meId: "me", loadRoom: async () => ({ ...room("host"), content }), isGone: () => false,
-    send: () => true, adapter: () => player, nowWatching: () => null, open: (url) => opened.push(url),
+    send: () => true, adapter: () => player, nowWatching: () => null, open: (url, _newTab, q) => (opened.push(url), quiet.push(q)),
     askOnSwitch: () => ask, onChange: () => {},
   });
   other.setConnected(true);
@@ -157,6 +160,7 @@ it("asks a member before following the host to another video, unless told to alw
   other.handle({ type: "room:update", roomId: "r1", serverTime: Date.now(), payload: null } as ServerEvent);
   await vi.advanceTimersByTimeAsync(0);
   expect(opened.at(-1)).toContain("ddddddddddd");
+  expect(quiet.at(-1)).toBe(true);
   expect(other.state.switched).toBeNull();
   other.dispose();
 });

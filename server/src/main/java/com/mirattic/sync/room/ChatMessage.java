@@ -12,10 +12,11 @@ public class ChatMessage {
 
 	/**
 	 * Mirrors `ChatMessage` in packages/types. `kind` null = a message someone wrote; else a room log (decision 78):
-	 * "join" / "leave" (text = the name then), "play" / "pause" / "seek" by the host, "content" (text = the title).
+	 * "join" / "leave" (text = the name then), "play" / "pause" / "seek" by the host, "content" (text = the title),
+	 * "stamp" (a member's timestamp, text = their name then). `contentKey`: the video a position belongs to.
 	 */
 	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, String kind,
-			long createdAt, boolean deleted) {
+			long createdAt, boolean deleted, String contentKey) {
 	}
 
 	@Id
@@ -25,6 +26,8 @@ public class ChatMessage {
 	private String text;
 	private Long mediaPositionMs;
 	private String kind;
+	/** "<provider>:<contentId>" of the room's video when written, with a position only. */
+	private String contentKey;
 	private boolean deleted;
 	/** Insert order (AUTO_INCREMENT), for read marks. */
 	@Column(insertable = false, updatable = false)
@@ -35,17 +38,23 @@ public class ChatMessage {
 	}
 
 	ChatMessage(String roomId, String userId, String text, Long mediaPositionMs, String kind) {
+		this(roomId, userId, text, mediaPositionMs, kind, null);
+	}
+
+	/** `room`'s video is what the position belongs to (none without a position). */
+	ChatMessage(String roomId, String userId, String text, Long mediaPositionMs, String kind, Room room) {
 		this.id = UUID.randomUUID().toString();
 		this.roomId = roomId;
 		this.userId = userId;
 		this.text = text;
 		this.mediaPositionMs = mediaPositionMs;
 		this.kind = kind;
+		this.contentKey = mediaPositionMs == null || room == null ? null : room.contentKey();
 		this.createdAt = System.currentTimeMillis();
 	}
 
 	View view() {
-		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted);
+		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey);
 	}
 
 	/** A "content" line: the title read late. */
@@ -59,6 +68,7 @@ public class ChatMessage {
 		this.deleted = true;
 		this.text = "";
 		this.mediaPositionMs = null;
+		this.contentKey = null;
 	}
 
 	boolean isLog() {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
+import { contentKey, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
@@ -215,7 +215,8 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       </div>
 
       <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
-        subscribe={subscribe} position={position} onSeek={isHost && s.canPlay ? (ms) => handle.seek(ms) : undefined} />
+        subscribe={subscribe} position={position} onSeek={isHost && s.canPlay ? (ms) => handle.seek(ms) : undefined}
+        video={content ? contentKey(content) : undefined} videoMs={content?.durationMs} />
 
       {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
       {asker.dialog}

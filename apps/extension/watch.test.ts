@@ -27,6 +27,7 @@ let posted: [number, string][]; // requests sent to the tabs' players (tab, op)
 let created: string[]; // tabs.create URLs
 let activated: number[]; // tabs made active by us
 let navigated: [number, string][]; // tabs we sent to a URL
+let createdBehind: string[]; // tabs.create URLs opened in the background
 let focusedWindows: number[]; // windows brought forward by us
 let heldUpdate: ReturnType<typeof hold<void>> | null = null; // the next tabs.update answers when released
 let lastFocused = 1; // the browser window focused last
@@ -119,7 +120,8 @@ vi.mock('wxt/browser', () => ({
         await held?.promise;
         if (q.url && tab) {
           navigated.push([id, q.url]);
-          return { ...tab, url: q.url, active: !!q.active };
+          if (q.active) activated.push(id);
+          return { ...tab, url: q.url, active: q.active ?? tab.active }; // unchanged unless asked, as in Chrome
         }
         if (q.active && !q.url && tab) {
           activated.push(id);
@@ -127,8 +129,9 @@ vi.mock('wxt/browser', () => ({
         }
         throw new Error('no such tab');
       },
-      create: async (q: { url: string }) => {
+      create: async (q: { url: string; active?: boolean }) => {
         created.push(q.url);
+        if (q.active === false) createdBehind.push(q.url);
         return (globalThis as any).__created;
       },
     },
@@ -165,6 +168,7 @@ beforeEach(() => {
   created = [];
   activated = [];
   navigated = [];
+  createdBehind = [];
   focusedWindows = [];
   lastFocused = 1;
 });
@@ -1649,6 +1653,28 @@ describe('watch: the panel detached into its own window', () => {
     await w.tabs!.choose(null);
     for (let i = 0; i < 3; i++) await settle();
     expect(w.tabs!.followed()).toBe(1); // window 1's active tab, not window 2's
+  });
+
+  it('following the host by itself (quiet) changes the followed tab\'s link without bringing it forward', async () => {
+    delete stored['mirattic.followActive'];
+    tabs = [YT(1), YT(2, true)];
+    const w = await watch({ inRoom: true });
+    await w.tabs!.choose(1, 1);
+    w.open(YT(5).url, false, true);
+    for (let i = 0; i < 3; i++) await settle();
+    expect(navigated).toEqual([[1, YT(5).url]]);
+    expect(activated).toEqual([]);
+    w.open(YT(6).url); // the user's own "이 영상 열기": brought forward
+    for (let i = 0; i < 3; i++) await settle();
+    expect(activated).toEqual([1]);
+    // The followed tab gone meanwhile: its replacement opens in the background too, and is followed once loaded.
+    const opened = { ...YT(7), status: 'loading' };
+    (globalThis as any).__created = opened;
+    tabs = [YT(2, true)];
+    w.open(YT(7).url, false, true);
+    for (let i = 0; i < 3; i++) await settle();
+    expect(createdBehind).toEqual([YT(7).url]);
+    expect(w.tabs!.followed()).toBe(7);
   });
 
   it('"이 영상 열기" with the video open in a playlist tab takes that tab back to the plain video', async () => {

@@ -18,12 +18,23 @@ import org.springframework.stereotype.Component;
  * instead of "pause" + "play". Where the host's page says whether the seek bar is held (`scrubbing`, decision 86:
  * YouTube), a pause without it is written at once and one with it is held until the drag ends, then a moment more
  * (the page lets go just before it plays again); elsewhere every pause is held a moment.
+ * A video ending and the next one starting by itself is the "content" line alone: a pause within END_MS of its length
+ * is held END_HOLD_MS and dropped if a new video comes meanwhile (else written: the host paused there), and the next
+ * one's first play where it starts (within FIRST_PLAY_MS of the change) isn't written. ponytail: that play can't be told
+ * from the host pressing play at the start within those seconds (no such signal from the page) — that one goes unlogged.
  * ponytail: in memory, single instance; after a server restart everyone reconnecting is logged as joining again.
  * Lines are written under one lock (a few per minute), so a leave can't land after a newer join.
  */
 @Component
 public class RoomLog {
 
+	/** A pause this close to the video's end may be it ending: held END_HOLD_MS, dropped if the next video comes. */
+	static final long END_MS = 2_000;
+	public static final long END_HOLD_MS = 10_000;
+	/** The new video's first play this soon after the change, where it starts: it starting by itself, no line. */
+	static final long FIRST_PLAY_MS = 10_000;
+	/** Room → when its video changed, until its first play (guarded by this). */
+	private final Map<String, Long> changedAt = new ConcurrentHashMap<>();
 	/** A "seek" landing this close to where playback would be anyway (e.g. a title update) is no move: no line. */
 	static final long MIN_JUMP_MS = 2_000;
 
@@ -54,6 +65,8 @@ public class RoomLog {
 		boolean scrubbing;
 		/** When the hold started: a drag's hold ends SCRUB_HOLD_MS after it, however long the moves go on. */
 		final long since;
+		/** At the video's end: held this long (a new video meanwhile drops it), not the hold time. */
+		long ending;
 
 		Held(String userId, long pausedPosition, long baseline, long position, long lastAt, boolean moved,
 				boolean scrubbing) {
@@ -69,7 +82,7 @@ public class RoomLog {
 
 		/** Past its time: a drag SCRUB_HOLD_MS after it began, otherwise the hold time after the last command. */
 		boolean due(long now, long pauseHoldMs) {
-			return scrubbing ? now - since >= SCRUB_HOLD_MS : now - lastAt >= pauseHoldMs;
+			return scrubbing ? now - since >= SCRUB_HOLD_MS : now - lastAt >= Math.max(pauseHoldMs, ending);
 		}
 	}
 
@@ -148,6 +161,11 @@ public class RoomLog {
 		}
 		long now = System.currentTimeMillis();
 		boolean jumped = Math.abs(a.landed() - a.expected()) >= MIN_JUMP_MS;
+		// Kept through the new video's first paused reports (it loads paused, then plays): decided by its first play.
+		Long changed = a.state().playing() ? changedAt.remove(roomId) : changedAt.get(roomId);
+		if (changed != null && now - changed < FIRST_PLAY_MS && !a.wasPlaying() && a.state().playing() && !jumped) {
+			return; // the new video starting by itself, where it starts (one played from elsewhere is a play, logged)
+		}
 		Held h = held.get(roomId);
 		// Held past its time (the sweep hasn't run yet), or another host now: written as it was.
 		if (h != null && (h.due(now, pauseHoldMs) || !h.userId.equals(me))) {
@@ -170,11 +188,15 @@ public class RoomLog {
 			}
 			return;
 		}
+		Long duration = a.state().durationMs();
 		if (a.wasPlaying() && !a.state().playing()) {
 			// Paused somewhere else (the drag's first report): the pause is where it was, the move comes after.
 			Held pause = new Held(me, jumped ? a.expected() : a.landed(), a.expected(), a.landed(), now, jumped,
 					Boolean.TRUE.equals(scrubbing));
-			if (Boolean.FALSE.equals(scrubbing)) {
+			if (duration != null && a.landed() >= duration - END_MS) {
+				pause.ending = END_HOLD_MS; // it ended, if the next video comes (contentChanged drops it)
+				held.put(roomId, pause);
+			} else if (Boolean.FALSE.equals(scrubbing)) {
 				writeHeld(roomId, pause); // not the seek bar: a pause, now
 			} else {
 				held.put(roomId, pause);
@@ -192,6 +214,7 @@ public class RoomLog {
 			return;
 		}
 		held.remove(roomId);
+		changedAt.put(roomId, System.currentTimeMillis()); // ponytail: one entry per room until its next play
 		post(roomId, log);
 	}
 

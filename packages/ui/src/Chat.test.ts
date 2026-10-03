@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { ChatMessage } from "@mirattic/types";
 import { logText, merge, receive, reconcile, tombstone, without } from "./Chat";
+import { parseClock } from "./format";
 
 const msg = (id: string, createdAt: number): ChatMessage => ({ id, roomId: "r", userId: "u", text: id, createdAt });
 
@@ -22,6 +23,7 @@ it("shows room logs", () => {
   expect(logText({ ...msg("c", 1), text: "2화", kind: "content" })).toBe("호스트가 영상을 바꿨습니다: 2화");
   expect(logText({ ...msg("s", 1), text: "", kind: "seek", mediaPositionMs: 754_000 })).toBe("호스트가 12:34로 이동했습니다");
   expect(logText({ ...msg("k", 1), text: "민수", kind: "kick" })).toBe("민수님이 내보내졌습니다");
+  expect(logText({ ...msg("t", 1), text: "민수", kind: "stamp", mediaPositionMs: 65_000 })).toBe("민수님이 1:05에 스탬프를 찍었습니다");
 });
 
 it("drops a deleted message, or every message of a deleted account", () => {
@@ -60,4 +62,11 @@ it("after a reconnect, a message deleted meanwhile shows the server's placeholde
   const page = [msg("a", 1), { ...msg("b", 2), text: "", deleted: true }];
   const shown = [msg("a", 1), msg("b", 2)];
   expect(reconcile(page, shown).map((m) => [m.id, m.text, !!m.deleted])).toEqual([["a", "a", false], ["b", "", true]]);
+});
+
+it("a stamp's time as typed", () => {
+  expect(parseClock("3:28")).toBe(208_000);
+  expect(parseClock(" 1:02:03 ")).toBe(3_723_000);
+  expect(parseClock("0:00")).toBe(0);
+  for (const bad of ["", "3", "3:7", "3:60", "1:60:00", "a:bc", "-1:00", "1:02:03:04"]) expect(parseClock(bad)).toBeNull();
 });

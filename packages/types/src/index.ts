@@ -127,9 +127,10 @@ export type FriendRequests = { incoming: FriendRequestView[]; outgoing: FriendRe
 /**
  * A room log line (decision 78), shown centered: someone came in / went out (`text` = their name then), or the
  * host played / paused / moved / changed the video (`text` = its title), removed a member or handed the room over
- * (`kick` / `host`, `text` = that member's name, decision 79). Sent as `chat:log`.
+ * (`kick` / `host`, `text` = that member's name, decision 79), or a member stamped a time (`stamp`, `text` = their
+ * name, decision 102). Sent as `chat:log`.
  */
-export type ChatLogKind = "join" | "leave" | "play" | "pause" | "seek" | "content" | "kick" | "host";
+export type ChatLogKind = "join" | "leave" | "play" | "pause" | "seek" | "content" | "kick" | "host" | "stamp";
 
 /** A chat line someone wrote (`chat:message`), or a room log (`kind`, `chat:log`). */
 export type ChatMessage = {
@@ -139,6 +140,8 @@ export type ChatMessage = {
   text: string;
   mediaPositionMs?: number;
   kind?: ChatLogKind | null;
+  /** The video `mediaPositionMs` belongs to (`contentKey` of the room's then; never shown, decision 102). */
+  contentKey?: string;
   createdAt: number;
   /** Deleted for everyone: `text` is empty, shown as a placeholder. */
   deleted?: boolean;
@@ -191,6 +194,11 @@ export function watchUrl(content: { provider: MediaProvider; contentId: string }
 /** The host moved on within the same series: members follow without being asked. */
 export function sameSeries(a: RoomContent | undefined, b: RoomContent | undefined) {
   return !!a?.series && a.provider === b?.provider && a.series === b.series;
+}
+
+/** What a chat line's position belongs to: "<provider>:<contentId>", as the server writes it (decision 102). */
+export function contentKey(content: { provider: MediaProvider; contentId: string }) {
+  return `${content.provider}:${content.contentId}`;
 }
 
 export type RoomRole = "HOST" | "MEMBER";

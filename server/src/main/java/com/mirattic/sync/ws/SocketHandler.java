@@ -68,6 +68,12 @@ class SocketHandler extends TextWebSocketHandler {
 	private final Map<String, Long> pauseRequests = new ConcurrentHashMap<>();
 	/** "room|host" → when the host's last connection left the room: a later leave restarts the wait. */
 	private final Map<String, Long> hostGone = new ConcurrentHashMap<>();
+	/** "user|reqId" → the stamp it posted, for STAMP_RETRY_MS: a retry after a lost answer gets that answer again. */
+	private final Map<String, Stamped> stamped = new ConcurrentHashMap<>();
+	private static final long STAMP_RETRY_MS = 120_000;
+
+	private record Stamped(String id, long createdAt, long at) {
+	}
 	private final TaskScheduler scheduler;
 	private final long hostGoneCloseMs;
 
@@ -156,7 +162,7 @@ class SocketHandler extends TextWebSocketHandler {
 			case "sync:request" -> hub.send(out(session), new ServerEvent("sync:response", null, null, null,
 					System.currentTimeMillis(), Map.of("reqId", reqId == null ? "" : reqId)));
 			case "room:join", "room:leave", "playback:play", "playback:pause", "playback:seek",
-					"playback:content-change", "chat:message", "pause:request", "room:read" -> {
+					"playback:content-change", "chat:message", "chat:stamp", "pause:request", "room:read" -> {
 				if (roomId == null) {
 					error(session, reqId, "bad_payload");
 					return;
@@ -245,11 +251,41 @@ class SocketHandler extends TextWebSocketHandler {
 					error(session, reqId, "bad_payload");
 					return;
 				}
+				JsonNode key = payload.path("contentKey"); // the video the position is on (absent: an older client)
 				ChatMessage.View message = rooms.chat(me, roomId, text.asString(),
-						position.canConvertToLong() ? position.asLong() : null);
+						position.canConvertToLong() ? position.asLong() : null, key.isString() ? key.asString() : null);
 				// To every member, live in the room or not: the others count it as unread (and may be notified).
 				ServerEvent event = new ServerEvent("chat:message", roomId, me, null, message.createdAt(), message);
 				rooms.memberIds(roomId).forEach(id -> hub.sendEvent(id, event));
+			}
+			case "chat:stamp" -> {
+				if (!withinBudget(session, CHAT_WINDOW, MAX_CHAT_PER_SECOND)) {
+					error(session, reqId, "rate_limited");
+					return;
+				}
+				JsonNode position = payload.path("mediaPositionMs");
+				if (!position.isIntegralNumber() || !position.canConvertToLong()) {
+					error(session, reqId, "bad_payload");
+					return;
+				}
+				long now = System.currentTimeMillis();
+				stamped.values().removeIf(s -> now - s.at() > STAMP_RETRY_MS); // ponytail: swept per stamp (a few a minute)
+				String attempt = reqId == null ? null : me + "|" + reqId;
+				Stamped done = attempt == null ? null : stamped.get(attempt);
+				if (done == null) {
+					// A line like the room's own logs: to the connections in the room, the others see it in the history.
+					JsonNode key = payload.path("contentKey");
+					ChatMessage.View line = rooms.stamp(me, roomId, position.asLong(), key.isString() ? key.asString() : null);
+					roomLog.post(roomId, line);
+					done = new Stamped(line.id(), line.createdAt(), now);
+					if (attempt != null) {
+						stamped.put(attempt, done);
+					}
+				}
+				if (reqId != null) { // the sender's dialog: this attempt went through (an error says the opposite)
+					hub.send(out(session), new ServerEvent("chat:stamp", roomId, me, null, done.createdAt(),
+							Map.of("reqId", reqId, "id", done.id())));
+				}
 			}
 			case "playback:content-change" -> {
 				if (!withinBudget(session, PLAYBACK_WINDOW, MAX_PLAYBACK_PER_SECOND)) {

@@ -107,8 +107,9 @@ export type Platform = {
   /**
    * Opens a watch page (built with `watchUrl`, never a URL from another user). `newTab`: always in a new tab
    * (the user's own click); otherwise the extension reuses the tab it follows (the room following the host).
+   * `quiet`: followed by itself (not the user's click) — the tab isn't activated, nor its window focused.
    */
-  open(url: string, newTab?: boolean): void;
+  open(url: string, newTab?: boolean, quiet?: boolean): void;
   /**
    * The panel in a window of its own (the extension): `detached` while this is one — every browser window's tabs then
    * count alike. `toggle`: out to its own window, or back to the side panel. Call from a click.
