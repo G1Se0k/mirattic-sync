@@ -15,6 +15,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
@@ -41,7 +42,7 @@ public class AccountController {
 	/** How recent the password sign-in behind the handoff must be. */
 	static final Duration REAUTH_WINDOW = Duration.ofMinutes(5);
 
-	/** Auth signs deletion orders for one minute; a longer one is not Auth's. */
+	/** Auth signs orders for one minute; a longer one is not Auth's. */
 	static final Duration ORDER_LIFETIME = Duration.ofMinutes(1);
 
 	/** Clock difference allowed between Auth and Sync for an order (the shared decoder's own allows 60 s). */
@@ -55,7 +56,7 @@ public class AccountController {
 	private final JwtDecoder deletionOrders;
 
 	AccountController(AccountService accounts, RoomService rooms, SocketHub hub, Handoffs handoffs, MiratticAuth auth) {
-		this.deletionOrders = auth.decoder(AccountController::isDeletionOrder);
+		this.deletionOrders = auth.decoder(order("account_deletion"));
 		this.accounts = accounts;
 		this.rooms = rooms;
 		this.hub = hub;
@@ -106,18 +107,20 @@ public class AccountController {
 	}
 
 	/**
-	 * A deletion order only: purpose account_deletion, no scope (never an API token), issued for at most a minute
-	 * and used within it (give or take {@link #ORDER_CLOCK_SKEW}).
+	 * An Auth order with this purpose only (account_deletion, admin_read): no scope (never an API token), issued for
+	 * at most a minute and used within it (give or take {@link #ORDER_CLOCK_SKEW}).
 	 */
-	static OAuth2TokenValidatorResult isDeletionOrder(Jwt jwt) {
-		Instant now = Instant.now();
-		Instant iat = jwt.getIssuedAt();
-		Instant exp = jwt.getExpiresAt();
-		boolean ok = "account_deletion".equals(jwt.getClaimAsString("purpose")) && !jwt.hasClaim("scope")
-				&& iat != null && exp != null && !exp.isAfter(iat.plus(ORDER_LIFETIME))
-				&& !iat.isAfter(now.plus(ORDER_CLOCK_SKEW)) && now.isBefore(exp.plus(ORDER_CLOCK_SKEW));
-		return ok ? OAuth2TokenValidatorResult.success()
-				: OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "not a deletion order", null));
+	public static OAuth2TokenValidator<Jwt> order(String purpose) {
+		return jwt -> {
+			Instant now = Instant.now();
+			Instant iat = jwt.getIssuedAt();
+			Instant exp = jwt.getExpiresAt();
+			boolean ok = purpose.equals(jwt.getClaimAsString("purpose")) && !jwt.hasClaim("scope")
+					&& iat != null && exp != null && !exp.isAfter(iat.plus(ORDER_LIFETIME))
+					&& !iat.isAfter(now.plus(ORDER_CLOCK_SKEW)) && now.isBefore(exp.plus(ORDER_CLOCK_SKEW));
+			return ok ? OAuth2TokenValidatorResult.success()
+					: OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token", "not a " + purpose + " order", null));
+		};
 	}
 
 	/** As after a leave / unfriend, the others are told; my sockets close. */

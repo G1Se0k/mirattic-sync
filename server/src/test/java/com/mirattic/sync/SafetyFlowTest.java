@@ -286,6 +286,32 @@ class SafetyFlowTest extends IntegrationTest {
 	}
 
 	/** As Auth signs one: one minute. */
+	@Test
+	void theAdminConsoleReadsWithAnAdminOrderOnly() throws Exception {
+		TestUser u = signup();
+		TestUser friend = signup();
+		befriend(u, friend);
+		call(HttpMethod.POST, "/api/feedback", u.accessToken(), "{\"kind\":\"BUG\",\"text\":\"고장 <b>\"}")
+				.andExpect(status().is2xxSuccessful());
+		String admin = order(java.util.UUID.randomUUID().toString(), AuthStub.CLIENT_ID, "admin_read");
+		JsonNode stats = body(call(HttpMethod.GET, "/api/internal/admin/stats", admin, null).andExpect(status().isOk()));
+		assertThat(stats.path("facts").get(0).get(0).asString()).isEqualTo("Sync 프로필");
+		assertThat(stats.path("tables").findValuesAsString("title")).containsExactly("최근 신고", "최근 피드백");
+		JsonNode user = body(call(HttpMethod.GET, "/api/internal/admin/users/" + u.id(), admin, null)
+				.andExpect(status().isOk()));
+		assertThat(user.toString()).contains("고장 <b>", "\"친구\",\"1\"");
+		assertThat(body(call(HttpMethod.GET, "/api/internal/admin/users/nobody", admin, null)).toString()).contains("없음");
+
+		// Not with an access token, a deletion order, another product's order, or none.
+		for (String token : new String[] {u.accessToken(), order(u.id(), AuthStub.CLIENT_ID, "account_deletion"),
+				order(u.id(), "mirattic-flow", "admin_read"), null}) {
+			call(HttpMethod.GET, "/api/internal/admin/stats", token, null).andExpect(status().isUnauthorized());
+			call(HttpMethod.GET, "/api/internal/admin/users/" + u.id(), token, null).andExpect(status().isUnauthorized());
+		}
+		// And an admin order is not a deletion order.
+		deletionOrder(admin).andExpect(status().isUnauthorized());
+	}
+
 	private static String order(String uid, String audience, String purpose) {
 		return AuthStub.sign(java.util.Map.of("sub", uid, "aud", audience, "purpose", purpose, "exp",
 				new java.util.Date(System.currentTimeMillis() + 60_000)));

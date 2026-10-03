@@ -3,6 +3,7 @@ package com.mirattic.sync.config;
 import static org.springframework.security.config.Customizer.withDefaults;
 
 import com.mirattic.sync.account.AccountController;
+import com.mirattic.sync.admin.AdminController;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -29,12 +30,13 @@ public class SecurityConfig {
 				.cors(withDefaults())
 				.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
-						.requestMatchers(AccountController.DELETION_ORDER).permitAll()
+						.requestMatchers(AccountController.DELETION_ORDER, AdminController.PATH + "/**").permitAll()
 						.requestMatchers("/actuator/health", "/api/auth/**", "/auth/**", "/ws", "/privacy.html", "/", "/index.html", "/landing/**").permitAll()
 						.anyRequest().authenticated())
-				// Auth's deletion order is not an access token: AccountController verifies it itself.
+				// Auth's orders (deletion, admin reads) are not access tokens: their controllers verify them.
 				.oauth2ResourceServer(o -> o.jwt(withDefaults()).bearerTokenResolver(request ->
-						AccountController.DELETION_ORDER.equals(request.getRequestURI()) ? null : BEARER.resolve(request)))
+						AccountController.DELETION_ORDER.equals(request.getRequestURI())
+								|| request.getRequestURI().startsWith(AdminController.PATH + "/") ? null : BEARER.resolve(request)))
 				.build();
 	}
 
