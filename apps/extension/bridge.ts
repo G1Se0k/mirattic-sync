@@ -61,6 +61,20 @@ export function serveAdapter(create: () => Served) {
 
 const REPLY_TIMEOUT_MS = 1000;
 
+/**
+ * Pauses the video of a tab no longer followed (another tab chosen): over a connection of its own, closed at once (the
+ * request reaches the page before the close; nothing is heard back, so nothing reaches the room).
+ */
+export function pauseTab(tabId: number) {
+  try {
+    const port = browser.tabs.connect(tabId, { name: PORT_NAME });
+    port.postMessage({ id: 0, op: 'pause' } satisfies PortRequest);
+    port.disconnect();
+  } catch {
+    // the tab closed meanwhile: nothing to pause
+  }
+}
+
 /** Providers whose page blocks seeking through <video>: the side panel seeks in the page's world instead. */
 const PAGE_SEEK: Partial<Record<MediaProvider, { site: string; seek: (positionMs: number) => boolean }>> = {
   netflix: { site: 'https://www.netflix.com/', seek: netflixSeek },

@@ -2,7 +2,7 @@ import { browser, type Browser } from 'wxt/browser';
 import type { Socket } from '@mirattic/client';
 import type { Platform, VideoTab } from '@mirattic/ui';
 import { contentTitle, type MediaPresence, type MediaProvider, type RoomContent, type WatchingInfo } from '@mirattic/types';
-import { RemoteAdapter } from './bridge';
+import { pauseTab, RemoteAdapter } from './bridge';
 import { ASK_ON_SWITCH_KEY, experimentKey, followActiveSetting } from './ui-port';
 import { describeMetadata, metadataInPage, type NetflixMetadata } from './providers/netflix';
 
@@ -607,6 +607,9 @@ export async function watch(opts: {
           changed();
           return void pick();
         }
+        // The tab followed until now, if connected: its video paused once another tab is confirmed as the choice —
+        // unless its site's control was turned off meanwhile (a site turned off is never driven).
+        const before = id !== tabId && adapter.connected ? { tabId: tabId!, provider: adapter.provider } : null;
         // Chosen at once: events of the old tab, or an earlier lookup, can't take it back meanwhile.
         activations++;
         choosing++;
@@ -621,6 +624,8 @@ export async function watch(opts: {
           // window the panel moves to: not followed there (the user picks again from that panel).
           release(opts?.move ? chosenIn : tab?.windowId ?? tabWindow);
         } else {
+          // Another tab chosen: the video playing in the one followed until now is paused (a paused one stays so).
+          if (before && (!isExperimental(before.provider) || on.has(before.provider))) pauseTab(before.tabId);
           // A tab of another window than the panel's: brought forward there (the user sees what they chose).
           // Not if the panel moved to another window meanwhile (the choice still holds; nothing brought forward), nor
           // for a move (the background brings it forward once the panel is in its window, decision 95).

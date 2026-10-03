@@ -151,7 +151,7 @@ export default defineBackground(() => {
   function offerPanelHere(tabId: number, windowId: number) {
     if (![...panelWindows.values()].some((p) => p.windowId !== windowId)) return; // no panel elsewhere
     const toast = {
-      type: TOAST, kind: 'panel', target: String(windowId), panelOpen: false, alertId: ++alertIds,
+      type: TOAST, kind: 'panel', target: String(windowId), panelOpen: false, alertId: ++alertIds, total: PANEL_OFFER_MS,
       title: '이 창에서 보시나요?', body: 'Mirattic 패널을 이 창으로 옮기면 이 탭의 영상을 인식합니다.',
     } as const;
     panelOffers.set(tabId, { toast, until: Date.now() + PANEL_OFFER_MS });

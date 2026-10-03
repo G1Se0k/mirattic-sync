@@ -21,12 +21,13 @@ export const TOAST_CLEAR = 'mirattic:toast-clear';
  */
 export type AlertKind = 'invite' | 'request' | 'pause' | 'answered' | 'type' | 'panel';
 /**
- * `ms`: how long it shows (the alert's time, decision 87: 30 s). `meta`: where to watch ("YouTube · channel").
+ * `ms`: how long it shows (the alert's time, decision 87: 30 s). `total`: that alert's full time, when not 30 s (the
+ * bar shows the share of it left). `meta`: where to watch ("YouTube · channel").
  * `seq` (every message to the pages): rising in send order, so one overtaken by a later clear or dismissal is
  * dropped on arrival.
  */
 export type ToastMessage = {
-  type: typeof TOAST; kind: AlertKind; target: string; ms: number; title: string; meta?: string; body: string;
+  type: typeof TOAST; kind: AlertKind; target: string; ms: number; total?: number; title: string; meta?: string; body: string;
   panelOpen: boolean; seq: number;
   /** Which alert (a new one for the same friend or room gets another): an answer names it. */
   alertId: number;
@@ -261,11 +262,11 @@ export function serveToast() {
       navWatch = undefined;
     }
   };
-  /** The bar runs from the share of the alert's 30 s still left (drawn again or moved, it doesn't start over). */
+  /** The bar runs from the share of the alert's time still left (drawn again or moved, it doesn't start over). */
   const startBar = (box: HTMLElement) => {
     const left = Math.max(0, Number(box.dataset.until) - Date.now());
     const bar = box.querySelector('.bar > i') as HTMLElement;
-    bar.style.setProperty('--from', `${(left / MAX_MS) * 100}%`);
+    bar.style.setProperty('--from', `${Math.min(1, left / Number(box.dataset.total)) * 100}%`);
     bar.style.animationDuration = `${left}ms`;
   };
   /** Into a stack by arrival, newest first (a merge keeps that order too). */
@@ -343,6 +344,7 @@ export function serveToast() {
     box.querySelector('.meta')!.textContent = m.meta ?? '';
     box.querySelector('.body')!.textContent = m.body;
     box.dataset.until = String(Date.now() + ms);
+    box.dataset.total = String(Number.isFinite(m.total) && m.total! > 0 ? Math.min(m.total!, MAX_MS) : MAX_MS);
     startBar(box);
     // A room type change (decision 93): the same "always" choice as the panel's dialog.
     let always: HTMLInputElement | null = null;

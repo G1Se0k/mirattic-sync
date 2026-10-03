@@ -23,6 +23,7 @@ let injected: string[][]; // files injected per call
 let dropConnection: (() => void) | null; // closes the latest port, as a tab without a live script does
 let injectFails = false; // a page we have no access to
 let disconnects: number[]; // ports we closed, by tab
+let posted: [number, string][]; // requests sent to the tabs' players (tab, op)
 let created: string[]; // tabs.create URLs
 let activated: number[]; // tabs made active by us
 let focusedWindows: number[]; // windows brought forward by us
@@ -91,7 +92,11 @@ vi.mock('wxt/browser', () => ({
         return {
           onMessage: { addListener() {} },
           onDisconnect: { addListener: (l: () => void) => void (dropConnection = l) },
-          postMessage() {},
+          postMessage: (m: { op: string }) => {
+            posted.push([id, m.op]);
+            // A pause's own connection (pauseTab) is not a binding: `connects` counts the player's bindings.
+            if (m.op === 'pause') connects.splice(connects.lastIndexOf(id), 1);
+          },
           disconnect() {
             disconnects.push(id);
           },
@@ -148,6 +153,7 @@ beforeEach(() => {
   dropConnection = null;
   injectFails = false;
   disconnects = [];
+  posted = [];
   created = [];
   activated = [];
   focusedWindows = [];
@@ -1524,4 +1530,42 @@ it('followsActive: out of a room (or replaced) yes, in a room only when followin
   expect(w.followsActive()).toBe(false);
   w.tabs!.setRoom!({ inRoom: false, site: null }); // e.g. this device replaced
   expect(w.followsActive()).toBe(true);
+});
+
+it('choosing another tab pauses the video of the one followed until then (not when choosing it again)', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), YT(2)];
+  const w = await watch();
+  expect(w.tabs!.followed()).toBe(1);
+  await w.tabs!.choose(1, 1);
+  expect(posted.filter(([, op]) => op === 'pause')).toEqual([]);
+  await w.tabs!.choose(2, 1);
+  expect(posted.filter(([, op]) => op === 'pause')).toEqual([[1, 'pause']]);
+  expect(w.tabs!.followed()).toBe(2);
+});
+
+it('choosing a tab closed meanwhile pauses nothing (the followed tab stays)', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), YT(2)];
+  const w = await watch();
+  tabs = tabs.filter((t) => t.id !== 2); // closed before the click arrived
+  await w.tabs!.choose(2, 1);
+  for (let i = 0; i < 3; i++) await settle();
+  expect(w.tabs!.followed()).toBe(1);
+  expect(posted.filter(([, op]) => op === 'pause')).toEqual([]);
+});
+
+it('no pause for a tab whose site was turned off while the choice was looked up (a site turned off is never driven)', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [NF(1, true), YT(2)];
+  const w = await watch();
+  expect(connects.at(-1)).toBe(1);
+  heldGet.set(2, hold());
+  const choosing = w.tabs!.choose(2, 1);
+  await settle();
+  await w.experimental!.setEnabled('netflix', false);
+  heldGet.get(2)!.resolve();
+  await choosing;
+  expect(w.tabs!.followed()).toBe(2);
+  expect(posted.filter(([, op]) => op === 'pause')).toEqual([]);
 });
