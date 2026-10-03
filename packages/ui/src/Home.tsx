@@ -496,13 +496,19 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   // The host changed the room's type (decision 93): confirm, or leave the room — told wherever the panel is.
   const typeNotice = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.roomTypeNotice?.() ?? null);
+  const [typeAlways, setTypeAlways] = useState(false);
+  useEffect(() => setTypeAlways(false), [typeNotice?.roomId, typeNotice?.version]); // each question starts unchecked
   const typeChanged = typeNotice ? (
     <Dialog alert title={`방장이 방을 ${PROVIDER_NAMES[typeNotice.type]} 방으로 바꿨습니다`}>
       {/* No dismissal: one of the two answers (Escape or a click outside don't count). */}
-      <p className="muted">이제 {PROVIDER_NAMES[typeNotice.type]}에서 같이 봅니다. 계속하려면 확인, 아니면 방을 나가세요.</p>
+      <p className="muted">이제 {PROVIDER_NAMES[typeNotice.type]}에서 같이 봅니다. 확인하면 지금 탭이 {PROVIDER_NAMES[typeNotice.type]}(으)로 이동합니다.</p>
+      <label className="row check">
+        <input type="checkbox" checked={typeAlways} onChange={(e) => setTypeAlways(e.target.checked)} />
+        <span>이 방에서는 항상 허용하기 (다음부터 묻지 않고 이동)</span>
+      </label>
       <Actions>
         <button className="link danger" onClick={() => platform.answerRoomType?.(typeNotice.roomId, typeNotice.version, true)}>방 나가기</button>
-        <button onClick={() => platform.answerRoomType?.(typeNotice.roomId, typeNotice.version, false)}>확인</button>
+        <button onClick={() => platform.answerRoomType?.(typeNotice.roomId, typeNotice.version, false, typeAlways)}>확인</button>
       </Actions>
     </Dialog>
   ) : null;

@@ -58,6 +58,8 @@ export type RoomSyncDeps = {
   open(url: string, newTab?: boolean): void;
   /** Entered by the user now (not restored): a member without the room's video open gets it in a new tab. */
   openOnEnter?: boolean;
+  /** A site's first page (decision 93): where a member goes for a room type whose video isn't of that site yet. */
+  siteUrl?(provider: MediaProvider): string | undefined;
   /** The user's setting: false = follow the host to any video without asking (decision 81). Default: ask. */
   askOnSwitch?(): boolean;
 
@@ -90,6 +92,14 @@ export class RoomSync {
   private player: MediaProviderAdapter | undefined;
   private engineKey = "";
   private enginePlayer: MediaProviderAdapter | undefined;
+  /** A type change this member just confirmed (its version), until a room load says so (the move happens then). */
+  private confirming: number | null = null;
+
+  /** The member confirmed the room's type change up to `version` (decision 93): their tab moves once the room says so. */
+  confirmType(version: number) {
+    this.confirming = Math.max(this.confirming ?? 0, version);
+    void this.reload();
+  }
   /** The content the host last announced; set from the room only when its content changes. */
   private announced: RoomContent | null = null;
   /** The content this member was last shown, to tell a series step from a switch. */
@@ -109,6 +119,24 @@ export class RoomSync {
     this.state = emptyRoomState(deps.roomId);
     void this.reload();
     this.poll = setInterval(() => void this.readSnapshot(), 1000);
+  }
+
+  /**
+   * The member confirmed the room's type change (decision 93): their tab moves there, in place — to the room's video
+   * if it is of that site by now, else the site's first page.
+   */
+  private followConfirmed() {
+    const r = this.state.room;
+    if (this.isHost || !r?.type) return;
+    this.switchCheck++; // anything else under way gives up
+    const url = r.content?.provider === r.type ? openUrl(r.content) : this.deps.siteUrl?.(r.type);
+    if (url) this.deps.open(url);
+  }
+
+  /** A member who hasn't confirmed the room's latest type change (decision 93). */
+  private typePending() {
+    const r = this.state.room;
+    return !this.isHost && !!r?.type && (r.typeVersion ?? 0) > (r.typeSeen ?? 0);
   }
 
   private get isHost() {
@@ -137,7 +165,17 @@ export class RoomSync {
       if (mine !== this.loads || this.disposed) return;
       const before = this.state.room?.content;
       this.set({ room, loadFailed: false });
-      this.contentChanged(before, room.content);
+      // An unconfirmed type change (decision 93): a follow still under way (a tab lookup) gives up, a prompt goes.
+      if (this.typePending()) {
+        this.switchCheck++;
+        if (this.state.switched) this.set({ switched: null });
+      }
+      // Confirmed here (`confirmType`) and the room says so now: the one move for it is to the room's site (below), not
+      // also a follow of its video.
+      const confirmed = this.confirming !== null && !this.typePending() && (room.typeSeen ?? 0) >= this.confirming;
+      if (confirmed) this.confirming = null;
+      this.contentChanged(before, room.content, confirmed);
+      if (confirmed) this.followConfirmed();
     } catch (e) {
       if (mine !== this.loads || this.disposed) return;
       if (this.deps.isGone(e)) this.set({ closed: true });
@@ -151,7 +189,7 @@ export class RoomSync {
     if (this.state.room) this.set({ room: { ...this.state.room, muted } });
   }
 
-  private contentChanged(before: RoomContent | null | undefined, content: RoomContent | null) {
+  private contentChanged(before: RoomContent | null | undefined, content: RoomContent | null, confirmed = false) {
     // Another video (or none): a prompt to follow an earlier one is over.
     if (this.state.switched && (this.state.switched.provider !== content?.provider || this.state.switched.contentId !== content.contentId)) {
       this.set({ switched: null });
@@ -171,7 +209,8 @@ export class RoomSync {
       this.set({ away: false });
       void this.readSnapshot();
     }
-    this.memberFollows(content, sameVideo);
+    if (confirmed) this.shown = content; // followConfirmed moves the tab
+    else this.memberFollows(content, sameVideo);
     this.refreshPlayer();
     // Same player, another room video (the next episode): stay on the credits of that one now.
     if (!sameVideo && this.engineKey === "member") this.enginePlayer?.keepCredits?.(content.contentId);
@@ -185,16 +224,29 @@ export class RoomSync {
   private memberFollows(content: RoomContent, sameVideo: boolean) {
     const before = this.shown;
     this.shown = content;
+    // The room's type changed and this member hasn't confirmed it yet (decision 93): no video of the room is followed,
+    // opened or asked about meanwhile (whatever came before) — their confirmation moves their tab.
+    if (this.typePending()) return;
     const entering = !before && !!this.deps.openOnEnter;
     if (!before && !entering || sameVideo || before?.provider === content.provider && before.contentId === content.contentId) return;
     if (this.isHost) return;
+    if (!before) {
+      // Entering a room whose type moved on from its video (decision 93): to the type's site, not the old video
+      // (whether or not the old video's site can be played here).
+      const type = this.state.room?.type;
+      const site = type && type !== content.provider ? this.deps.siteUrl?.(type) : undefined;
+      if (site) {
+        this.switchCheck++;
+        return this.deps.open(site, true);
+      }
+    }
     const player = this.deps.adapter(content.provider);
     const url = openUrl(content);
     if (!player || !url) return;
     const mine = ++this.switchCheck; // the room may move on again before the tab answers
     if (!before) return this.openOnEnter(content, url, player, mine, 0);
     void player.getSnapshot().then((s) => {
-      if (mine !== this.switchCheck || this.disposed || s?.contentId === content.contentId) return;
+      if (mine !== this.switchCheck || this.disposed || this.typePending() || s?.contentId === content.contentId) return;
       // The same series, the setting, or "이 방에서 항상 허용" (decision 81): opened without asking.
       if (sameSeries(before, content) || this.followAlways || this.deps.askOnSwitch?.() === false) this.deps.open(url);
       else this.set({ switched: content });
@@ -214,7 +266,7 @@ export class RoomSync {
     // Still this room video, and still a member (a wait may see the room move on or me become the host).
     const stillFollowing = () => {
       const now = this.state.room?.content;
-      return mine === this.switchCheck && !this.disposed && !this.isHost
+      return mine === this.switchCheck && !this.disposed && !this.isHost && !this.typePending()
         && now?.provider === content.provider && now.contentId === content.contentId;
     };
     if (watchingIt()) return;
@@ -310,7 +362,9 @@ export class RoomSync {
   private restart() {
     const ready = !!this.player && !!this.state.room && this.state.clockReady;
     const host = this.isHost;
-    const key = !ready ? "" : host ? (this.connected ? "host" : "") : "member";
+    // A member who hasn't confirmed the room's type change (decision 93) isn't synced meanwhile (their player isn't
+    // played, paused or moved by the room until they confirm; the room reloads then and this starts it).
+    const key = !ready ? "" : host ? (this.connected ? "host" : "") : this.typePending() ? "" : "member";
     const engineOf = this.player;
     if (key === this.engineKey && engineOf === this.enginePlayer) return;
     this.stopEngines();

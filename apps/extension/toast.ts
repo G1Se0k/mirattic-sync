@@ -42,7 +42,8 @@ export type ToastOverVideo = { type: typeof TOAST_OVER_VIDEO; target: string; al
 export type ToastClear = { type: typeof TOAST_CLEAR; seq: number };
 /** An alert settled elsewhere (cancelled, answered, expired): off every page. */
 export type ToastDismiss = { type: typeof TOAST_DISMISS; kind: AlertKind; target: string; seq: number };
-export type ToastAnswer = { type: typeof TOAST_ANSWER; kind: AlertKind; target: string; accept: boolean; alertId?: number };
+/** `always`: a room type change's "이 방에서는 항상 허용하기" (decision 93), checked when it was confirmed. */
+export type ToastAnswer = { type: typeof TOAST_ANSWER; kind: AlertKind; target: string; accept: boolean; alertId?: number; always?: boolean };
 
 /** Button labels: [yes, no], in that order left to right. Yes opens the panel too, except on a pause. */
 const ANSWERS: Record<AlertKind, [string, string]> = {
@@ -129,6 +130,8 @@ const STYLE = `
   span.meta { margin-top: 2px; }
   span:empty { display: none; }
   .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 12px 16px 14px; }
+  label.always { display: flex; align-items: center; gap: 6px; padding: 10px 16px 0; font-size: 12px; cursor: pointer; }
+  label.always input { margin: 0; }
   button { width: 100%; margin: 0; padding: 6px 12px; border: 1px solid transparent; border-radius: 7px;
     font: inherit; font-weight: 550; cursor: pointer; background: var(--strong); color: var(--on-strong); }
   button.no { background: transparent; color: var(--fg); border-color: var(--line); }
@@ -340,12 +343,23 @@ export function serveToast() {
     box.querySelector('.body')!.textContent = m.body;
     box.dataset.until = String(Date.now() + ms);
     startBar(box);
+    // A room type change (decision 93): the same "always" choice as the panel's dialog.
+    let always: HTMLInputElement | null = null;
+    if (m.kind === 'type') {
+      const label = document.createElement('label');
+      label.className = 'always';
+      always = document.createElement('input');
+      always.type = 'checkbox';
+      label.append(always, document.createTextNode('이 방에서는 항상 허용하기'));
+      box.querySelector('.text')!.after(label);
+    }
     ANSWERS[m.kind].forEach((label, i) => {
       const button = document.createElement('button');
       button.textContent = label;
       if (i === 1) button.className = 'no';
       button.addEventListener('click', () => {
-        const answer: ToastAnswer = { type: TOAST_ANSWER, kind: m.kind, target: m.target, accept: i === 0, alertId: m.alertId };
+        const answer: ToastAnswer = { type: TOAST_ANSWER, kind: m.kind, target: m.target, accept: i === 0, alertId: m.alertId,
+          ...(always?.checked && i === 0 ? { always: true } : {}) };
         void browser.runtime.sendMessage(answer).catch(() => {});
         if (shown.get(key) === box) remove(key);
       });

@@ -35,7 +35,7 @@ export type Watch = Omit<Platform, 'connect' | 'room'> & {
 };
 
 /** Each site's first page, opened when the room's type is picked and no tab of it is open (decision 93). */
-const SITE_HOME = {
+export const SITE_HOME = {
   youtube: YOUTUBE,
   netflix: 'https://www.netflix.com/browse',
   laftel: 'https://laftel.net/',
@@ -555,7 +555,9 @@ export async function watch(opts: { windowId?: number } = {}): Promise<Watch> {
         void browser.storage.local.set({ [followActiveSetting]: false });
         changed();
         const home = SITE_HOME[site as keyof typeof SITE_HOME];
-        const [found] = await browser.tabs.query({ windowId, url: [`${new URL(home).origin}/*`] }).catch(() => []);
+        // Every window's tabs of that site, the panel's window first.
+        const all = await browser.tabs.query({ url: [`${new URL(home).origin}/*`] }).catch(() => []);
+        const found = all.find((t) => t.windowId === windowId) ?? all[0];
         if (mine !== intent) return; // the user said otherwise since
         if (found?.id !== undefined) {
           activations++;

@@ -81,8 +81,11 @@ export type Platform = {
   seenClosed?(roomId: string): void;
   /** The host changed the type of the room I'm in (decision 93): to confirm or leave; the same object until it changes. */
   roomTypeNotice?(): { roomId: string; type: MediaProvider; version: number } | null;
-  /** That change (`version`) confirmed, or leave the room (the extension leaves it; its screen goes back). */
-  answerRoomType?(roomId: string, version: number, leave: boolean): void;
+  /**
+   * That change (`version`) confirmed — the tab followed moves to the room's site then — or leave the room (the
+   * extension leaves it; its screen goes back). `always`: this room's later changes are confirmed without asking.
+   */
+  answerRoomType?(roomId: string, version: number, leave: boolean, always?: boolean): void;
   /** The room the app is still in (the extension keeps it when the panel closes). */
   activeRoom?(): string | null;
   /** Provider control the user turns on at their own risk (Netflix, Laftel). Absent = not offered in this app. */

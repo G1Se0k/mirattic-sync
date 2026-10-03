@@ -38,7 +38,7 @@ export type FromPanel =
   /** The tab to follow; null = the active one, as the user switches. */
   | { op: 'tab'; tabId: number | null; windowId?: number }
   /** The room's type change told (decision 93): confirmed, or leave the room. */
-  | { op: 'type:answer'; roomId: string; version: number; leave: boolean }
+  | { op: 'type:answer'; roomId: string; version: number; leave: boolean; always?: boolean }
   /** The room's type picked: follow that site's tab of this window, or open the site. */
   | { op: 'site'; site: MediaProvider; windowId?: number }
   /** The notice of this closed room was shown to this account: not again (every panel). */

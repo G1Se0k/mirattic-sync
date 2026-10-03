@@ -416,25 +416,36 @@ type Site = Exclude<MediaProvider, "mock">;
 const SITES: Site[] = ["youtube", "netflix", "laftel"];
 /** The room's type as its site's icon; the host's opens the list of sites to switch the room to. */
 function RoomType({ type, onPick }: { type: MediaProvider | null; onPick?: (site: Site) => void }) {
-  const [open, setOpen] = useState(false);
+  // Where it opens: fixed under the button, so the scrolling room body doesn't clip it under the chat.
+  const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
+    const close = () => setOpen(null);
     document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
+    window.addEventListener("resize", close);
+    document.addEventListener("scroll", close, true); // anything scrolled: it would float away from the button
+    return () => {
+      document.removeEventListener("click", close);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("scroll", close, true);
+    };
   }, [open]);
   const icon = type ? <ProviderIcon provider={type} /> : <span className="provider mock" title="플랫폼 없음">·</span>;
   if (!onPick) return icon;
   return (
     <span className="menu">
       <button type="button" className="type-button" title="방 플랫폼 바꾸기" aria-label="방 플랫폼 바꾸기" aria-haspopup="menu"
-        aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>
+        aria-expanded={!!open} onClick={(e) => {
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          setOpen((o) => (o ? null : { top: r.bottom + 4, left: r.left }));
+        }}>
         {icon}
       </button>
       {open && (
-        <div className="menu-items left" role="menu">
+        <div className="menu-items left" role="menu" style={{ position: "fixed", top: open.top, left: open.left }}>
           {SITES.map((site) => (
-            <button key={site} role="menuitem" onClick={() => { setOpen(false); onPick(site); }}>
+            <button key={site} role="menuitem" onClick={() => { setOpen(null); onPick(site); }}>
               <ProviderIcon provider={site} /> {PROVIDER_NAMES[site]}
               {site === type && <span className="muted">· 지금</span>}
             </button>

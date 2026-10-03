@@ -313,3 +313,179 @@ it("a room entered without a video opens its first one; a restored one (not ente
     sync.dispose();
   }
 });
+
+it("a member who hasn't confirmed the room's type change isn't moved to another site's video (their confirmation does it)", async () => {
+  let view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "First" }, type: "youtube", typeVersion: 0, typeSeen: 0 };
+  const opened: string[] = [];
+  const mock = new MockMediaProvider({ contentId: "aaaaaaaaaaa", title: "First", durationMs: 600_000 });
+  const any = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => any, nowWatching: () => null, open: (url) => void opened.push(url), onChange: () => {},
+    askOnSwitch: () => false, // would follow without asking
+  });
+  sync.setConnected(true);
+  await settle();
+  view = { ...view, content: { provider: "netflix", contentId: "81234567", title: "Other site" }, type: "netflix", typeVersion: 1 };
+  await sync.reload();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(opened).toEqual([]);
+  expect(sync.state.switched).toBeNull();
+  // Another video of the new site before confirming: still not followed.
+  view = { ...view, content: { provider: "netflix", contentId: "81234569", title: "Another" } };
+  await sync.reload();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(opened).toEqual([]);
+  expect(sync.state.switched).toBeNull();
+  // Confirmed (seen), then the host moves on within that site: followed (moved to it once).
+  view = { ...view, content: { provider: "netflix", contentId: "81234568", title: "Next" }, typeSeen: 1 };
+  sync.confirmType(1);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(opened).toEqual(["https://www.netflix.com/watch/81234568"]);
+  sync.dispose();
+});
+
+it("entering a room without a video: its first video after an unconfirmed type change doesn't open", async () => {
+  let view: RoomView = { ...room("host"), content: null, type: null, typeVersion: 0, typeSeen: 0 };
+  const opened: string[] = [];
+  const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+  const any = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => any, nowWatching: () => null, open: (url) => void opened.push(url), onChange: () => {}, openOnEnter: true,
+  });
+  sync.setConnected(true);
+  await settle();
+  view = { ...view, content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "First" }, type: "youtube", typeVersion: 1 };
+  await sync.reload();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(opened).toEqual([]);
+  sync.dispose();
+});
+
+it("a type change without a new video drops a pending prompt to follow (until confirmed)", async () => {
+  let view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "First" }, type: "youtube", typeVersion: 0, typeSeen: 0 };
+  const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+  const any = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => any, nowWatching: () => null, open: () => {}, onChange: () => {}, askOnSwitch: () => true,
+  });
+  sync.setConnected(true);
+  await settle();
+  view = { ...view, content: { provider: "youtube", contentId: "bbbbbbbbbbb", title: "Next" } };
+  await sync.reload();
+  await settle();
+  expect(sync.state.switched?.contentId).toBe("bbbbbbbbbbb");
+  view = { ...view, type: "netflix", typeVersion: 1 }; // the type changed, the video not yet
+  await sync.reload();
+  await settle();
+  expect(sync.state.switched).toBeNull();
+  sync.dispose();
+});
+
+it("a member isn't synced (no playback applied) until they confirm the room's type change", async () => {
+  let view: RoomView = { ...room("host"), type: "mock", typeVersion: 1, typeSeen: 0 };
+  const m = start("me", "host");
+  m.sync["deps"].loadRoom = async () => view;
+  await m.sync.reload();
+  await measured(m);
+  m.event({ type: "playback:update", roomId: "r1", payload: { provider: "mock", contentId: "c1", positionMs: 300_000, playing: true, capturedAt: Date.now(), version: 5 } });
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect((await m.player.getSnapshot())!.playing).toBe(false); // not driven while unconfirmed
+  view = { ...view, typeSeen: 1 }; // confirmed
+  await m.sync.reload();
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect((await m.player.getSnapshot())!.playing).toBe(true);
+  m.sync.dispose();
+});
+
+it("confirming a type change moves the member's tab once, in place: to the room's video of that site, else the site", async () => {
+  for (const [content, expected] of [
+    [{ provider: "netflix", contentId: "81234567", title: "On it" }, "https://www.netflix.com/watch/81234567"],
+    [{ provider: "youtube", contentId: "aaaaaaaaaaa", title: "Old site" }, "https://www.netflix.com/browse"],
+  ] as const) {
+    let view: RoomView = { ...room("host"), content, type: "netflix", typeVersion: 1, typeSeen: 0 };
+    const opened: [string, boolean | undefined][] = [];
+    const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+    const sync = new RoomSync({
+      roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+      adapter: () => mock, nowWatching: () => null, open: (url, newTab) => void opened.push([url, newTab]), onChange: () => {},
+      askOnSwitch: () => false, siteUrl: (p) => (p === "netflix" ? "https://www.netflix.com/browse" : undefined),
+    });
+    sync.setConnected(true);
+    await settle();
+    expect(opened).toEqual([]); // unconfirmed
+    view = { ...view, typeSeen: 1 };
+    sync.confirmType(1); // confirmed here
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(opened).toEqual([[expected, undefined]]); // once, in the tab followed
+    sync.dispose();
+  }
+});
+
+it("entering a room whose type moved on from its video opens the type's site, not the old video", async () => {
+  const view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "Old" }, type: "netflix", typeVersion: 1, typeSeen: 1 };
+  const opened: [string, boolean | undefined][] = [];
+  const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => mock, nowWatching: () => null, open: (url, newTab) => void opened.push([url, newTab]), onChange: () => {},
+    openOnEnter: true, siteUrl: (p) => (p === "netflix" ? "https://www.netflix.com/browse" : undefined),
+  });
+  sync.setConnected(true);
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(opened).toEqual([["https://www.netflix.com/browse", true]]);
+  sync.dispose();
+});
+
+it("confirming while the room's video moved on too: one move, to the newer video", async () => {
+  let view: RoomView = { ...room("host"), content: { provider: "netflix", contentId: "81234567", title: "A" }, type: "netflix", typeVersion: 1, typeSeen: 0 };
+  const opened: string[] = [];
+  const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+  const netflix = new Proxy(mock, { get: (t, k) => (k === "provider" ? "netflix" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => netflix, nowWatching: () => null, open: (url) => void opened.push(url), onChange: () => {},
+    askOnSwitch: () => false, siteUrl: () => "https://www.netflix.com/browse",
+  });
+  sync.setConnected(true);
+  await settle();
+  view = { ...view, content: { provider: "netflix", contentId: "81234568", title: "B" }, typeSeen: 1 };
+  sync.confirmType(1);
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(opened).toEqual(["https://www.netflix.com/watch/81234568"]);
+  sync.dispose();
+});
+
+it("confirmed before this sync ever saw the change pending: still moves once the room says so", async () => {
+  let view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "Old" }, type: "youtube", typeVersion: 0, typeSeen: 0 };
+  const opened: string[] = [];
+  const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => mock, nowWatching: () => null, open: (url) => void opened.push(url), onChange: () => {},
+    siteUrl: () => "https://www.netflix.com/browse",
+  });
+  sync.setConnected(true);
+  await settle();
+  view = { ...view, type: "netflix", typeVersion: 1, typeSeen: 1 }; // changed and confirmed before any reload here
+  sync.confirmType(1);
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(opened).toEqual(["https://www.netflix.com/browse"]);
+  sync.dispose();
+});
+
+it("entering a room whose type moved on opens the type's site even if the old video's site can't play here", async () => {
+  const view: RoomView = { ...room("host"), content: { provider: "netflix", contentId: "81234567", title: "Old" }, type: "youtube", typeVersion: 1, typeSeen: 1 };
+  const opened: string[] = [];
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => undefined, nowWatching: () => null, open: (url) => void opened.push(url), onChange: () => {},
+    openOnEnter: true, siteUrl: () => "https://www.youtube.com/",
+  });
+  sync.setConnected(true);
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(opened).toEqual(["https://www.youtube.com/"]);
+  sync.dispose();
+});

@@ -38,7 +38,6 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
   let view: { roomId: string; state: RoomSyncState; listeners: Set<() => void>; seen: boolean; shown: boolean } | null = null;
   const windowId = (await browser.windows.getCurrent()).id;
   const subscribers = new Set<() => void>();
-  let windowTabs: VideoTab[] = [];
   /** A tab choice the background hasn't shown back yet: said again after a worker restart (the port may have dropped it). */
   let choosingTab: { tabId: number | null } | null = null;
   // Text size (Settings), kept in storage.local: applied before the app renders and on any panel's change. Each step
@@ -95,8 +94,6 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
           typeNotices: same(shared.typeNotices, m.shared.typeNotices),
           tabs: same(shared.tabs, m.shared.tabs),
         };
-        // This window's tabs only (the background's list has every window's).
-        windowTabs = same(windowTabs, shared.tabs.filter((t) => t.windowId === windowId));
         if (choosingTab && (choosingTab.tabId === null ? shared.followActive : !shared.followActive && shared.followedTab === choosingTab.tabId)) {
           choosingTab = null;
         }
@@ -175,7 +172,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
       setAskOnSwitch: (ask) => browser.storage.local.set({ [ASK_ON_SWITCH_KEY]: ask }),
     },
     tabs: {
-      list: () => windowTabs,
+      list: () => shared.tabs, // every window's video tabs
       followed: () => shared.followedTab,
       auto: () => shared.followActive,
       openSite: (site) => send({ op: 'site', site, windowId }),
@@ -188,7 +185,7 @@ export async function connectPanel(): Promise<{ api: ApiClient; platform: Platfo
     alertUntil: (kind, target) => shared.alertsUntil[`${kind}:${target}`],
     closedRooms: () => shared.closedRooms,
     roomTypeNotice: () => shared.typeNotices[0] ?? null, // one at a time, the others after it's answered
-    answerRoomType: (roomId, version, leave) => send({ op: 'type:answer', roomId, version, leave }),
+    answerRoomType: (roomId, version, leave, always) => send({ op: 'type:answer', roomId, version, leave, always }),
     seenClosed: (roomId) => {
       // The account it was shown to (the one these notices are for), until the background confirms storing it.
       const shown = shared.closedRooms.find((c) => c.roomId === roomId);

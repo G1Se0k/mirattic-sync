@@ -6,7 +6,7 @@ import {
 } from '@mirattic/types';
 import { API_URL, SOCKET_URL, authorize, store } from '../session';
 import { hasConsent } from '../consent';
-import { watch, type Watch } from '../watch';
+import { SITE_HOME, watch, type Watch } from '../watch';
 import {
   TOAST, TOAST_ANSWER, TOAST_CLEAR, TOAST_DISMISS, TOAST_OVER_VIDEO, TOAST_READY,
   type AlertKind, type ToastAnswer, type ToastClear, type ToastDismiss, type ToastMessage, type ToastOverVideo,
@@ -30,6 +30,10 @@ const PROVIDER_ORIGINS = ['https://www.youtube.com/', 'https://www.netflix.com/'
 const PROVIDER_TABS = PROVIDER_ORIGINS.map((o) => `${o}*`);
 /** `until`: when it stops counting. */
 type Alert = { kind: AlertKind; target: string; title: string; toast: Omit<ToastMessage, 'seq'>; until: number };
+
+/** storage.local (+ ".<userId>"): rooms whose type changes are confirmed without asking (decision 93, "이 방에서는 항상 허용하기"). */
+const TYPE_ALWAYS_ITEM = 'mirattic.typeAlways';
+const TYPE_RETRY_MS = 60_000; // a failed confirmation: asked instead, automatic again after this
 
 export default defineBackground(() => {
   // Toolbar icon opens the side panel (outside the page, never over the player).
@@ -227,7 +231,7 @@ export default defineBackground(() => {
    * runs here); the panel opens too if Chrome still counts the click, and follows the room. Failures (the invite
    * gone, nothing watched) leave it to the panel.
    */
-  async function answerAlert({ kind, target, accept }: ToastAnswer) {
+  async function answerAlert({ kind, target, accept, always }: ToastAnswer) {
     const answered = alerts.find((a) => a.kind === kind && a.target === target);
     if (!answered || !meId) return;
     // Off the list now (a second click does nothing); back if the call fails, unless it is gone for good.
@@ -246,7 +250,7 @@ export default defineBackground(() => {
         broadcast({ kind: 'event', event: { type: 'watch:cancel', userId: target, serverTime: Date.now(), payload: null } });
       } else if (kind === 'type') {
         // The toast is the room's latest change (a newer one replaces it): its version is the notice's.
-        await answerType(target, typeNotices.find((n) => n.roomId === target)?.version ?? 0, !accept);
+        await answerType(target, typeNotices.find((n) => n.roomId === target)?.version ?? 0, !accept, always === true);
       } else if (kind === 'pause' && room?.state.roomId === target && room.state.pauseRequest) {
         if (accept) room.pauseAll();
         else room.dismissPauseRequest();
@@ -266,20 +270,49 @@ export default defineBackground(() => {
   let typeChecks = 0;
   /** The latest check applied: an earlier one answering later is older news; a newer one failing doesn't void it. */
   let typeApplied = 0;
+  /**
+   * Rooms where "이 방에서는 항상 허용하기" was checked: their type changes are confirmed (and followed) without asking —
+   * unless the new site's control (experimental) is off. In storage.local, the latest 50.
+   */
+  // Per account (another one signing in here didn't choose it).
+  const typeAlwaysOf = new Map<string, Promise<Set<string>>>();
+  const typeAlways = (userId: string) => {
+    let got = typeAlwaysOf.get(userId);
+    if (!got) {
+      const key = `${TYPE_ALWAYS_ITEM}.${userId}`;
+      got = browser.storage.local.get(key).then(
+        (v) => new Set<string>(Array.isArray(v[key]) ? v[key].filter((id: unknown) => typeof id === 'string') : []),
+        () => new Set<string>());
+      typeAlwaysOf.set(userId, got);
+    }
+    return got;
+  };
+  const confirming = new Set<string>(); // automatic confirmations under way (one per room)
+  const typeFailedAt = new Map<string, number>(); // a confirmation's failure, per room: not automatic again for a while
   async function checkTypes() {
     const mine = ++typeChecks;
     const me = meId;
     if (!me) return;
-    const list = await api.rooms().catch(() => null);
+    const [list, always] = await Promise.all([api.rooms().catch(() => null), typeAlways(me)]);
     if (me !== meId || mine <= typeApplied) return;
     if (!list) {
       if (mine === typeChecks) setTimeout(() => mine === typeChecks && void checkTypes(), 2_000); // the latest failed: again
       return;
     }
     typeApplied = mine;
-    const next = list.flatMap((r) => r.type && (r.typeVersion ?? 0) > (r.typeSeen ?? 0)
+    const pending = list.flatMap((r) => r.type && (r.typeVersion ?? 0) > (r.typeSeen ?? 0)
       && !r.members.some((m) => m.user.id === me && m.role === 'HOST')
       ? [{ roomId: r.id, type: r.type, version: r.typeVersion ?? 0 }] : []);
+    const off = (t: MediaProvider) => (t === 'netflix' || t === 'laftel') && !platform?.experimental?.enabled(t);
+    // Not one whose automatic confirmation failed a moment ago: asked (shown) instead, tried again after a while.
+    const auto = pending.filter((n) => always.has(n.roomId) && !off(n.type)
+      && Date.now() - (typeFailedAt.get(n.roomId) ?? 0) >= TYPE_RETRY_MS);
+    for (const n of auto) {
+      if (confirming.has(n.roomId)) continue;
+      confirming.add(n.roomId);
+      void answerType(n.roomId, n.version, false).catch(() => {}).finally(() => confirming.delete(n.roomId));
+    }
+    const next = pending.filter((n) => !auto.includes(n));
     for (const old of typeNotices) {
       if (!next.some((n) => n.roomId === old.roomId)) dropAlerts((a) => a.kind === 'type' && a.target === old.roomId);
     }
@@ -295,6 +328,14 @@ export default defineBackground(() => {
     alert('type', n.roomId, INCOMING_MS, `방장이 방을 ${PROVIDER_NAMES[n.type]} 방으로 바꿨습니다`,
       off ? `${PROVIDER_NAMES[n.type]} 제어(실험)가 꺼져 있습니다. 패널에서 켜거나 방을 나가세요.` : '');
   }
+  async function keepTypeAlways(userId: string, roomId: string) {
+    const set = await typeAlways(userId);
+    set.delete(roomId);
+    set.add(roomId); // the latest last
+    const kept = [...set].slice(-50);
+    for (const id of set) if (!kept.includes(id)) set.delete(id); // the oldest ones out here too
+    await browser.storage.local.set({ [`${TYPE_ALWAYS_ITEM}.${userId}`]: kept }).catch(() => {});
+  }
   /** Many room updates in a moment (a hand-over, members coming and going): one look. */
   let typeCheckTimer: ReturnType<typeof setTimeout> | undefined;
   function checkTypesSoon() {
@@ -307,10 +348,21 @@ export default defineBackground(() => {
    * handed the host meanwhile, the server refuses (409) instead of closing the room. Then looked at again (a failure
    * leaves it to answer again).
    */
-  async function answerType(roomId: string, version: number, leave: boolean) {
+  async function answerType(roomId: string, version: number, leave: boolean, always = false) {
+    // The account answering, for all that follows (one signing in meanwhile gets nothing of it).
+    const me = meId;
+    const mine = session;
+    const still = () => me !== null && meId === me && session === mine;
+    let failed = false;
     try {
-      if (!leave) await api.seeRoomType(roomId, version);
-      else {
+      if (!leave) {
+        await api.seeRoomType(roomId, version);
+        // Confirmed: the notice goes, and the room here is told (it reloads: the server tells no one of a confirmation)
+        // — its sync moves the tab to the room's site once the room says so, and resumes. Another room: when entered.
+        if (room?.state.roomId === roomId && still()) room.confirmType(version);
+        void checkTypes();
+        if (always && still()) await keepTypeAlways(me!, roomId);
+      } else {
         const left = await api.leaveRoom(roomId, true).then(() => true, (e) => {
           if (e instanceof ApiError && e.status === 404) return true; // gone already: left
           if (e instanceof ApiError && e.status === 409) return false; // the host now: stays
@@ -318,7 +370,16 @@ export default defineBackground(() => {
         });
         if (left && room?.state.roomId === roomId) closeRoom();
       }
+    } catch (e) {
+      failed = true;
+      throw e;
     } finally {
+      // Looked at again now: after a failure, the room is asked (shown) instead of confirmed automatically for a while,
+      // and looked at again after that (not a tight loop of retries).
+      if (failed) {
+        typeFailedAt.set(roomId, Date.now());
+        setTimeout(() => void checkTypes(), TYPE_RETRY_MS);
+      }
       void checkTypes();
     }
   }
@@ -476,6 +537,7 @@ export default defineBackground(() => {
       nowWatching: () => platform?.nowWatching?.() ?? null,
       askOnSwitch: () => platform?.preferences?.askOnSwitch() ?? true,
       openOnEnter: entering,
+      siteUrl: (provider) => (provider in SITE_HOME ? SITE_HOME[provider as keyof typeof SITE_HOME] : undefined),
       open: (url, newTab) => {
         console.info('[mirattic] following the host to', url); // who moved the tab, when a user reports it
         platform?.open(url, newTab);
@@ -801,7 +863,9 @@ export default defineBackground(() => {
           }
           break;
         case 'type:answer':
-          if (typeof m.roomId === 'string' && typeof m.version === 'number') void answerType(m.roomId, m.version, m.leave === true).catch(() => {});
+          if (typeof m.roomId === 'string' && typeof m.version === 'number') {
+            void answerType(m.roomId, m.version, m.leave === true, m.always === true).catch(() => {});
+          }
           break;
         case 'site':
           if (typeof m.site === 'string' && (m.windowId === undefined || typeof m.windowId === 'number')) {
