@@ -37,6 +37,8 @@ vi.mock('wxt/browser', () => ({
     windows: {
       getCurrent: async () => ({ id: 1 }),
       update: async (id: number, q: { focused?: boolean }) => void (q.focused && focusedWindows.push(id)),
+      onFocusChanged: on('windows.onFocusChanged'),
+      WINDOW_ID_NONE: -1,
     },
     storage: {
       local: {
@@ -1439,4 +1441,87 @@ it('two quick choices of other windows\' tabs: the later one stays active (an ea
   for (let i = 0; i < 5; i++) await settle();
   expect(activated.at(-1)).toBe(6);
   expect(w.tabs!.followed()).toBe(6);
+});
+
+it("a move choice (the panel opening in the tab's window) brings nothing forward itself, and doesn't follow a tab dragged out of that window", async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), { ...YT(5), windowId: 2 }, { ...YT(6), windowId: 2 }];
+  const w = await watch();
+  await w.tabs!.choose(5, 2, { move: true }); // still in window 2: followed, left to the background to bring forward
+  for (let i = 0; i < 3; i++) await settle();
+  expect(w.tabs!.followed()).toBe(5);
+  expect(activated).toEqual([]);
+  expect(focusedWindows).toEqual([]);
+  tabs[2] = { ...tabs[2]!, windowId: 3 }; // dragged to a third window before the lookup
+  await w.tabs!.choose(6, 2, { move: true });
+  for (let i = 0; i < 3; i++) await settle();
+  expect(w.tabs!.followed()).not.toBe(6);
+  expect(activated).toEqual([]);
+  expect(focusedWindows).toEqual([]);
+});
+
+it('following the active tab, a video tab activated in another window is offered (the panel can move there)', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }, { ...OTHER(6), windowId: 2 }];
+  const offered: [number, number][] = [];
+  const w = await watchOutside({ inRoom: false, onOtherWindow: (id, win) => void offered.push([id, win]) });
+  await fire('tabs.onActivated', { tabId: 5, windowId: 2 });
+  expect(offered).toEqual([[5, 2]]);
+  expect(w.tabs!.followed()).toBe(1); // not followed by itself (the panel is in window 1)
+  tabs[2] = { ...tabs[2]!, active: true };
+  tabs[1] = { ...tabs[1]!, active: false };
+  await fire('tabs.onActivated', { tabId: 6, windowId: 2 }); // not a video tab: nothing offered
+  expect(offered).toHaveLength(1);
+  w.tabs!.setRoom!({ inRoom: true, site: 'youtube' }); // in a room (fixed): nothing offered
+  tabs[1] = { ...tabs[1]!, active: true };
+  await fire('tabs.onActivated', { tabId: 5, windowId: 2 });
+  expect(offered).toHaveLength(1);
+});
+
+it('switching windows (not tabs) to one whose active tab is a video tab offers the panel there too', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }];
+  const offered: number[] = [];
+  await watchOutside({ inRoom: false, onOtherWindow: (id) => void offered.push(id) });
+  await fire('windows.onFocusChanged', 2);
+  for (let i = 0; i < 3; i++) await settle();
+  expect(offered).toEqual([5]);
+});
+
+it("entering a room while another window's tab is looked up doesn't offer the panel (fixed there)", async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), { ...YT(5, true), windowId: 2 }];
+  const offered: number[] = [];
+  const w = await watchOutside({ inRoom: false, onOtherWindow: (id) => void offered.push(id) });
+  heldGet.set(5, hold());
+  const activated = fire('tabs.onActivated', { tabId: 5, windowId: 2 });
+  await settle();
+  w.tabs!.setRoom!({ inRoom: true, site: 'youtube' });
+  heldGet.get(5)!.resolve();
+  await activated;
+  expect(offered).toEqual([]);
+});
+
+it("another window's active tab finishing loading a video page is offered then", async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true), { ...OTHER(5, true), windowId: 2 }];
+  const offered: number[] = [];
+  await watchOutside({ inRoom: false, onOtherWindow: (id) => void offered.push(id) });
+  await fire('tabs.onActivated', { tabId: 5, windowId: 2 }); // still loading: not a video page yet
+  expect(offered).toEqual([]);
+  tabs[1] = { ...YT(5, true), windowId: 2 };
+  await fire('tabs.onUpdated', 5, { status: 'complete' }, tabs[1]);
+  for (let i = 0; i < 3; i++) await settle();
+  expect(offered).toEqual([5]);
+});
+
+it('followsActive: out of a room (or replaced) yes, in a room only when following the active tab', async () => {
+  delete stored['mirattic.followActive'];
+  tabs = [YT(1, true)];
+  const w = await watchOutside({ inRoom: false });
+  expect(w.followsActive()).toBe(true);
+  w.tabs!.setRoom!({ inRoom: true, site: 'youtube' });
+  expect(w.followsActive()).toBe(false);
+  w.tabs!.setRoom!({ inRoom: false, site: null }); // e.g. this device replaced
+  expect(w.followsActive()).toBe(true);
 });

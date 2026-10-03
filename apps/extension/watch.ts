@@ -32,6 +32,8 @@ const PRESENCE_DELAY_MS = 300; // the server drops presence updates closer than 
 export type Watch = Omit<Platform, 'connect' | 'room'> & {
   /** Follow the video tab of another window (the one whose side panel was opened last). */
   follow(windowId: number): void;
+  /** The active tab is what is followed now: out of a room (a replaced device too), or following it by choice. */
+  followsActive(): boolean;
 };
 
 /** Each site's first page, opened when the room's type is picked and no tab of it is open (decision 93). */
@@ -51,7 +53,13 @@ const followedTabEntry = 'mirattic.followedTab';
  * and the user's presence. Runs in the background, so it goes on while the side panel is closed.
  */
 /** `site`: the room's site already (a restarted worker back in a room): what is taken over by itself is of it from the start. */
-export async function watch(opts: { windowId?: number; site?: MediaProvider | null; inRoom?: boolean } = {}): Promise<Watch> {
+/** `onOtherWindow`: following the active tab, a video tab was activated in another window than the panel's. */
+export async function watch(opts: {
+  windowId?: number;
+  site?: MediaProvider | null;
+  inRoom?: boolean;
+  onOtherWindow?: (tabId: number, windowId: number) => void;
+} = {}): Promise<Watch> {
   let windowId = opts.windowId ?? (await browser.windows.getCurrent()).id;
   let tabId: number | null = null;
   let content: RoomContent | null = null;
@@ -419,8 +427,30 @@ export async function watch(opts: { windowId?: number; site?: MediaProvider | nu
     }
   });
 
+  /** Another window's active video tab while the active tab is what is followed: the panel can move there. */
+  const offerIfOther = async (id: number) => {
+    if (!autoNow() || !opts.onOtherWindow) return;
+    const tab = await tabNow(id);
+    // As things are after the lookup (a room entered meanwhile, the panel moved there).
+    // YouTube tabs only: Netflix / Laftel get our script only in the tab followed, so no toast can show in another.
+    if (tab?.id !== undefined && autoNow() && ofSite(tab.url) && providerOf(tab.url) === 'youtube' && tab.active
+      && tab.windowId !== windowId) {
+      opts.onOtherWindow(tab.id, tab.windowId);
+    }
+  };
+  // Switching windows without switching tabs: that window's active tab counts the same.
+  browser.windows.onFocusChanged?.addListener(async (focused) => {
+    if (focused === browser.windows.WINDOW_ID_NONE || focused === windowId || !autoNow()) return;
+    const [active] = await browser.tabs.query({ active: true, windowId: focused }).catch(() => []);
+    if (active?.id !== undefined) void offerIfOther(active.id);
+  });
   browser.tabs.onActivated.addListener(async (info) => {
-    if (info.windowId !== windowId) return;
+    if (info.windowId !== windowId) {
+      // Another window's video tab, while the active tab is what is followed: the panel can be moved there (the user
+      // clicks it — Chrome opens a side panel only for a user's gesture).
+      await offerIfOther(info.tabId);
+      return;
+    }
     void checkOffSite();
     if (!switching()) return; // the chosen tab stays
     const mine = ++activations;
@@ -439,6 +469,8 @@ export async function watch(opts: { windowId?: number; site?: MediaProvider | nu
   browser.tabs.onUpdated.addListener((id, change, tab) => {
     if (change.url || change.status) changedTab(id);
     if (change.title !== undefined || change.url || change.status === 'complete') void listTabs();
+    // Another window's active tab done loading (a video page ready only now): offered as on activating it.
+    if (change.status === 'complete' && tab.active && tab.windowId !== windowId) void offerIfOther(id);
     if (tab.active && tab.windowId === windowId && (change.url || change.status === 'complete')) void checkOffSite();
     // The synced tab left the video sites: following the active tab, another video tab in this window takes over
     // (with none, the tab stays ours, so "이 영상 열기" brings it back). A chosen tab stays chosen, followed again
@@ -546,6 +578,7 @@ export async function watch(opts: { windowId?: number; site?: MediaProvider | nu
   };
 
   return {
+    followsActive: autoNow,
     follow: (id) => {
       if (id === windowId) return;
       windowId = id;
@@ -558,7 +591,7 @@ export async function watch(opts: { windowId?: number; site?: MediaProvider | nu
       list: () => tabs,
       followed: () => tabId,
       auto: () => followActive,
-      choose: async (id, chosenIn) => {
+      choose: async (id, chosenIn, opts) => {
         stopped = false;
         if (chosenIn !== undefined) windowId = chosenIn; // the panel's window, for its active tab and fallbacks
         const mine = ++intent;
@@ -582,14 +615,16 @@ export async function watch(opts: { windowId?: number; site?: MediaProvider | nu
         tabProvider = null;
         const tab = await tabNow(id);
         if (mine !== intent || tabId !== id) return; // the user said otherwise since
-        if (!tab || offSiteOf(tab.url)) {
+        if (!tab || offSiteOf(tab.url) || (opts?.move && tab.windowId !== chosenIn)) {
           // Closed before the click arrived (its onRemoved may have come already), or its site turned off meanwhile:
-          // another video tab of its window (the panel's, if it's gone) takes over.
-          release(tab?.windowId ?? tabWindow);
+          // another video tab of its window (the panel's, if it's gone) takes over. A move's tab dragged out of the
+          // window the panel moves to: not followed there (the user picks again from that panel).
+          release(opts?.move ? chosenIn : tab?.windowId ?? tabWindow);
         } else {
           // A tab of another window than the panel's: brought forward there (the user sees what they chose).
-          // Not if the panel moved to another window meanwhile (the choice still holds; nothing brought forward).
-          if (chosenIn !== undefined && tab.windowId !== chosenIn && windowId === chosenIn) {
+          // Not if the panel moved to another window meanwhile (the choice still holds; nothing brought forward), nor
+          // for a move (the background brings it forward once the panel is in its window, decision 95).
+          if (!opts?.move && chosenIn !== undefined && tab.windowId !== chosenIn && windowId === chosenIn) {
             // Its window as activated (it may have moved meanwhile); none if it couldn't be activated.
             // One after another, each only if still the latest choice: an older one finishing late can't leave its tab
             // active over a newer choice.

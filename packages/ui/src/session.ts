@@ -61,8 +61,12 @@ export type Platform = {
     list(): VideoTab[];
     followed(): number | null;
     auto(): boolean;
-    /** null: follow the active tab. `windowId`: the window it was chosen in (the extension's panel adds it). */
-    choose(tabId: number | null, windowId?: number): void;
+    /**
+     * null: follow the active tab. `windowId`: the window it was chosen in (the extension's panel adds it). `move`: the
+     * panel moves to the tab's window `windowId` with this choice — the tab isn't brought forward here (the extension's
+     * background does, once the panel is there), and isn't followed if it has left that window by then.
+     */
+    choose(tabId: number | null, windowId?: number, opts?: { move?: true }): void;
     /** The room's type picked (decision 93): that site's tab here is followed (fixed), else its first page opens. */
     openSite(site: MediaProvider, windowId?: number): void;
     /**

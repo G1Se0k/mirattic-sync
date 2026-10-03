@@ -35,6 +35,7 @@ type Alert = { kind: AlertKind; target: string; title: string; toast: Omit<Toast
 const TYPE_ALWAYS_ITEM = 'mirattic.typeAlways';
 const latestPanelEntry = 'mirattic.latestPanel'; // storage.session: the latest opened side panel (decision 94)
 const roomSiteEntry = 'mirattic.roomSite'; // storage.session: the room's site while in one (decision 94)
+const PANEL_OFFER_MS = 10_000; // "패널 열기" over another window's video (decision 95)
 const TYPE_RETRY_MS = 60_000; // a failed confirmation: asked instead, automatic again after this
 
 export default defineBackground(() => {
@@ -68,6 +69,7 @@ export default defineBackground(() => {
     for (const [other, p] of panelWindows) {
       if (other !== port && p.windowId !== windowId && newerPanel(me, p)) {
         panelAllowed.set(other, Promise.resolve(false)); // nothing more from it, already (it is closing)
+        lostTo.set(other, { windowId, at: Date.now() });
         post(other, { kind: 'close' });
       }
     }
@@ -78,6 +80,55 @@ export default defineBackground(() => {
     a.openedAt > b.openedAt || (a.openedAt === b.openedAt && (a.windowId ?? 0) > (b.windowId ?? 0));
   /** Each panel's arbitration: its other messages wait for it, and do nothing if it lost (it is closing). */
   const panelAllowed = new Map<Browser.runtime.Port, Promise<boolean>>();
+  const closedPanels = new WeakSet<Browser.runtime.Port>();
+  /**
+   * Which window's panel each losing panel lost to, and when: a choice moving the panel to that very window, sent
+   * just before, is the handoff that opened it (its message and the new panel's hello come over different ports, in
+   * either order) — not a loser's late, unrelated move (another window, or long after).
+   */
+  const lostTo = new WeakMap<Browser.runtime.Port, { windowId: number | undefined; at: number }>();
+  const LOST_TO_MS = 3_000;
+  /**
+   * Tab choices from the panels, and bringing a moved tab forward, one at a time in arrival order (decision 95): a
+   * later one always acts after an earlier one is done, so none can land over a newer one.
+   */
+  let tabTurn: Promise<void> = Promise.resolve();
+  const inTabTurn = (step: () => Promise<void>) => void (tabTurn = tabTurn.then(step).catch(() => {}));
+  /**
+   * Whether a panel of `windowId` has the side panel now: the latest opened, and one of its panels is connected and
+   * won (not told to close) — the latest opened alone stays so after it closed.
+   */
+  async function panelLiveIn(windowId: number) {
+    if ((await latestPanel())?.windowId !== windowId) return false;
+    for (const [port, p] of panelWindows) {
+      // Still connected after waiting for its arbitration (it may have closed meanwhile).
+      if (p.windowId === windowId && (await (panelAllowed.get(port) ?? false)) && panelWindows.has(port)) return true;
+    }
+    return false;
+  }
+  /** A choice that moved the panel to its tab's window: its tab brought forward once the panel there won. */
+  let pendingMove: { tabId: number; windowId: number } | null = null;
+  /** In the turn: the moved tab activated, and its window focused if the panel there still has the side panel. */
+  async function bringMoved(windowId: number) {
+    const move = pendingMove;
+    if (!move || move.windowId !== windowId) return;
+    pendingMove = null;
+    // Only while a panel there has the side panel (another window's may have won meanwhile, or it closed) and the tab
+    // is still in that window (not dragged to another): before and after activating.
+    const stillThere = async () =>
+      (await panelLiveIn(move.windowId)) && (await browser.tabs.get(move.tabId).catch(() => null))?.windowId === move.windowId;
+    if (!(await stillThere())) return;
+    const [before] = await browser.tabs.query({ active: true, windowId: move.windowId }).catch(() => []);
+    const t = await browser.tabs.update(move.tabId, { active: true }).catch(() => undefined);
+    // Lost while activating: that window's tab as it was.
+    if (t && !(await stillThere())) {
+      if (before?.id !== undefined && before.id !== move.tabId) await browser.tabs.update(before.id, { active: true }).catch(() => {});
+      return;
+    }
+    if (t) {
+      await browser.windows.update(move.windowId, { focused: true }).catch(() => {});
+    }
+  }
   /**
    * Replaced by another device (decision 89): not following a room here any more (the saved room stays, for "여기서
    * 계속") — what is watched is the active tab again (decision 95).
@@ -88,6 +139,51 @@ export default defineBackground(() => {
   }
   /** A room was opened or closed in this worker (before that, the saved room says whether it is in one). */
   let roomKnown = false;
+  /**
+   * Following the active tab, a video tab of another window became active while the panel is in another window: a
+   * toast over it offers to move the panel there (Chrome opens a side panel only on the user's own click). Each tab's
+   * latest offer counts (a click on an older one in that tab does nothing), kept with when it runs out: shown again,
+   * for the time left, when its page redraws (TOAST_READY), until answered.
+   */
+  const panelOffers = new Map<number, { toast: Omit<ToastMessage, 'seq' | 'ms'>; until: number }>();
+  browser.tabs.onRemoved.addListener((id) => void panelOffers.delete(id));
+  const onYouTube = (url?: string) => !!url && url.startsWith(new URL(SITE_HOME.youtube).origin + '/');
+  function offerPanelHere(tabId: number, windowId: number) {
+    if (![...panelWindows.values()].some((p) => p.windowId !== windowId)) return; // no panel elsewhere
+    const toast = {
+      type: TOAST, kind: 'panel', target: String(windowId), panelOpen: false, alertId: ++alertIds,
+      title: '이 창에서 보시나요?', body: 'Mirattic 패널을 이 창으로 옮기면 이 탭의 영상을 인식합니다.',
+    } as const;
+    panelOffers.set(tabId, { toast, until: Date.now() + PANEL_OFFER_MS });
+    sendOffer(tabId, toast.alertId);
+  }
+  /** The tab's offer `alertId` sent (first, or again to a redrawn page) for the time it has left, if it still applies. */
+  function sendOffer(tabId: number, alertId: number) {
+    // In line with every other message to the pages (a clear sent before it can't arrive after it). A YouTube tab
+    // opened before the extension was installed or updated has no script yet: put one in, then offer.
+    sending = sending
+      .then(async () => {
+        // The message, numbered (the pages' order; a toast without one is dropped) — or null, once it no longer
+        // applies: no longer the tab's latest offer or run out, the tab no longer active and on YouTube (it may have
+        // moved on while this waited), signed out, the active tab no longer followed, no panel in another window.
+        const current = async () => {
+          const o = panelOffers.get(tabId);
+          const t = await browser.tabs.get(tabId).catch(() => null);
+          const now = Date.now();
+          if (o?.toast.alertId !== alertId || o.until <= now || !t?.active || !onYouTube(t.url)) return null;
+          const elsewhere = [...panelWindows.values()].some((p) => p.windowId !== t.windowId);
+          if (!meId || !(platform?.followsActive() ?? !room) || !elsewhere) return null;
+          return { ...o.toast, ms: o.until - now, seq: ++seq };
+        };
+        let offer = await current();
+        if (!offer) return;
+        if (await browser.tabs.sendMessage(tabId, offer).then(() => true, () => false)) return;
+        if (!(await current())) return;
+        const injected = await browser.scripting.executeScript({ target: { tabId }, files: ['/content-scripts/youtube.js'] }).catch(() => null);
+        if (injected && (offer = await current())) await browser.tabs.sendMessage(tabId, offer).catch(() => {});
+      })
+      .catch(() => {});
+  }
   /** The room's site for the tabs taken over by themselves, kept for a worker restart (decision 94). */
   let roomSite: MediaProvider | null | undefined;
   /** Which room `roomSite` is of: another room opened starts with its site unknown until it loads. */
@@ -484,7 +580,7 @@ export default defineBackground(() => {
           roomSite = site; // the room's site as kept, until its room says
           roomSiteOf = savedRoom;
         }
-        return watch({ windowId, site, inRoom });
+        return watch({ windowId, site, inRoom, onOtherWindow: offerPanelHere });
       })
       .then((p) => {
       platform = p;
@@ -747,6 +843,7 @@ export default defineBackground(() => {
     void setClosedRooms([]).catch(() => {}); // the same: their notices aren't the next account's
     void markReplaced(false); // the next sign-in connects
     clearAlerts();
+    panelOffers.clear(); // not shown again to the next account's pages (a redraw asks for them)
     closeRoom();
     clearInterval(keepAlive);
     const s = socket;
@@ -885,7 +982,24 @@ export default defineBackground(() => {
           const behind = a.kind === 'request' && left.get(a.target) === a.toast.alertId;
           toTabs({ ...a.toast, ms: a.until - now, leftBehind: behind }, () => alerts.includes(a), tabId);
         }
+        // Its panel offer too (the page redrew — fullscreen, YouTube's in-page navigation): if it still applies.
+        const offer = panelOffers.get(tabId);
+        if (offer) sendOffer(tabId, offer.toast.alertId);
       });
+      return;
+    }
+    // "패널 열기" over another window's video (decision 95): the panel moves there (the click is the gesture).
+    if (m?.type === TOAST_ANSWER && m.kind === 'panel') {
+      // The offer shown last, from its tab: answered either way, it isn't shown again when the page redraws.
+      if (panelOffers.get(tabId)?.toast.alertId !== m.alertId) return;
+      panelOffers.delete(tabId);
+      // Only while it still applies: the tab still active and on YouTube, the active tab followed (out of a room, or
+      // following it), a panel elsewhere.
+      const offered = sender.tab.active && onYouTube(url);
+      const following = platform?.followsActive() ?? !room;
+      const here = sender.tab.windowId;
+      const elsewhere = [...panelWindows.values()].some((p) => p.windowId !== here);
+      if (m.accept && offered && following && elsewhere) void browser.sidePanel.open({ windowId: here }).catch(() => {});
       return;
     }
     if (m?.type !== TOAST_ANSWER || !active(m.kind, m.target, m.alertId)) return; // settled or replaced meanwhile
@@ -894,12 +1008,42 @@ export default defineBackground(() => {
     void answerAlert(m);
   });
 
+  /**
+   * A panel's tab choice, in the turn: applied only if that port still is the panel, or — a choice moving the panel to
+   * its tab's window — the panel there won (its hello may come first). A move's tab is brought forward once the panel
+   * there won (the old one is closing); any other choice drops a move still waiting.
+   */
+  async function chooseTab(port: Browser.runtime.Port, m: Extract<FromPanel, { op: 'tab' }>, asArrived: Promise<boolean>) {
+    if (!(m.tabId === null || typeof m.tabId === 'number') || !(m.windowId === undefined || typeof m.windowId === 'number')) return;
+    const watcher = await ensureWatching(); // a restarted worker: once it follows tabs again
+    const moveTo = m.move === true && typeof m.tabId === 'number' && typeof m.windowId === 'number' ? m.windowId : undefined;
+    const movedThere = async () => moveTo !== undefined && (await panelLiveIn(moveTo));
+    // The move exception only for the panel's own handoff: it still had the side panel when it sent it, or it lost it
+    // just now to the destination's panel (the one its click opened, whose hello came first).
+    const lost = lostTo.get(port);
+    const handoff = moveTo !== undefined && lost?.windowId === moveTo && Date.now() - lost.at < LOST_TO_MS;
+    const owns = (!closedPanels.has(port) && (await (panelAllowed.get(port) ?? true)))
+      || (((await asArrived) || handoff) && (await movedThere()));
+    if (!owns) return;
+    // A move: the watcher brings nothing forward itself, and doesn't follow a tab dragged out of the destination by
+    // its lookup (the user picks again from the panel there) — then nothing is brought forward here either.
+    await watcher?.tabs?.choose(m.tabId, m.windowId, moveTo !== undefined ? { move: true } : undefined);
+    pendingMove = moveTo !== undefined && typeof m.tabId === 'number' && watcher?.tabs?.followed() === m.tabId
+      ? { tabId: m.tabId, windowId: moveTo } : null;
+    if (moveTo !== undefined && (await movedThere())) await bringMoved(moveTo);
+  }
+
   browser.runtime.onConnect.addListener((port) => {
     // Only our own pages (the side panel), never a content script running in a provider's page.
     if (port.name !== UI_PORT || port.sender?.id !== browser.runtime.id || !port.sender.url?.startsWith(browser.runtime.getURL('/'))) return;
     ports.add(port);
     clearAlerts(); // the panel shows them now
     port.onMessage.addListener(async (m: FromPanel) => {
+      // A tab choice: in the turn, as it arrives (see chooseTab).
+      if (m.op === 'tab') {
+        const asArrived = panelAllowed.get(port) ?? Promise.resolve(true); // whether it was the panel as it chose
+        return inTabTurn(() => chooseTab(port, m, asArrived));
+      }
       if (m.op === 'hello' && typeof m.openedAt === 'number') {
         // The side panel lives in one window, the latest opened (decision 94): by when each panel opened (not by when
         // its hello arrives, nor whether it is a reconnect), kept across worker restarts. An older one closes. One
@@ -917,6 +1061,8 @@ export default defineBackground(() => {
             const watcher = await ensureWatching(m.windowId, false); // created for its window if none yet
             if (!(await (panelAllowed.get(port) ?? true))) break;
             if (m.windowId !== undefined) watcher?.follow(m.windowId);
+            const here = m.windowId;
+            if (here !== undefined && !m.hold) inTabTurn(() => bringMoved(here)); // the panel a choice moved here
           }
           post(port, { kind: 'shared', shared: shared() });
           post(port, { kind: 'status', status });
@@ -970,12 +1116,6 @@ export default defineBackground(() => {
             (room[m.name] as (...a: unknown[]) => void)(...m.args);
           }
           break;
-        case 'tab':
-          if ((m.tabId === null || typeof m.tabId === 'number') && (m.windowId === undefined || typeof m.windowId === 'number')) {
-            const watcher = await ensureWatching(); // a restarted worker: once it follows tabs again
-            if (await (panelAllowed.get(port) ?? true)) watcher?.tabs?.choose(m.tabId, m.windowId); // still the panel
-          }
-          break;
         case 'type:answer':
           if (typeof m.roomId === 'string' && typeof m.version === 'number') {
             void answerType(m.roomId, m.version, m.leave === true, m.always === true).catch(() => {});
@@ -1000,6 +1140,7 @@ export default defineBackground(() => {
       viewers.delete(port);
       panelWindows.delete(port);
       panelAllowed.delete(port);
+      closedPanels.add(port); // its messages still being handled count as from a panel that lost
       if (!ports.size) typeNotices.forEach(toastType); // closed without answering: asked over the videos again
     });
   });

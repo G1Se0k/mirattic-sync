@@ -41,7 +41,8 @@ export type FromPanel =
   | { op: 'room:act'; roomId: string; name: RoomAction; args: unknown[] }
   | { op: 'open'; url: string; newTab?: boolean }
   /** The tab to follow; null = the active one, as the user switches. */
-  | { op: 'tab'; tabId: number | null; windowId?: number }
+  /** `move`: the panel moves to the chosen tab's window with this choice (it counts though the panel there wins). */
+  | { op: 'tab'; tabId: number | null; windowId?: number; move?: boolean }
   /** The room's type change told (decision 93): confirmed, or leave the room. */
   | { op: 'type:answer'; roomId: string; version: number; leave: boolean; always?: boolean }
   /** The room's type picked: follow that site's tab of this window, or open the site. */

@@ -48,11 +48,13 @@ export function holdWindow(openedAt: number) {
 /** `openedAt`: when the panel page started (which of two panels opened last wins the side panel, decision 94). */
 export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; platform: Platform }> {
   let port = browser.runtime.connect({ name: UI_PORT });
+  /** False between a worker restart and the reconnect: the resume below restates what matters. */
   const send = (message: FromPanel) => {
     try {
       port.postMessage(message);
+      return true;
     } catch {
-      // between a worker restart and the reconnect: the resume below restates what matters
+      return false;
     }
   };
   const replies = new Map<number, { resolve(v: unknown): void; reject(e: unknown): void }>();
@@ -74,6 +76,8 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
   const subscribers = new Set<() => void>();
   /** A tab choice the background hasn't shown back yet: said again after a worker restart (the port may have dropped it). */
   let choosingTab: { tabId: number | null } | null = null;
+  /** Tab choices made here: a failed move resent only while it is the latest. */
+  let moves = 0;
   // Text size (Settings), kept in storage.local: applied before the app renders and on any panel's change. Each step
   // in Settings is one choice, saved at once. While this panel's saves are out, storage changes aren't applied (they
   // may be its own older ones, which would undo a quicker press); once all are done, storage is read again.
@@ -214,6 +218,22 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       auto: () => shared.followActive,
       openSite: (site) => send({ op: 'site', site, windowId }),
       choose: (tabId) => {
+        const there = tabId === null ? undefined : shared.tabs.find((t) => t.id === tabId)?.windowId;
+        if (tabId !== null && there !== undefined && there !== windowId) {
+          // A tab of another window: chosen for that window (the background takes it even if the panel there says
+          // hello first), the panel opened there within this click (Chrome opens one only for a user's gesture; this
+          // one then closes, decision 94), and the background shows the tab in front.
+          choosingTab = { tabId };
+          const mine = ++moves;
+          // Not delivered (the worker restarting): the panel stays here; the resume sends the choice from here.
+          if (!send({ op: 'tab', tabId, windowId: there, move: true })) return;
+          const opened = browser.sidePanel.open({ windowId: there }).then(() => true, () => false);
+          // Opened: the background brings the tab forward (this panel is closing). Not opened: the panel stays here,
+          // so the choice is sent from here again if still the latest (brought forward as any other window's tab).
+          void opened.then((ok) => !ok && mine === moves && send({ op: 'tab', tabId, windowId }));
+          return;
+        }
+        moves++; // a choice here: an earlier move that failed to open isn't resent over it
         choosingTab = { tabId };
         send({ op: 'tab', tabId, windowId }); // this window's active tab, or a tab of it
       },
