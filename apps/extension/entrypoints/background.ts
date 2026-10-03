@@ -819,6 +819,8 @@ export default defineBackground(() => {
   }
 
   async function signedIn() {
+    await offLoaded;
+    if (off) return; // turned off (meanwhile too: a restore still under way as it was turned off)
     const mine = session;
     const me = await api.me();
     if (mine !== session) return;
@@ -880,17 +882,41 @@ export default defineBackground(() => {
   }
 
   /**
+   * Turned off ("동기화 끄기", decision 98): known here at once, kept in storage.local (read once as the worker starts;
+   * a change made since is newer). No session starts while it is set.
+   */
+  let off = false;
+  let offTouched = false;
+  const offLoaded = browser.storage.local.get(OFF_FLAG).then((v) => {
+    if (!offTouched) off = v[OFF_FLAG] === true;
+  }, () => {});
+  const setOff = (on: boolean) => {
+    offTouched = true;
+    off = on;
+    void (on ? browser.storage.local.set({ [OFF_FLAG]: true }) : browser.storage.local.remove(OFF_FLAG)).catch(() => {});
+  };
+  /** Turning off, one at a time; a panel opening waits for it (see `panelOn`). */
+  let offTurn: Promise<void> = Promise.resolve();
+  /** Panels told to close by turning off: they don't turn it on again, and nothing more from them is done. */
+  const closedByOff = new WeakSet<Browser.runtime.Port>();
+  /** Each panel's say on turning on: after any turning off under way, true unless that closed it (then: ignored). */
+  const panelOn = new Map<Browser.runtime.Port, Promise<boolean>>();
+
+  /**
    * "동기화 끄기" (decision 98): out of the room (a host's closes, as "방 닫기"), offline (friends see it), every panel
    * closed. Signed in still: the next panel opening turns it on (its sign-in check starts the session again).
    */
-  async function turnOff() {
-    await browser.storage.local.set({ [OFF_FLAG]: true }).catch(() => {});
-    const roomId = room?.state.roomId;
-    // At most `LOOKUP_MS` (turning off never waits on a hanging call): gone already, offline or slow, the host-left rule
-    // closes it (the call may still land).
-    if (roomId && meId) await within(api.leaveRoom(roomId).catch(() => {}), undefined);
-    stop();
-    broadcast({ kind: 'close' });
+  function turnOff() {
+    return (offTurn = offTurn.then(async () => {
+      setOff(true);
+      const roomId = room?.state.roomId;
+      // At most `LOOKUP_MS` (turning off never waits on a hanging call): gone already, offline or slow, the host-left
+      // rule closes it (the call may still land).
+      if (roomId && meId) await within(api.leaveRoom(roomId).catch(() => {}), undefined);
+      stop();
+      for (const p of ports) closedByOff.add(p); // the ones opened meanwhile too
+      broadcast({ kind: 'close' });
+    }));
   }
 
   /** The panel's API calls, run by the one client here. Sign-in and sign-out also start or stop the session. */
@@ -1088,8 +1114,15 @@ export default defineBackground(() => {
         const asArrived = panelAllowed.get(port) ?? Promise.resolve(true); // whether it was the panel as it chose
         return inTabTurn(() => chooseTab(port, m, asArrived));
       }
-      // A panel opening turns it on again (decision 98): its sign-in check (`restore`) starts the session.
-      if (m.op === 'hello') void browser.storage.local.remove(OFF_FLAG).catch(() => {});
+      // A panel opening turns it on again (decision 98) — after a turning off under way, unless that closed it — before
+      // anything else from it is done: its sign-in check (`restore`) then starts the session.
+      if (m.op === 'hello') {
+        panelOn.set(port, offTurn.then(() => {
+          if (closedByOff.has(port) || !ports.has(port)) return false;
+          if (off) setOff(false);
+          return true;
+        }));
+      }
       if (m.op === 'hello' && typeof m.openedAt === 'number') {
         // The side panel lives in one window, the latest opened (decision 94): by when each panel opened (not by when
         // its hello arrives, nor whether it is a reconnect), kept across worker restarts. An older one closes. One
@@ -1098,8 +1131,9 @@ export default defineBackground(() => {
         const detached = m.detached === true;
         panelAllowed.set(port, (panelTurn = panelTurn.then(() => arbitrate(port, openedAt, m.windowId, detached))) as Promise<boolean>);
       }
-      // Nothing from a panel that lost (closing), nor before its arbitration ends.
+      // Nothing from a panel that lost (closing), nor before its arbitration ends; nor from one turning off closed.
       if (!(await (panelAllowed.get(port) ?? true))) return;
+      if (!(await (panelOn.get(port) ?? true)) || closedByOff.has(port)) return;
       switch (m.op) {
         case 'hello':
           if (m.hold) break; // a panel still asking for consent: its window is all it says
@@ -1192,6 +1226,7 @@ export default defineBackground(() => {
       viewers.delete(port);
       panelWindows.delete(port);
       panelAllowed.delete(port);
+      panelOn.delete(port);
       closedPanels.add(port); // its messages still being handled count as from a panel that lost
       if (!ports.size) typeNotices.forEach(toastType); // closed without answering: asked over the videos again
     });
@@ -1207,8 +1242,9 @@ export default defineBackground(() => {
       void setClosedRooms([...kept.filter((c) => typeof c?.userId === 'string'), ...closedRooms]).catch(() => {});
     }
     if (!(await hasConsent())) return;
-    // Turned off: nothing until a panel opens (its own sign-in check then) — unless one already did meanwhile.
-    if ((await browser.storage.local.get(OFF_FLAG).catch(() => ({})) as Record<string, unknown>)[OFF_FLAG] === true) return;
+    // Turned off: nothing until a panel opens (its own sign-in check then); turned off while restoring: signedIn stops.
+    await offLoaded;
+    if (off) return;
     if (await api.restore().catch(() => false)) await signedIn().catch(() => {});
   })();
 });
