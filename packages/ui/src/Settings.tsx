@@ -33,6 +33,10 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
           </div>
           <IconButton icon="logout" label="로그아웃" onClick={onSignedOut} />
         </section>
+        <section>
+          {/* A new tab of the user's own (not the followed one): the account is edited on Mirattic Auth itself. */}
+          <button className="secondary" onClick={() => window.open(ACCOUNT_URL, "_blank", "noopener")}>계정 정보 수정</button>
+        </section>
         <Privacy me={me} onChange={onMeChange} />
         <TextSize />
         <AskOnSwitch />
@@ -62,6 +66,8 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
 }
 
 const noSubscribe = () => () => {};
+/** Where the Mirattic account itself (email, password, profile) is edited. */
+const ACCOUNT_URL = "https://auth.mirattic.com/";
 
 /** The text size, in percent (only where the platform keeps it). */
 function TextSize() {
