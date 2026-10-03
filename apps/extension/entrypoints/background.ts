@@ -135,21 +135,30 @@ export default defineBackground(() => {
    */
   function outOfRoomMode() {
     roomKnown = true;
+    dropOffers();
     platform?.tabs?.setRoom?.({ inRoom: false, site: null });
   }
   /** A room was opened or closed in this worker (before that, the saved room says whether it is in one). */
   let roomKnown = false;
   /**
-   * Following the active tab, a video tab of another window became active while the panel is in another window: a
-   * toast over it offers to move the panel there (Chrome opens a side panel only on the user's own click). Each tab's
-   * latest offer counts (a click on an older one in that tab does nothing), kept with when it runs out: shown again,
-   * for the time left, when its page redraws (TOAST_READY), until answered.
+   * The host of the room I'm in, following the active tab: a video tab of another window became active while the panel
+   * is in another window, a toast over it offers to move the panel there (Chrome opens a side panel only on the user's
+   * own click). Each tab's latest offer counts (a click on an older one in that tab does nothing), kept with when it
+   * runs out: shown again, for the time left, when its page redraws (TOAST_READY), until answered.
    */
   const panelOffers = new Map<number, { toast: Omit<ToastMessage, 'seq' | 'ms'>; until: number }>();
   browser.tabs.onRemoved.addListener((id) => void panelOffers.delete(id));
   const onYouTube = (url?: string) => !!url && url.startsWith(new URL(SITE_HOME.youtube).origin + '/');
+  /** The offer is only for the host of the room I'm in (a member, or nobody's room: never). */
+  const hosting = () => !!room && !room.state.closed
+    && !!room.state.room?.members.some((m) => m.user.id === meId && m.role === 'HOST');
+  /** Hosting ended (the role handed over, the room left or closed, replaced): the offers still showing go, like dropAlerts. */
+  function dropOffers() {
+    for (const [tabId, o] of panelOffers) toTabs({ type: TOAST_DISMISS, kind: 'panel', target: o.toast.target }, () => true, tabId);
+    panelOffers.clear();
+  }
   function offerPanelHere(tabId: number, windowId: number) {
-    if (![...panelWindows.values()].some((p) => p.windowId !== windowId)) return; // no panel elsewhere
+    if (!hosting() || ![...panelWindows.values()].some((p) => p.windowId !== windowId)) return; // not hosting, or no panel elsewhere
     const toast = {
       type: TOAST, kind: 'panel', target: String(windowId), panelOpen: false, alertId: ++alertIds, total: PANEL_OFFER_MS,
       title: '이 창에서 보시나요?', body: 'Mirattic 패널을 이 창으로 옮기면 이 탭의 영상을 인식합니다.',
@@ -165,14 +174,15 @@ export default defineBackground(() => {
       .then(async () => {
         // The message, numbered (the pages' order; a toast without one is dropped) — or null, once it no longer
         // applies: no longer the tab's latest offer or run out, the tab no longer active and on YouTube (it may have
-        // moved on while this waited), signed out, the active tab no longer followed, no panel in another window.
+        // moved on while this waited), signed out, no longer the host of the room I'm in, the active tab no longer
+        // followed, no panel in another window.
         const current = async () => {
           const o = panelOffers.get(tabId);
           const t = await browser.tabs.get(tabId).catch(() => null);
           const now = Date.now();
           if (o?.toast.alertId !== alertId || o.until <= now || !t?.active || !onYouTube(t.url)) return null;
           const elsewhere = [...panelWindows.values()].some((p) => p.windowId !== t.windowId);
-          if (!meId || !(platform?.followsActive() ?? !room) || !elsewhere) return null;
+          if (!meId || !hosting() || !(platform?.followsActive() ?? !room) || !elsewhere) return null;
           return { ...o.toast, ms: o.until - now, seq: ++seq };
         };
         let offer = await current();
@@ -731,6 +741,7 @@ export default defineBackground(() => {
         const pending = !!r?.type && (r.typeVersion ?? 0) > (r.typeSeen ?? 0)
           && !r.members.some((m) => m.user.id === meId && m.role === 'HOST');
         if (room === sync && r && !pending) setRoomSite(r.type ?? null, sync.state.roomId);
+        if (room === sync && !hosting()) dropOffers(); // the host role handed over (or another room): no offer for a member
         if (!state.pauseRequest) dropAlerts((a) => a.kind === 'pause'); // answered or expired (30 s)
         if (state.closed && room === sync) closeRoom();
       },
@@ -771,6 +782,7 @@ export default defineBackground(() => {
     room?.dispose();
     room = null;
     roomKnown = true;
+    dropOffers();
     setRoomSite(null, null);
     void browser.storage.session.remove(ROOM_KEY);
     pushShared();
@@ -993,13 +1005,13 @@ export default defineBackground(() => {
       // The offer shown last, from its tab: answered either way, it isn't shown again when the page redraws.
       if (panelOffers.get(tabId)?.toast.alertId !== m.alertId) return;
       panelOffers.delete(tabId);
-      // Only while it still applies: the tab still active and on YouTube, the active tab followed (out of a room, or
-      // following it), a panel elsewhere.
+      // Only while it still applies: the tab still active and on YouTube, still the host of the room I'm in, the active
+      // tab followed, a panel elsewhere.
       const offered = sender.tab.active && onYouTube(url);
       const following = platform?.followsActive() ?? !room;
       const here = sender.tab.windowId;
       const elsewhere = [...panelWindows.values()].some((p) => p.windowId !== here);
-      if (m.accept && offered && following && elsewhere) void browser.sidePanel.open({ windowId: here }).catch(() => {});
+      if (m.accept && offered && hosting() && following && elsewhere) void browser.sidePanel.open({ windowId: here }).catch(() => {});
       return;
     }
     if (m?.type !== TOAST_ANSWER || !active(m.kind, m.target, m.alertId)) return; // settled or replaced meanwhile
