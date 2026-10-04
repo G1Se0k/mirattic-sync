@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { contentKey, MEDIA_PROVIDERS, memberLimitOf, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
+import { contentKey, MEDIA_PROVIDERS, memberLimitOf, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type RoomMemberView, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, showsRoomVideo, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
@@ -183,33 +183,9 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       </header>
 
       <div className="room-body">
-        {/* Decision 106: how full the room is — a segment per seat, red once full. */}
-        <div className={`members-head${full ? " full" : ""}`} aria-label={`방 인원 ${room.members.length}/${limit}명${full ? ", 가득 참" : ""}`}>
-          <span className="label">멤버</span>
-          <span className="gauge" aria-hidden="true">
-            {Array.from({ length: limit }, (_, i) => <i key={i} className={i < room.members.length ? "on" : undefined} />)}
-          </span>
-          <span className="count">{room.members.length} / {limit}{full && " · 가득 참"}</span>
-        </div>
-        <div className="members">
-          {room.members.map((m) => (
-            <span key={m.user.id} className="member" title={m.role === "HOST" ? "호스트" : m.present ? "참가 중" : "초대됨"}>
-              <Avatar name={m.user.displayName} on={m.present} />
-              {m.user.displayName}
-              {m.user.id === me.id && <span className="muted">(나)</span>}
-              {m.role === "HOST" && <span className="muted">· 호스트</span>}
-              {m.user.id !== me.id && (
-                <IconButton icon="flag" label="신고" onClick={() => setReporting({ id: m.user.id, name: m.user.displayName })} />
-              )}
-              {isHost && m.user.id !== me.id && (
-                <>
-                  <IconButton icon="crown" label="호스트 넘기기" onClick={() => void manage(m.user.displayName, "host", m.user.id)} />
-                  <IconButton icon="userMinus" tone="danger" label="내보내기" onClick={() => void manage(m.user.displayName, "kick", m.user.id)} />
-                </>
-              )}
-            </span>
-          ))}
-        </div>
+        <Members members={room.members} meId={me.id} isHost={isHost} limit={limit}
+          onReport={(id, name) => setReporting({ id, name })}
+          onManage={(name, action, id) => void manage(name, action, id)} />
         <PlayerStatus content={content ?? null} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
           roomType={roomType} onPickSite={pickSite} onRequestPause={() => setAskingPause(true)} />
       </div>
@@ -414,6 +390,134 @@ function TabPicker({ type }: { type: MediaProvider | null }) {
         </label>
       </div>
     </details>
+  );
+}
+
+const MEMBERS_OPEN_KEY = "mirattic.membersOpen";
+
+/**
+ * The room's members (decision 106): a "멤버" line with a segment per seat (red once full) that folds the list
+ * (remembered on this device), and chips with the avatar and name. A chip opens a small box under it — over what
+ * follows, nothing moves: the name ("(나)" for me), "호스트", and its actions — report (not me), hand the room over
+ * and remove (the host, on someone else).
+ */
+function Members({ members, meId, isHost, limit, onReport, onManage }: {
+  members: RoomMemberView[];
+  meId: string;
+  isHost: boolean;
+  limit: number;
+  onReport: (id: string, name: string) => void;
+  onManage: (name: string, action: "host" | "kick", id: string) => void;
+}) {
+  const [open, setOpen] = useState(() => {
+    try {
+      return localStorage.getItem(MEMBERS_OPEN_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const [picked, setPicked] = useState<string | null>(null);
+  const wrap = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const full = members.length >= limit;
+  const shown = members.find((m) => m.user.id === picked);
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    setPicked(null);
+    try {
+      localStorage.setItem(MEMBERS_OPEN_KEY, next ? "1" : "0");
+    } catch {
+      // not kept: open again next time
+    }
+  }
+
+  // Under its chip, kept inside the list's width.
+  useLayoutEffect(() => {
+    const chip = list.current?.querySelector<HTMLElement>(`[data-member="${picked}"]`);
+    const el = box.current;
+    if (!chip || !el || !list.current) return;
+    el.style.left = `${Math.max(0, Math.min(chip.offsetLeft, list.current.clientWidth - el.offsetWidth))}px`;
+    el.style.top = `${chip.offsetTop + chip.offsetHeight + 4}px`;
+  }, [picked, members]);
+
+  // Opened: focus in it and in view (the panel may be short); closed by the keyboard or an action: back to its chip.
+  useEffect(() => {
+    if (!picked) return;
+    box.current?.focus({ preventScroll: true });
+    box.current?.scrollIntoView({ block: "nearest" });
+  }, [picked]);
+  function closeBox() {
+    list.current?.querySelector<HTMLElement>(`[data-member="${picked}"]`)?.focus();
+    setPicked(null);
+  }
+
+  // Closed by a click elsewhere, Escape, or a resize (the chips may wrap elsewhere).
+  useEffect(() => {
+    if (!picked) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (e.key === "Escape") closeBox();
+      } else if (!wrap.current?.contains(e.target as Node)) setPicked(null);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    const shut = () => setPicked(null);
+    window.addEventListener("resize", shut);
+    return () => {
+      window.removeEventListener("resize", shut);
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [picked]);
+
+  return (
+    <>
+      <button type="button" className={`members-head${full ? " full" : ""}`} aria-expanded={open}
+        aria-label={`멤버 ${members.length}/${limit}명${full ? ", 가득 참" : ""}, ${open ? "접기" : "펼치기"}`} onClick={toggle}>
+        <span className="label">멤버</span>
+        <span className="gauge" aria-hidden="true">
+          {Array.from({ length: limit }, (_, i) => <i key={i} className={i < members.length ? "on" : undefined} />)}
+        </span>
+        <span className="count">{members.length} / {limit}{full && " · 가득 참"}</span>
+      </button>
+      {/* Folds smoothly (kept rendered, out of reach while folded); the box sits outside the fold so it isn't clipped. */}
+      <div className="members-wrap" ref={wrap}>
+        <div className={`fold${open ? "" : " closed"}`} inert={!open}>
+          <div className="members" ref={list}>
+            {members.map((m) => (
+          <button key={m.user.id} type="button" className="member" data-member={m.user.id} aria-haspopup="dialog"
+            aria-expanded={picked === m.user.id} title={m.present ? "참가 중" : "방 밖"}
+            onClick={() => setPicked((p) => (p === m.user.id ? null : m.user.id))}>
+            <Avatar name={m.user.displayName} on={m.present} />
+            {m.user.displayName}
+          </button>
+            ))}
+          </div>
+        </div>
+        {shown && (
+          <div className="member-box" ref={box} tabIndex={-1} role="dialog" aria-label={`${shown.user.displayName} 메뉴`}>
+            <span className="who">
+              {shown.user.displayName}{shown.user.id === meId && " (나)"}
+              {shown.role === "HOST" && <span className="muted"> · 호스트</span>}
+            </span>
+            {shown.user.id !== meId && (
+              <span className="row">
+                <IconButton icon="flag" label="신고" onClick={() => { closeBox(); onReport(shown.user.id, shown.user.displayName); }} />
+                {isHost && (
+                  <>
+                    <IconButton icon="crown" label="호스트 넘기기" onClick={() => { closeBox(); onManage(shown.user.displayName, "host", shown.user.id); }} />
+                    <IconButton icon="userMinus" tone="danger" label="내보내기" onClick={() => { closeBox(); onManage(shown.user.displayName, "kick", shown.user.id); }} />
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 

@@ -77,6 +77,7 @@ section { margin-top: 4px; }
 .home > main { flex: 1; width: 100%; box-sizing: border-box; }
 .me-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 8px 16px; }
 .me-bar > section { max-width: 640px; margin: 4px auto 14px; }
+.me-bar > section h2 { margin-top: 4px; }
 .me-bar .friend { max-width: 640px; margin: 0 auto; padding: 0; }
 .avatar { position: relative; width: 28px; height: 28px; border-radius: 50%; background: var(--hover); border: 1px solid var(--line);
   display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--text-scale)); font-weight: 600; flex-shrink: 0; color: var(--fg); }
@@ -117,6 +118,18 @@ input.code::placeholder { font-family: inherit; letter-spacing: normal; }
 .banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
 
 /* Menus */
+/* Motion: a fold grows and shrinks; a menu or box drops in; a revealed part slides in (closing is instant). */
+.fold { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.18s ease; }
+.fold.closed { grid-template-rows: 0fr; }
+.fold > * { overflow: hidden; min-height: 0; }
+.menu-items, .member-box { animation: drop-in 0.12s ease-out; }
+.reveal, .me-bar > section { animation: reveal 0.18s ease-out; }
+@keyframes drop-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes reveal { from { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) {
+  .fold, .tab-picker::details-content { transition: none; }
+  .menu-items, .member-box, .reveal, .me-bar > section { animation: none; }
+}
 .menu { position: relative; }
 .menu-items { position: absolute; right: 0; top: 30px; z-index: 5; min-width: 128px; padding: 4px; background: var(--surface);
   border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.12); }
@@ -134,9 +147,15 @@ input.code::placeholder { font-family: inherit; letter-spacing: normal; }
 main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 /* Shrinks and scrolls in a short panel (large text): the chat below keeps its minimum, composer included. */
 .room-body { padding: 10px 12px 0; display: flex; flex-direction: column; gap: 8px; flex: 0 1 auto; min-height: 0; overflow-y: auto; }
-.members { display: flex; flex-wrap: wrap; gap: 4px; }
-/* The room's member count over its limit (decision 106): a segment per seat, red once full. */
-.members-head { display: flex; align-items: center; gap: 8px; font-size: calc(11px * var(--text-scale)); color: var(--muted); }
+/* The list folds inside .fold; the gap above it is inside too (padding), so folded it leaves no gap behind. */
+.members-wrap { position: relative; margin-top: -8px; }
+.members { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 8px; }
+/* The room's member count over its limit (decision 106): a segment per seat, red once full; it folds the list. */
+.members-head { display: flex; align-items: center; gap: 8px; width: calc(100% + 12px); margin: -4px -6px; padding: 4px 6px; border: none;
+  border-radius: 6px; background: none; text-align: left; cursor: pointer; font-weight: 400; font-size: calc(11px * var(--text-scale)); color: var(--muted); }
+.members-head:hover { background: var(--hover); }
+/* Closer to the player box below (the list folded or not). */
+.room-body > .members-wrap + section.card { margin-top: -2px; }
 .members-head .label { font-weight: 600; letter-spacing: 0.04em; }
 .members-head .gauge { display: flex; gap: 2px; flex: 1; max-width: 96px; }
 .members-head .gauge i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
@@ -145,8 +164,21 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .members-head.full .gauge i.on { background: var(--danger); }
 .members-head.full .count { color: var(--danger); }
 .member { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 2px; border: 1px solid var(--line);
-  border-radius: 999px; font-size: calc(12px * var(--text-scale)); background: var(--surface); }
+  border-radius: 999px; font-size: calc(12px * var(--text-scale)); background: var(--surface); color: var(--fg); cursor: pointer; font-weight: 400; }
+.member:hover { background: var(--hover); }
+.member[aria-expanded="true"] { border-color: var(--accent); }
+/* A member's box under their chip, over what follows (nothing moves): name, role, actions. */
+.member-box { position: absolute; z-index: 5; max-width: calc(100% - 4px); display: flex; align-items: center; gap: 6px; min-height: 36px;
+  padding: 4px 4px 4px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+  font-size: calc(12px * var(--text-scale)); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
+.member-box:focus { outline: none; }
+.member-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.member-box .who { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 4px; }
 .member .avatar { width: 20px; height: 20px; font-size: calc(10px * var(--text-scale)); }
+/* "인식할 탭" opens and closes smoothly (Chromium's ::details-content). */
+.tab-picker { interpolate-size: allow-keywords; }
+.tab-picker::details-content { block-size: 0; overflow: hidden; transition: block-size 0.18s ease, content-visibility 0.18s allow-discrete; }
+.tab-picker[open]::details-content { block-size: auto; }
 .tab-picker summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-picker .stack { margin-top: 8px; }
 .tab-picker summary { font-size: calc(12px * var(--text-scale)); }

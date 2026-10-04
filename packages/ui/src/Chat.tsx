@@ -114,6 +114,17 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     shown.current = next;
   }, [shownLines, meId]);
 
+  // The list itself shrinking or growing (the member list folding above, a resize) keeps the bottom in view.
+  useEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const keep = new ResizeObserver(() => {
+      if (atBottom.current) el.scrollTop = el.scrollHeight;
+    });
+    keep.observe(el);
+    return () => keep.disconnect();
+  }, []);
+
   function onScroll() {
     const el = list.current!;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;

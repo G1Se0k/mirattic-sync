@@ -45,9 +45,9 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
           <button className="secondary" aria-expanded={showBlocked} onClick={() => setShowBlocked((v) => !v)}>
             차단한 사용자 ({blocked.length}) {showBlocked ? "닫기" : "보기"}
           </button>
-          {showBlocked && blocked.length === 0 && <p className="muted">없습니다.</p>}
+          {showBlocked && blocked.length === 0 && <p className="muted reveal">없습니다.</p>}
           {showBlocked && (
-            <ul className="list">
+            <ul className="list reveal">
               {blocked.map((u) => (
                 <li key={u.id} className="friend">
                   <Avatar name={u.displayName} />
