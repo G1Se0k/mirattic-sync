@@ -13,8 +13,9 @@ class ServerApplicationTests extends IntegrationTest {
 	}
 
 	@Test
-	void privacyPolicyIsPublic() throws Exception {
+	void privacyPolicyAndPatchNotesArePublic() throws Exception {
 		call(HttpMethod.GET, "/privacy.html", null, null).andExpect(status().isOk());
+		call(HttpMethod.GET, "/patch-notes.html", null, null).andExpect(status().isOk());
 	}
 
 	@Test
