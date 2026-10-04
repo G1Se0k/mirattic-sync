@@ -7,6 +7,9 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### 서버 스케줄러 스레드 4개 (2026-10-04, 사용자 요청)
+- `spring.task.scheduling.pool.size=4`(기본 1): ping(30초) · 퇴장 기록(5초) · 빈 방 정리(60초) · 보관 이벤트 정리(10분) · 호스트가 떠난 30초 뒤 방 닫기가 한 스레드에서 줄 서던 것 — 빈 방 정리가 DB에서 느려져도 ping(Cloudflare 100초 유휴 끊김 방지)과 방 닫기가 밀리지 않음. 같은 작업은 겹쳐 돌지 않고, 서로 다른 작업은 각자의 잠금으로 보호됨. 메모리 증가는 1MB 안팎
+
 ### CI: 테스트는 모든 푸시, 배포는 서버가 바뀐 푸시만 (2026-10-04, 사용자 요청)
 - `ci.yml`에 `changes` 잡: 푸시 전후(`github.event.before`..`sha`)에 `server/` · `deploy/` · `ci.yml`이 바뀌었으면 배포, 아니면 `deploy`는 건너뜀. 전 커밋을 모르면(새 브랜치 · 강제 푸시) 배포
 - 확장 전용 커밋에 붙이던 `[skip ci]`(테스트까지 건너뜀)는 더 쓰지 않음
