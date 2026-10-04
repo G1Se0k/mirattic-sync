@@ -205,8 +205,9 @@
       </div>
     </div>
     <!-- What Sync does, drawn and animated here (script at the end): the host pauses, seeks and plays; the
-         friend's window follows and the room log says so. Static (paused) with reduced motion. -->
-    <div class="scene" role="img" aria-label="방장 지우가 일시정지하고 2:40으로 넘기자 민준의 화면도 똑같이 멈추고 넘어가며, 방 기록에 남는 모습">
+         friend's window follows, and the side chat has a stamp and a message at those times (the room log keeps no
+         play/pause/seek lines). Static (paused) with reduced motion. -->
+    <div class="scene" role="img" aria-label="방장 지우가 일시정지하고 2:40으로 넘기자 민준의 화면도 똑같이 멈추고 넘어가며, 그 장면에 스탬프를 찍고 채팅하는 모습">
       <div class="win host">
         <div class="win-bar"><span class="av on">지</span>지우 <small>방장</small></div>
         <div class="screen"><i class="cloud"></i><i class="cloud two"></i><div class="paused-mark"><span><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg></span></div></div>
@@ -237,7 +238,7 @@
         <ol>
           <li><div><b>확장프로그램 설치</b><p>툴바 아이콘을 누르면 사이드 패널이 열립니다. Mirattic 계정으로 로그인하세요.</p></div></li>
           <li><div><b>영상 열고 방 만들기</b><p>보고 싶은 영상을 연 채로 방을 만들고, 친구를 초대하거나 방 코드를 보내세요.</p></div></li>
-          <li><div><b>같이 보기</b><p>방장이 재생·일시정지·넘기기를 하면 모두의 화면이 따라갑니다. 누가 언제 멈췄는지는 채팅에 남습니다.</p></div></li>
+          <li><div><b>같이 보기</b><p>방장이 재생·일시정지·넘기기를 하면 모두의 화면이 따라갑니다. 장면에 스탬프를 남기고 그 시각으로 이야기할 수 있습니다.</p></div></li>
         </ol>
         <div class="pair">
           <figure>
@@ -346,13 +347,14 @@
     const still = () => {
       wins.forEach((w) => { w.pos = 160; w.playing = false; draw(w); });
       log.replaceChildren();
-      say('호스트가 일시정지했습니다', '1:24');
-      say('호스트가 2:40로 이동했습니다');
+      say('지우님이 1:16에 스탬프를 찍었습니다');
+      say('민준: 여기 바다 색 봐', '2:40');
     };
     const script = [
-      [4000, () => { act((w) => { w.playing = false; }); say('호스트가 일시정지했습니다', clock(wins[0].pos)); }],
-      [6500, () => { act((w) => { w.pos = 160; }); say('호스트가 2:40로 이동했습니다'); }],
-      [8500, () => { act((w) => { w.playing = true; }); say('호스트가 재생했습니다', '2:40'); }],
+      // Paused at 1:16 exactly (not wherever the frames got to), so the stamp reads as in the still frame.
+      [4000, () => { act((w) => { w.playing = false; w.pos = 76; }); say('지우님이 1:16에 스탬프를 찍었습니다'); }],
+      [6500, () => { act((w) => { w.pos = 160; }); }],
+      [8500, () => { act((w) => { w.playing = true; }); say('민준: 여기 바다 색 봐', '2:40'); }],
       [13000, () => { wins.forEach((w) => { w.pos = 72; w.playing = true; }); log.replaceChildren(); say('민준님이 들어왔습니다'); }],
     ];
     let start, last, step, frame = 0, pending = 0;
