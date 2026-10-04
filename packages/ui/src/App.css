@@ -138,16 +138,16 @@ input.code::placeholder { font-family: inherit; letter-spacing: normal; }
 .room-page { height: 100vh; display: flex; flex-direction: column; }
 main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 /* Shrinks and scrolls in a short panel (large text): the chat below keeps its minimum, composer included. */
-.room-body { padding: 10px 12px 0; display: flex; flex-direction: column; gap: 8px; flex: 0 1 auto; min-height: 0; overflow-y: auto; }
-/* The list folds inside .fold; the gap above it is inside too (padding), so folded it leaves no gap behind. */
-.members-wrap { position: relative; margin-top: -8px; }
+.room-body { padding: 8px 12px 0; display: flex; flex-direction: column; gap: 8px; flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+/* In a card like the player's; the list folds inside .fold, its gap above (padding) with it. */
+.members-wrap { position: relative; }
+/* The room's cards 8px apart and from the edges above and below (not the general section margin on top). */
+.room-body > section { margin-top: 0; }
 .members { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 8px; }
 /* The room's member count over its limit (decision 106): a segment per seat, red once full; it folds the list. */
 .members-head { display: flex; align-items: center; gap: 8px; width: calc(100% + 12px); margin: -4px -6px; padding: 4px 6px; border: none;
   border-radius: 6px; background: none; text-align: left; cursor: pointer; font-weight: 400; font-size: calc(11px * var(--text-scale)); color: var(--muted); }
 .members-head:hover { background: var(--hover); }
-/* Closer to the player box below (the list folded or not). */
-.room-body > .members-wrap + section.card { margin-top: -2px; }
 .members-head .label { font-weight: 600; letter-spacing: 0.04em; }
 .members-head .gauge { display: flex; gap: 2px; flex: 1; max-width: 96px; }
 .members-head .gauge i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }

@@ -183,11 +183,11 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       </header>
 
       <div className="room-body">
+        <PlayerStatus content={content ?? null} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
+          roomType={roomType} onPickSite={pickSite} onRequestPause={() => setAskingPause(true)} />
         <Members members={room.members} meId={me.id} isHost={isHost} limit={limit}
           onReport={(id, name) => setReporting({ id, name })}
           onManage={(name, action, id) => void manage(name, action, id)} />
-        <PlayerStatus content={content ?? null} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
-          roomType={roomType} onPickSite={pickSite} onRequestPause={() => setAskingPause(true)} />
       </div>
 
       <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
@@ -397,8 +397,8 @@ const MEMBERS_OPEN_KEY = "mirattic.membersOpen";
 
 /**
  * The room's members (decision 106): a "멤버" line with a segment per seat (red once full) that folds the list
- * (remembered on this device), and chips with the avatar and name. A chip opens a small box under it — over what
- * follows, nothing moves: the name ("(나)" for me), "호스트", and its actions — report (not me), hand the room over
+ * (remembered on this device), and chips with the avatar and name. A chip opens a small box over it — on top of what
+ * comes before, nothing moves: the name ("(나)" for me), "호스트", and its actions — report (not me), hand the room over
  * and remove (the host, on someone else).
  */
 function Members({ members, meId, isHost, limit, onReport, onManage }: {
@@ -434,13 +434,13 @@ function Members({ members, meId, isHost, limit, onReport, onManage }: {
     }
   }
 
-  // Under its chip, kept inside the list's width.
+  // Over its chip (the list is the last thing above the chat), kept inside the list's width.
   useLayoutEffect(() => {
     const chip = list.current?.querySelector<HTMLElement>(`[data-member="${picked}"]`);
     const el = box.current;
     if (!chip || !el || !list.current) return;
     el.style.left = `${Math.max(0, Math.min(chip.offsetLeft, list.current.clientWidth - el.offsetWidth))}px`;
-    el.style.top = `${chip.offsetTop + chip.offsetHeight + 4}px`;
+    el.style.top = `${chip.offsetTop - el.offsetHeight - 4}px`;
   }, [picked, members]);
 
   // Opened: focus in it and in view (the panel may be short); closed by the keyboard or an action: back to its chip.
@@ -474,7 +474,7 @@ function Members({ members, meId, isHost, limit, onReport, onManage }: {
   }, [picked]);
 
   return (
-    <>
+    <section className="card">
       <button type="button" className={`members-head${full ? " full" : ""}`} aria-expanded={open}
         aria-label={`멤버 ${members.length}/${limit}명${full ? ", 가득 참" : ""}, ${open ? "접기" : "펼치기"}`} onClick={toggle}>
         <span className="label">멤버</span>
@@ -486,6 +486,7 @@ function Members({ members, meId, isHost, limit, onReport, onManage }: {
       {/* Folds smoothly (kept rendered, out of reach while folded); the box sits outside the fold so it isn't clipped. */}
       <div className="members-wrap" ref={wrap}>
         <div className={`fold${open ? "" : " closed"}`} inert={!open}>
+          <div>{/* folds to 0, the list's padding with it */}
           <div className="members" ref={list}>
             {members.map((m) => (
           <button key={m.user.id} type="button" className="member" data-member={m.user.id} aria-haspopup="dialog"
@@ -495,6 +496,7 @@ function Members({ members, meId, isHost, limit, onReport, onManage }: {
             {m.user.displayName}
           </button>
             ))}
+          </div>
           </div>
         </div>
         {shown && (
@@ -517,7 +519,7 @@ function Members({ members, meId, isHost, limit, onReport, onManage }: {
           </div>
         )}
       </div>
-    </>
+    </section>
   );
 }
 
