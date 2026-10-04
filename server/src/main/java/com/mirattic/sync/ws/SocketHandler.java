@@ -164,7 +164,7 @@ class SocketHandler extends TextWebSocketHandler {
 			case "sync:request" -> hub.send(out(session), new ServerEvent("sync:response", null, null, null,
 					System.currentTimeMillis(), Map.of("reqId", reqId == null ? "" : reqId)));
 			case "room:join", "room:leave", "playback:play", "playback:pause", "playback:seek",
-					"playback:content-change", "chat:message", "chat:stamp", "pause:request" -> {
+					"playback:content-change", "chat:message", "chat:stamp", "pause:request", "room:host-video" -> {
 				if (roomId == null) {
 					error(session, reqId, "bad_payload");
 					return;
@@ -187,6 +187,7 @@ class SocketHandler extends TextWebSocketHandler {
 		String me = userId(session);
 		switch (type) {
 			case "room:join" -> {
+				boolean wasIn = joined(session).contains(roomId); // this very connection joining again (not another device's)
 				PlaybackState state = hub.joinRoom(roomId, out(session), () -> {
 					PlaybackState s = rooms.join(me, roomId);
 					// Back in: an earlier leave's wait is over. Under the entry lock, so a disconnect's new wait (made
@@ -197,7 +198,32 @@ class SocketHandler extends TextWebSocketHandler {
 				joined(session).add(roomId);
 				roomLog.joined(roomId, me);
 				hub.send(out(session), playbackEvent(roomId, state));
+				if (rooms.isHost(me, roomId)) {
+					if (!wasIn) {
+						hub.hostVideoForgotten(roomId, me, () -> rooms.hostOf(roomId)); // until their app tells (1.1.1 never does)
+					}
+				} else {
+					hub.sendHostVideo(roomId, out(session), () -> rooms.hostOf(roomId));
+				}
 				rooms.announce(roomId, rooms.memberIds(roomId));
+			}
+			case "room:host-video" -> {
+				// The host tells whether their browser shows the room's video: members stamp only while it does.
+				if (!withinBudget(session, PLAYBACK_WINDOW, MAX_PLAYBACK_PER_SECOND)) {
+					error(session, reqId, "rate_limited");
+					return;
+				}
+				JsonNode watching = payload.path("watching");
+				if (!watching.isBoolean()) {
+					error(session, reqId, "bad_payload");
+					return;
+				}
+				rooms.requireMembership(me, roomId);
+				if (!rooms.isHost(me, roomId)) {
+					error(session, reqId, "not_host");
+					return;
+				}
+				hub.hostVideoTold(roomId, me, watching.asBoolean(), () -> rooms.hostOf(roomId));
 			}
 			case "room:leave" -> {
 				if (joined(session).remove(roomId)) {
@@ -354,6 +380,7 @@ class SocketHandler extends TextWebSocketHandler {
 			hub.sendToRoom(roomId, playbackEvent(roomId, state));
 		}
 		if (rooms.isHost(userId, roomId)) {
+			hub.refreshHostVideo(roomId, () -> rooms.hostOf(roomId)); // none of the host's connections in the room: false
 			closeIfHostStaysAway(userId, roomId);
 		}
 	}

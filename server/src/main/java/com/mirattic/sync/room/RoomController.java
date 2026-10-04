@@ -437,6 +437,7 @@ class RoomController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void handOver(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody HandOver body) {
 		RoomService.Logged handed = rooms.handOver(jwt.getSubject(), id, body.userId());
+		hub.refreshHostVideo(id, () -> rooms.hostOf(id)); // the former host's report no longer counts: unknown
 		roomLog.post(id, handed.log());
 		rooms.announce(id, handed.memberIds());
 	}

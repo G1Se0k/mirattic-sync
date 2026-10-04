@@ -521,6 +521,81 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void aMemberInBeforeTheHostHearsTheHostShowsNothing() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").asBoolean(true)).isFalse();
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", roomId, "{}"));
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").isBoolean()).isFalse(); // in: unknown
+		hostWs.send(event("room:host-video", roomId, "{\"watching\":true}"));
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").asBoolean()).isTrue();
+	}
+
+	@Test
+	void theHostTellsWhetherTheyShowTheRoomsVideoAndMembersHearIt() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		assertThat(friendWs.nextOfType("room:host-video")).isNull(); // the host in, nothing told yet: unknown
+
+		hostWs.send(event("room:host-video", roomId, "{\"watching\":false}"));
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").asBoolean(true)).isFalse();
+		hostWs.send(event("room:host-video", roomId, "{\"watching\":false}")); // unchanged: not told again
+		assertThat(friendWs.nextOfType("room:host-video")).isNull();
+		hostWs.send(event("room:host-video", roomId, "{\"watching\":true}"));
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").asBoolean()).isTrue();
+
+		// Only the host tells it; a bad payload is refused.
+		friendWs.send(event("room:host-video", roomId, "{\"watching\":false}"));
+		assertThat(friendWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_host");
+		hostWs.send(event("room:host-video", roomId, "{\"watching\":\"yes\"}"));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+
+		// Joining (again) hears the current one with the playback state.
+		friendWs.send(event("room:leave", roomId, "{}"));
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").asBoolean()).isTrue();
+
+		// The host's connections all out of the room: nothing shown there.
+		hostWs.send(event("room:leave", roomId, "{}"));
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").asBoolean(true)).isFalse();
+		// Back in: unknown until their app tells (a 1.1.1 app never does: members aren't held back by the old false).
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").isBoolean()).isFalse();
+		hostWs.send(event("room:host-video", roomId, "{\"watching\":true}"));
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").asBoolean()).isTrue();
+		// A join again from the connection already in the room keeps the report (its app wouldn't tell it again).
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+		assertThat(friendWs.nextOfType("room:host-video")).isNull();
+		// A new host: unknown until their app tells.
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/host", host.accessToken(), "{\"userId\":\"%s\"}".formatted(friend.id()))
+				.andExpect(status().isNoContent());
+		// (null left out of the payload: no boolean = unknown)
+		assertThat(friendWs.nextOfType("room:host-video").path("payload").path("watching").isBoolean()).isFalse();
+		// The former host's report no longer counts; the new host's does.
+		hostWs.send(event("room:host-video", roomId, "{\"watching\":true}"));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_host");
+		friendWs.send(event("room:host-video", roomId, "{\"watching\":false}"));
+		assertThat(hostWs.nextOfType("room:host-video").path("payload").path("watching").asBoolean(true)).isFalse();
+	}
+
+	@Test
 	void theHostKicksAMemberAndHandsTheRoomOver() throws Exception {
 		TestUser host = signup();
 		TestUser a = signup();

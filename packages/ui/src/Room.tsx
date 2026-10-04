@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
 import { contentKey, MEDIA_PROVIDERS, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
-import { PAUSE_REQUEST_SHOWN_MS, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
+import { PAUSE_REQUEST_SHOWN_MS, showsRoomVideo, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
@@ -203,7 +203,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
 
       <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
         subscribe={subscribe} position={position} onSeek={isHost && showsRoomVideo(s, content) ? (ms) => handle.seek(ms) : undefined}
-        canStamp={showsRoomVideo(s, content)}
+        canStamp={showsRoomVideo(s, content) && (isHost || s.hostVideo !== false)}
         video={content ? contentKey(content) : undefined} videoMs={content?.durationMs} />
 
       {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
@@ -402,14 +402,6 @@ function TabPicker({ type }: { type: MediaProvider | null }) {
       </div>
     </details>
   );
-}
-
-/**
- * This browser shows the room's video (the followed tab is on it, same site and id): a time can be stamped, and the
- * host's click on one moves the room. Not with no tab, a tab with no video, or another one.
- */
-export function showsRoomVideo(s: Pick<RoomSyncState, "canPlay" | "playerProvider" | "snapshot">, content: RoomContent | null | undefined) {
-  return s.canPlay && !!content && s.playerProvider === content.provider && s.snapshot?.contentId === content.contentId;
 }
 
 /** The room's type as its site's icon; the host's opens the list of sites to switch the room to. */

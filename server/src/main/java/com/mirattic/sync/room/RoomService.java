@@ -322,6 +322,13 @@ public class RoomService {
 		return new Left(everyone, false, null);
 	}
 
+	/** The room's host, or null (no room). */
+	@Transactional(readOnly = true)
+	public String hostOf(String roomId) {
+		return members.findByRoomId(roomId).stream().filter(m -> m.getRole() == RoomMember.Role.HOST)
+				.map(RoomMember::getUserId).findFirst().orElse(null);
+	}
+
 	@Transactional(readOnly = true)
 	public boolean isHost(String me, String roomId) {
 		return members.findByRoomIdAndUserId(roomId, me).filter(m -> m.getRole() == RoomMember.Role.HOST).isPresent();

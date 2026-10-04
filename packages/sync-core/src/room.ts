@@ -42,7 +42,17 @@ export type RoomSyncState = {
   pauseCooldownUntil: number;
   /** Host: a member asked to pause; cleared after 30 seconds. */
   pauseRequest: PauseRequest | null;
+  /** Whether the host's browser shows the room's video (`room:host-video`); null = not known (not told). */
+  hostVideo: boolean | null;
 };
+
+/**
+ * This browser shows the room's video (the followed tab is on it, same site and id): a time can be stamped there, and
+ * the host's click on one moves the room. Not with no tab, a tab with no video, or another one.
+ */
+export function showsRoomVideo(s: Pick<RoomSyncState, "canPlay" | "playerProvider" | "snapshot">, content: RoomContent | null | undefined) {
+  return s.canPlay && !!content && s.playerProvider === content.provider && s.snapshot?.contentId === content.contentId;
+}
 
 /** Entering a room with no snapshot yet: how long a tab still connecting gets before the video is opened. */
 const ENTER_RECHECK_MS = 1500;
@@ -73,7 +83,7 @@ export type RoomSyncDeps = {
 export function emptyRoomState(roomId: string): RoomSyncState {
   return {
     roomId, room: null, closed: false, loadFailed: false, clockReady: false, canPlay: false, playerProvider: null, snapshot: undefined,
-    away: false, sync: null, switched: null, pauseCooldownUntil: 0, pauseRequest: null,
+    away: false, sync: null, switched: null, pauseCooldownUntil: 0, pauseRequest: null, hostVideo: null,
   };
 }
 
@@ -111,6 +121,8 @@ export class RoomSync {
   /** "이 방에서 항상 허용" was ticked: this room's switches open without asking (until it is left). */
   private followAlways = false;
   private connected = false;
+  /** Host: what this app last told the room of `showsRoomVideo` (undefined: nothing since joining). */
+  private toldHostVideo: boolean | undefined;
   private readonly sentAt = new Map<string, number>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly poll: ReturnType<typeof setInterval>;
@@ -149,7 +161,19 @@ export class RoomSync {
   private set(change: Partial<RoomSyncState>) {
     if (this.disposed) return;
     this.state = { ...this.state, ...change };
+    this.tellHostVideo();
     this.deps.onChange(this.state);
+  }
+
+  /** Host: the room hears whether this browser shows its video, when that changes (members stamp only while it does). */
+  private tellHostVideo() {
+    if (!this.isHost || !this.connected) {
+      this.toldHostVideo = undefined; // a host again (hand-over, reconnect) tells it afresh
+      return;
+    }
+    const watching = showsRoomVideo(this.state, this.state.room?.content);
+    if (watching === this.toldHostVideo) return;
+    if (this.deps.send({ type: "room:host-video", roomId: this.deps.roomId, payload: { watching } })) this.toldHostVideo = watching;
   }
 
   private later(fn: () => void, ms: number) {
@@ -307,9 +331,14 @@ export class RoomSync {
 
   /** Socket up or down. The server forgets joins on disconnect: rejoin and re-measure on every connect. */
   setConnected(open: boolean) {
+    // Heard again on joining, if the host told it; told again by a host (before `connected`: nothing sent yet).
+    this.connected = false;
+    this.toldHostVideo = undefined;
+    if (this.state.hostVideo !== null) this.set({ hostVideo: null });
     this.connected = open;
     if (open) {
       this.deps.send({ type: "room:join", roomId: this.deps.roomId, payload: {} });
+      this.tellHostVideo();
       for (let i = 0; i < CLOCK_SAMPLES; i++) {
         this.later(() => {
           const reqId = `clock-${Date.now()}-${i}`;
@@ -338,6 +367,10 @@ export class RoomSync {
     if (event.roomId !== this.deps.roomId) return;
     if (event.type === "room:update") {
       void this.reload();
+    }
+    if (event.type === "room:host-video") {
+      const watching = (event.payload as { watching?: unknown } | null)?.watching;
+      this.set({ hostVideo: typeof watching === "boolean" ? watching : null });
     }
     if (event.type === "playback:update") {
       const state = event.payload as PlaybackState;

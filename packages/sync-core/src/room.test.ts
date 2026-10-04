@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ClientEvent, RoomView, ServerEvent } from "@mirattic/types";
+import type { ClientEvent, PlayerSnapshot, RoomContent, RoomView, ServerEvent } from "@mirattic/types";
 import { MockMediaProvider } from "./mock";
-import { RoomSync } from "./room";
+import { RoomSync, showsRoomVideo } from "./room";
 
 beforeEach(() => vi.useFakeTimers({ now: 1_000_000 }));
 afterEach(() => vi.useRealTimers());
@@ -492,4 +492,58 @@ it("entering a room whose type moved on opens the type's site even if the old vi
   await vi.advanceTimersByTimeAsync(3_000);
   expect(opened).toEqual(["https://www.youtube.com/"]);
   sync.dispose();
+});
+
+
+const roomVideo: RoomContent = { provider: "youtube", contentId: "12345678901", title: "x" };
+const on = (contentId: string): PlayerSnapshot => ({ contentId, positionMs: 0, playing: true, capturedAt: 0 });
+const youtube = { canPlay: true, playerProvider: "youtube" as const };
+
+it("says the browser shows the room's video only for its site and id, with a player that read it", () => {
+  expect(showsRoomVideo({ ...youtube, snapshot: on("12345678901") }, roomVideo)).toBe(true);
+  expect(showsRoomVideo({ ...youtube, snapshot: null }, roomVideo)).toBe(false); // a tab with no video
+  expect(showsRoomVideo({ ...youtube, snapshot: undefined }, roomVideo)).toBe(false); // not read yet
+  expect(showsRoomVideo({ ...youtube, snapshot: on("9bZkp7q19f0") }, roomVideo)).toBe(false); // another video
+  // The same id on another site (a Netflix id can look like a YouTube one): not the room's video.
+  expect(showsRoomVideo({ canPlay: true, playerProvider: "netflix", snapshot: on("12345678901") }, roomVideo)).toBe(false);
+  expect(showsRoomVideo({ canPlay: false, playerProvider: null, snapshot: null }, roomVideo)).toBe(false); // no player
+  expect(showsRoomVideo({ ...youtube, snapshot: on("12345678901") }, null)).toBe(false); // no room video
+});
+
+it("tells the room whether the host's browser shows its video, when that changes", async () => {
+  const h = start("me", "me");
+  await measured(h);
+  await vi.advanceTimersByTimeAsync(1_000); // the player is read
+  const told = () => h.sent.filter((e) => e.type === "room:host-video").map((e) => (e.payload as { watching: boolean }).watching);
+  expect(told().at(-1)).toBe(true);
+  const before = told().length;
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(told()).toHaveLength(before); // unchanged: not told again
+  h.player.getSnapshot = async () => null as unknown as PlayerSnapshot; // the tab left the video
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(told().at(-1)).toBe(false);
+  h.sync.setConnected(false);
+  h.sync.setConnected(true); // a rejoin tells it afresh
+  expect(h.sent.at(-1)).toEqual({ type: "room:host-video", roomId: "r1", payload: { watching: false } });
+  h.sync.dispose();
+
+  const m = start("me", "host"); // a member never tells it
+  await measured(m);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(m.sent.some((e) => e.type === "room:host-video")).toBe(false);
+  m.sync.dispose();
+});
+
+it("keeps what the host's browser shows, as the room tells it; unknown again on reconnecting", async () => {
+  const m = start("me", "host");
+  await measured(m);
+  expect(m.sync.state.hostVideo).toBeNull();
+  m.event({ type: "room:host-video", roomId: "r1", payload: { watching: false } });
+  expect(m.sync.state.hostVideo).toBe(false);
+  m.event({ type: "room:host-video", roomId: "r1", payload: {} }); // a new host: unknown
+  expect(m.sync.state.hostVideo).toBeNull();
+  m.event({ type: "room:host-video", roomId: "r1", payload: { watching: true } });
+  m.sync.setConnected(false);
+  expect(m.sync.state.hostVideo).toBeNull();
+  m.sync.dispose();
 });

@@ -232,6 +232,9 @@ public class SocketHub {
 				return set;
 			}
 			result[0] = action.get();
+			if (result[0] != null) {
+				forgetHostVideo(roomId); // closed
+			}
 			return result[0] == null ? set : null;
 		});
 		@SuppressWarnings("unchecked")
@@ -256,6 +259,89 @@ public class SocketHub {
 
 	public void closeRoom(String roomId) {
 		rooms.remove(roomId);
+		forgetHostVideo(roomId);
+	}
+
+	/** A host's own report: whether their browser shows the room's video. */
+	private record Told(String userId, boolean watching) {
+	}
+
+	/**
+	 * Room → what its host last told (`room:host-video`), and what the room was last told of it. What the room hears is
+	 * worked out afresh each time from the current state — the room's host now, whether they are in the room, and
+	 * whether this report is theirs — so a late report of a former host, or a leave racing a rejoin, can't leave it
+	 * wrong: no host in the room → false; the host's own report → it; else (a 1.1.1 app, a new host) → unknown (null),
+	 * which holds no member back. ponytail: in memory, single instance, one lock for every room (these are rare);
+	 * a restart forgets it until the host's app tells again (it does on its next join).
+	 */
+	private final Map<String, Told> told = new ConcurrentHashMap<>();
+	private final Map<String, Boolean> heard = new ConcurrentHashMap<>();
+
+	/**
+	 * A host's report. Who hosts is looked up again here, under the lock: a report of someone no longer hosting (checked
+	 * just before a hand-over, recorded after it) is dropped and never replaces the new host's.
+	 */
+	public synchronized void hostVideoTold(String roomId, String userId, boolean watching, Supplier<String> host) {
+		if (!userId.equals(host.get())) {
+			return;
+		}
+		told.put(roomId, new Told(userId, watching));
+		refreshHostVideo(roomId, host);
+	}
+
+	/**
+	 * The host's connection (back) in the room: their own earlier report goes — unknown until their app tells (a 1.1.1
+	 * app never does). Only theirs: a new host's report (handed over meanwhile) stays.
+	 */
+	public synchronized void hostVideoForgotten(String roomId, String userId, Supplier<String> host) {
+		told.computeIfPresent(roomId, (k, t) -> t.userId().equals(userId) ? null : t);
+		refreshed(roomId, host);
+	}
+
+	/** Worked out again (the host left, or another member hosts now) and told to the room if it changed. */
+	public synchronized void refreshHostVideo(String roomId, Supplier<String> host) {
+		refreshed(roomId, host);
+	}
+
+	/** @return whether the room was told (it changed). */
+	private boolean refreshed(String roomId, Supplier<String> host) {
+		String hostId = host.get();
+		Told t = told.get(roomId);
+		Boolean now = hostId == null ? null
+				: !presentIn(roomId).contains(hostId) ? Boolean.FALSE
+				: t != null && t.userId().equals(hostId) ? Boolean.valueOf(t.watching()) : null;
+		Boolean before = now == null ? heard.remove(roomId) : heard.put(roomId, now);
+		if (java.util.Objects.equals(before, now)) {
+			return false;
+		}
+		sendToRoom(roomId, hostVideoEvent(roomId, now));
+		return true;
+	}
+
+	/**
+	 * A member's connection just in the room: worked out now (no host in it yet → false), told to the room if that
+	 * changed — this connection included — else to it alone, if known.
+	 */
+	synchronized void sendHostVideo(String roomId, WebSocketSession session, Supplier<String> host) {
+		if (refreshed(roomId, host)) {
+			return;
+		}
+		Boolean watching = heard.get(roomId);
+		if (watching != null) {
+			send(session, hostVideoEvent(roomId, watching));
+		}
+	}
+
+	private void forgetHostVideo(String roomId) {
+		told.remove(roomId);
+		heard.remove(roomId);
+	}
+
+	/** `room:host-video` `{ watching }` (null: unknown — left out of the JSON). */
+	private ServerEvent hostVideoEvent(String roomId, Boolean watching) {
+		Map<String, Object> payload = new java.util.HashMap<>();
+		payload.put("watching", watching);
+		return new ServerEvent("room:host-video", roomId, null, null, System.currentTimeMillis(), payload);
 	}
 
 	/** Users with at least one session in the room. */
