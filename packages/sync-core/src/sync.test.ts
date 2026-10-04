@@ -183,6 +183,106 @@ describe("SyncFollower", () => {
     expect(Math.abs(m.player.positionMs() - target)).toBeLessThan(500); // not stuck 1.46 s behind
   });
 
+  it("aligns a new video that starts late in the member's tab, even within the tolerated band", async () => {
+    // The host changed videos: the member's (inactive) tab is still on the previous one, then loads the new one late
+    // and starts it from its start by itself — 1.4 s behind the room, with no seek of ours to check.
+    const m = member();
+    let loaded = false;
+    const snapshot = m.player.getSnapshot.bind(m.player);
+    m.player.getSnapshot = async () => {
+      const s = await snapshot();
+      return s && (loaded ? s : { ...s, contentId: "previous" });
+    };
+    m.follower.apply(state({ positionMs: 0, playing: false, version: 1 })); // the room restarts paused on it
+    await settle();
+    m.follower.apply(state({ positionMs: 0, playing: true, capturedAt: Date.now(), version: 2 })); // the host plays
+    await settle();
+    expect(m.statuses.at(-1)).toEqual({ kind: "other-content" });
+    await vi.advanceTimersByTimeAsync(1_400);
+    loaded = true;
+    await m.player.play(); // autoplay from 0
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "synced" });
+    expect(Math.abs(m.player.positionMs() - 3_400)).toBeLessThan(500);
+  });
+
+  it("keeps that first alignment until the new video plays, when its autoplay is held back at first", async () => {
+    const m = member();
+    let allowed = false;
+    const play = m.player.play.bind(m.player);
+    m.player.play = async () => void (allowed && (await play())); // a hidden tab: playing waits
+    m.follower.apply(state({ positionMs: 0, playing: true, capturedAt: Date.now(), version: 2 }));
+    await settle();
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "synced" }); // paused at 0, the room just past 0: no drift yet
+    await vi.advanceTimersByTimeAsync(1_400);
+    allowed = true;
+    await play(); // the page starts it by itself once allowed, from where it is: 1.4 s behind
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "synced" });
+    expect(Math.abs(m.player.positionMs() - 4_400)).toBeLessThan(500);
+  });
+
+  it("keeps aligning while the new video says it plays but is still buffering at its start", async () => {
+    const m = member();
+    let buffering = true;
+    const snapshot = m.player.getSnapshot.bind(m.player);
+    m.player.getSnapshot = async () => {
+      const s = await snapshot();
+      return s && (buffering ? { ...s, positionMs: 0, playing: true } : s); // unpaused, but not moving yet
+    };
+    let seeks = 0;
+    const seek = m.player.seek.bind(m.player);
+    m.player.seek = (ms) => (seeks++, seek(ms));
+    m.follower.apply(state({ positionMs: 0, playing: true, capturedAt: Date.now(), version: 2 }));
+    await settle();
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "synced" }); // at 0, the room just past 0
+    await vi.advanceTimersByTimeAsync(1_400);
+    expect(m.player.positionMs()).toBe(0); // really stalled: the player hasn't moved (it says it plays)
+    buffering = false;
+    await m.player.play(); // it starts moving ("playing"), from its start: 1.4 s behind
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(seeks).toBeGreaterThan(0); // aligned by the follower, not by itself
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "synced" });
+    expect(Math.abs(m.player.positionMs() - 4_400)).toBeLessThan(500);
+  });
+
+  it("also when that alignment itself lands late (both in an inactive window)", async () => {
+    const m = member();
+    let loaded = false;
+    const snapshot = m.player.getSnapshot.bind(m.player);
+    m.player.getSnapshot = async () => {
+      const s = await snapshot();
+      return s && (loaded ? s : { ...s, contentId: "previous" });
+    };
+    const seek = m.player.seek.bind(m.player);
+    m.player.seek = (ms) => seek(ms - 1_200);
+    m.follower.apply(state({ positionMs: 0, playing: true, capturedAt: Date.now(), version: 2 }));
+    await settle();
+    await vi.advanceTimersByTimeAsync(1_300);
+    loaded = true;
+    await m.player.play();
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "synced" });
+    expect(Math.abs(m.player.positionMs() - 4_300)).toBeLessThan(500);
+  });
+
+  it("never seeks again and again when every landing falls 2 s short (the seek band)", async () => {
+    const m = member();
+    let seeks = 0;
+    const seek = m.player.seek.bind(m.player);
+    const start = Date.now();
+    m.player.seek = () => (seeks++, seek(100_000 + (Date.now() - start) - 2_000)); // emits onChange each time
+    m.follower.apply(state({ positionMs: 100_000, playing: true }));
+    await settle();
+    expect(seeks).toBe(3); // the correction and two landings again, at once — not on and on
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(seeks).toBeLessThanOrEqual(3 + 10); // then as before: confirmed, at most about once a second
+  });
+
   it("seeks again at most twice after its own seek, then leaves a tolerated drift be", async () => {
     const m = member();
     let seeks = 0;

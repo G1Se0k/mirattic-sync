@@ -52,11 +52,14 @@ export class SyncFollower {
   /** When the speed was last set: a page that keeps resetting it is tried once a recheck, not on its every event. */
   private rateAt = -Infinity;
   /**
-   * After a seek of ours, until `until`: where it landed is checked. A player lands late (it buffers there while the
-   * room goes on — longer in a hidden window), which can leave a drift in the tolerated band for good; such a landing
-   * is sought again ahead by what it missed (`aheadMs`), at most LANDING_RETRIES times.
+   * A window in which even a drift in the tolerated band is aligned, `retries` times at most: LANDING_MS after a new
+   * host state — counted from when the player plays (or pauses) as the room does (`until` null before: a member's tab
+   * may load the new video late, hold its autoplay back, or buffer at its start, and its late start is what drifts) —
+   * and after each seek of ours (a player lands late: it buffers there while the room goes on, longer in a hidden
+   * window). After a seek of ours (`sought`), it is aimed ahead by what was missed (`aheadMs`). Without it, such a
+   * drift stays in the tolerated band for good.
    */
-  private landing: { until: number; retries: number; aheadMs: number } | null = null;
+  private landing: { until: number | null; retries: number; aheadMs: number; sought: boolean } | null = null;
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -79,7 +82,7 @@ export class SyncFollower {
     if (state.version <= this.version) return false;
     this.state = state;
     this.confirming = false;
-    this.landing = null;
+    this.landing = { until: null, retries: LANDING_RETRIES + 1, aheadMs: 0, sought: false };
     this.rateAt = -Infinity; // the host's own change: followed at once
     void this.check(true);
     return true;
@@ -147,6 +150,10 @@ export class SyncFollower {
     const target = estimatePosition(state, clock.serverNow());
     const driftMs = snap.positionMs - target;
     const action = classifyDrift(driftMs, { ...DEFAULT_DRIFT, ...adapter.driftOverride });
+    const now = Date.now();
+    if (this.landing?.until === null && snap.playing === state.playing) this.landing.until = now + LANDING_MS;
+    if (this.landing?.until != null && now >= this.landing.until) this.landing = null;
+    const landing = this.landing?.until != null ? this.landing : null;
 
     if (action !== "ignore" && action !== "recheck" && adapter.seekable === false) {
       this.confirming = false;
@@ -155,19 +162,23 @@ export class SyncFollower {
     }
     if (action === "immediate" || (action === "seek" && (hostEvent || this.confirming))) {
       this.confirming = false;
-      this.landing = { until: Date.now() + LANDING_MS, retries: LANDING_RETRIES, aheadMs: 0 };
+      // Its landing checked LANDING_RETRIES times; a window already past its first seek keeps what it has left, so a
+      // player that never lands isn't sought again and again.
+      const left = landing?.sought ? landing.retries : LANDING_RETRIES;
+      this.landing = { until: now + LANDING_MS, retries: left, aheadMs: landing?.sought ? landing.aheadMs : 0, sought: true };
       // Re-estimate: play()/getSnapshot() may have taken a while on a real player.
       await adapter.seek(estimatePosition(state, clock.serverNow()));
       this.schedule(); // real players land imprecisely; verify
       return onStatus?.({ kind: "corrected", driftMs });
     }
-    const landing = this.landing;
-    if (landing && Date.now() >= landing.until) this.landing = null;
-    else if (landing && action === "recheck" && landing.retries > 0) {
-      // Our seek landed short of the room (or past it): again, ahead by what it missed, while playing.
+    if (landing && (action === "recheck" || action === "seek") && landing.retries > 0 && adapter.seekable !== false) {
+      // Short of the room (or past it) in the window: aligned; after a seek of ours, ahead by what it missed.
       landing.retries--;
-      landing.until = Date.now() + LANDING_MS;
-      if (state.playing) landing.aheadMs = Math.max(-MAX_AHEAD_MS, Math.min(MAX_AHEAD_MS, landing.aheadMs - driftMs));
+      landing.until = now + LANDING_MS;
+      if (landing.sought && state.playing) {
+        landing.aheadMs = Math.max(-MAX_AHEAD_MS, Math.min(MAX_AHEAD_MS, landing.aheadMs - driftMs));
+      }
+      landing.sought = true;
       await adapter.seek(estimatePosition(state, clock.serverNow()) + (state.playing ? landing.aheadMs : 0));
       this.schedule();
       return onStatus?.({ kind: "corrected", driftMs });
