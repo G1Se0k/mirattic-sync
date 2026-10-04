@@ -19,3 +19,6 @@ output/
 
 # Chrome Web Store listing images, kept locally (not in the repo)
 docs/store-assets/
+
+# graphify knowledge graph output
+graphify-out/
