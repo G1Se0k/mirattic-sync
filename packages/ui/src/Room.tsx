@@ -49,32 +49,10 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   const experimentOn = useExperiment(experiment);
 
   /**
-   * Back to the list by the user (decision 90): the host's closes the room, asked first. The server decides who
-   * hosts it now: a screen still showing me as a member gets a 409 if I host it by now, and asks me then. A
-   * member just goes back (still in the room).
+   * Back to the list (decision 90, changed 2026-10-04 at the user's request): for the host too, the room stays —
+   * like closing the panel, the background keeps it. The host closes it with 방 닫기 here or on its row in the list.
    */
-  async function back() {
-    const askClose = () => asker.ask("방을 나갈까요?", { body: "방장이 나가면 방이 종료됩니다.", ok: "나가기", danger: true });
-    let confirmed = false;
-    if (isHost && !(confirmed = await askClose())) return;
-    for (;;) {
-      try {
-        if (!(await api.backFromRoom(roomId, confirmed)).closed) return onClose(); // a member: still in it
-        break;
-      } catch (e) {
-        const status = e instanceof ApiError ? e.status : 0;
-        if (status === 409 && !confirmed) {
-          if (!(confirmed = await askClose())) return; // the host by now (handed to me meanwhile)
-          continue;
-        }
-        if (status === 404) break; // already gone
-        if (!confirmed) return onClose(); // a member's back goes back regardless
-        return void asker.tell("방을 나가지 못했습니다", "다시 시도해 주세요."); // the room may still be open
-      }
-    }
-    handle.exit();
-    onClose();
-  }
+  const back = () => onClose();
 
   // Closed, or no longer a member: back to the list, without a notice.
   useEffect(() => {

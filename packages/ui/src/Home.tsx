@@ -634,7 +634,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 const mine = host?.user.id === me.id;
                 const here = r.id === activeRoom;
                 return (
-                  <li key={r.id} className={`item${here ? " active" : ""}`}>
+                  <li key={r.id} className={`item${here ? " active" : ""}`} aria-current={here ? "true" : undefined}>
                     {r.content ? <ProviderIcon provider={r.content.provider} /> : <span className="provider none" title="영상 없음">·</span>}
                     <div className="grow">
                       <div className="name ellipsis">{r.content?.title ?? "영상 없음"}</div>
@@ -642,11 +642,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                         {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.length}/{memberLimitOf(r)}명
                       </div>
                     </div>
-                    {here && <span className="badge">참여 중</span>}
-                    <button className={here ? "secondary small" : "small"} onClick={() => enter(r.id)}>입장</button>
-                    <Menu label={`${r.content?.title ?? "방"} 메뉴`} items={[
-                      { label: mine ? "방 닫기" : "방 나가기", icon: "logout", danger: true, run: () => void leaveRoom(r.id) },
-                    ]} />
+                    <IconButton icon="login" tone="primary" label="입장" onClick={() => enter(r.id)} />
+                    <IconButton icon="logout" tone="danger" label={mine ? "방 닫기" : "방 나가기"} onClick={() => void leaveRoom(r.id)} />
                   </li>
                 );
               })}
@@ -711,9 +708,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           <Avatar name={me.displayName} on={status === "open"} />
           <div className="grow">
             <div className="name ellipsis">{me.displayName} <span className="muted">(나)</span></div>
-            {(info ? describe({ status: "WATCHING", media: info }) : [status === "open" ? "온라인" : "연결 중"]).map((line, i) => (
-              <div key={i} className="muted ellipsis">{line || "\u00a0"}</div>
-            ))}
+            {/* What I watch is the card on top; here only how I'm connected. */}
+            <div className="muted">{status === "open" ? "온라인" : "연결 중"}</div>
             {me.presenceVisibility === "OFF" && <div className="muted">친구에게 숨김</div>}
           </div>
           <IconButton icon="hash" label={showCode ? "친구 코드 닫기" : "내 친구 코드"} onClick={() => setShowCode((v) => !v)} />

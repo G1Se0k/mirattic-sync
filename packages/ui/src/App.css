@@ -287,7 +287,5 @@ button.small { padding: 4px 10px; font-size: calc(12px * var(--text-scale)); }
 .item.active { box-shadow: inset 3px 0 0 var(--accent); }
 .box > .item.active:first-child { border-top-left-radius: 11px; }
 .box > .item.active:last-child { border-bottom-left-radius: 11px; }
-.badge { font-size: calc(11px * var(--text-scale)); font-weight: 650; padding: 1px 7px; border-radius: 999px; background: var(--accent-tint);
-  color: var(--accent); white-space: nowrap; }
 .box.empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
 .box.empty p { margin: 0; }

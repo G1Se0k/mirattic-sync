@@ -78,7 +78,7 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 | POST | `/api/rooms/{id}/host` | `{ userId }` → 204. 호스트만(403), 자기 자신 400, 멤버 아님 404. 호스트 넘기기(결정 79): 역할 교환, `chat:log` `host`, 모든 멤버에게 `room:update` |
 | DELETE | `/api/rooms/{id}/messages/{messageId}` | 204. 보낸 사람 또는 방 호스트만 (아니면 403). 멤버가 아니거나 이 방 메시지가 아니거나 이미 삭제됐거나 방 기록(`kind`)이면 404. 소프트 삭제(결정 71): `text` ""·`mediaPositionMs`·`contentKey` 없음·`deleted: true`로 기록에 남음. 모든 멤버의 연결에 `chat:delete { id }` |
 | PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204, 아무것도 하지 않음 (결정 104로 알림 끄기 없어짐, 1.1.1 확장 호환용). 멤버가 아니면 404, `muted` 없으면 400 |
-| POST | `/api/rooms/{id}/back` | `{ confirmed }` → `{ closed }`. 방 화면에서 목록으로 돌아감 (결정 90): 지금 HOST면 `confirmed: true`일 때 방 삭제("방 닫기"와 같음, 다른 멤버에게 `room:closed`), 아니면 409(`detail`: `the host closes the room: confirm first`, 앱이 확인창 뒤 다시 보냄). 멤버면 아무것도 안 함(`closed: false`, 방에 남음). 방 잠금 안에서 판단(호스트 넘김과 겹치지 않음). 멤버가 아니면 404 |
+| POST | `/api/rooms/{id}/back` | `{ confirmed }` → `{ closed }`. **호환용(1.1.1 확장의 방 화면 뒤로)** — 1.2.0부터 방 화면의 뒤로는 서버를 부르지 않고 목록으로만 감(방 유지, 결정 90 변경). 지금 HOST면 `confirmed: true`일 때 방 삭제("방 닫기"와 같음, 다른 멤버에게 `room:closed`), 아니면 409(`detail`: `the host closes the room: confirm first`, 앱이 확인창 뒤 다시 보냄). 멤버면 아무것도 안 함(`closed: false`, 방에 남음). 방 잠금 안에서 판단(호스트 넘김과 겹치지 않음). 멤버가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/me` (`?asMember=true`) | 나가기 / 초대 거절. HOST가 나가면 방 삭제, 다른 멤버에게 `room:closed`(결정 90). 모든 멤버에게 `room:update`. `asMember=true`(방 타입 알림의 "방 나가기", 결정 93): 그새 HOST가 됐으면 409, 아무것도 바뀌지 않음 |
 
 `RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만), series?([A-Za-z0-9_-] 1–128자) }`. `series`가 같으면 같은 묶음(YouTube 재생목록, Laftel 작품, Netflix의 이어 본 화들)이라 멤버가 호스트의 다음 영상으로 묻지 않고 따라감 (결정 67). 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
