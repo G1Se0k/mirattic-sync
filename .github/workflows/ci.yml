@@ -34,11 +34,34 @@ jobs:
           cache: maven
       - run: ./mvnw -B test
 
+  # Whether this push changes what runs on the server: the tests above run on every push, the deploy only then
+  # (an extension-only push isn't redeployed). Without a known base (a new branch, a force push): deploy.
+  changes:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      server: ${{ steps.diff.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # A pathspec diff, no pipe: a file moved out of server/ shows as deleted there; a git error (exit > 1) deploys.
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
+              || ! git diff --quiet "$BEFORE" "$GITHUB_SHA" -- server deploy .github/workflows/ci.yml; then
+            echo server=true >> "$GITHUB_OUTPUT"
+          else
+            echo server=false >> "$GITHUB_OUTPUT"
+          fi
+
   # main only: build an arm64 image (the deploy host is an Apple Silicon Mac running OrbStack),
   # stream it over SSH (no registry, so no credentials on the host) and switch to it there.
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [web, server]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.server == 'true'
+    needs: [web, server, changes]
     runs-on: ubuntu-latest
     concurrency: deploy
     env:
