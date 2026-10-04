@@ -77,6 +77,13 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
   let view: { roomId: string; state: RoomSyncState; listeners: Set<() => void>; seen: boolean; shown: boolean } | null = null;
   const windowId = (await browser.windows.getCurrent()).id;
   const subscribers = new Set<() => void>();
+  // A store update downloaded while this page is open (Settings offers it then). Listened here only, not in the
+  // background: a background listener would hold the browser's own install-when-idle back.
+  let updateReady: string | null = null;
+  browser.runtime.onUpdateAvailable.addListener((details) => {
+    updateReady = details.version;
+    subscribers.forEach((s) => s());
+  });
   /** A tab choice the background hasn't shown back yet: said again after a worker restart (the port may have dropped it). */
   let choosingTab: { tabId: number | null } | null = null;
   /** Tab choices made here: a failed move resent only while it is the latest. */
@@ -331,6 +338,16 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
     },
     open: (url, newTab) => send({ op: 'open', url, newTab }),
     turnOff: () => send({ op: 'off' }),
+    updates: {
+      version: browser.runtime.getManifest().version,
+      check: async () => {
+        const r = await browser.runtime.requestUpdateCheck();
+        if (r.status === 'update_available' && r.version) return { status: 'available', version: r.version };
+        return { status: r.status === 'throttled' ? 'throttled' : 'latest' };
+      },
+      ready: () => updateReady,
+      apply: () => browser.runtime.reload(),
+    },
     panelWindow: {
       detached: DETACHED,
       toggle: () => {

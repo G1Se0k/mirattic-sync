@@ -116,6 +116,18 @@ export type Platform = {
   panelWindow?: { detached: boolean; toggle(): void };
   /** "동기화 끄기" (the extension): out of the room, offline, the panel closed — on again when the panel opens. */
   turnOff?(): void;
+  /**
+   * This app's version and its store updates (the extension). `check` asks the store, on the user's click only (the
+   * browser checks by itself every few hours); "available" starts the download. `ready`: the version downloaded and
+   * waiting while this page is open, else null (announced via `subscribe`). `apply` restarts the extension into it
+   * (the panel closes) — only once ready: before that it restarts into the same version.
+   */
+  updates?: {
+    version: string;
+    check(): Promise<{ status: "available"; version: string } | { status: "latest" | "throttled" }>;
+    ready(): string | null;
+    apply(): void;
+  };
 };
 
 /** The text sizes Settings offers, in percent. */
