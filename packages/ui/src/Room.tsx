@@ -183,8 +183,15 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       </header>
 
       <div className="room-body">
+        {/* Decision 106: how full the room is — a segment per seat, red once full. */}
+        <div className={`members-head${full ? " full" : ""}`} aria-label={`방 인원 ${room.members.length}/${limit}명${full ? ", 가득 참" : ""}`}>
+          <span className="label">멤버</span>
+          <span className="gauge" aria-hidden="true">
+            {Array.from({ length: limit }, (_, i) => <i key={i} className={i < room.members.length ? "on" : undefined} />)}
+          </span>
+          <span className="count">{room.members.length} / {limit}{full && " · 가득 참"}</span>
+        </div>
         <div className="members">
-          <span className="muted" title="방 인원 / 최대 인원">{room.members.length}/{limit}명</span>
           {room.members.map((m) => (
             <span key={m.user.id} className="member" title={m.role === "HOST" ? "호스트" : m.present ? "참가 중" : "초대됨"}>
               <Avatar name={m.user.displayName} on={m.present} />

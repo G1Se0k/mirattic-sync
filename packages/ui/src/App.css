@@ -135,6 +135,15 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 /* Shrinks and scrolls in a short panel (large text): the chat below keeps its minimum, composer included. */
 .room-body { padding: 10px 12px 0; display: flex; flex-direction: column; gap: 8px; flex: 0 1 auto; min-height: 0; overflow-y: auto; }
 .members { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The room's member count over its limit (decision 106): a segment per seat, red once full. */
+.members-head { display: flex; align-items: center; gap: 8px; font-size: calc(11px * var(--text-scale)); color: var(--muted); }
+.members-head .label { font-weight: 600; letter-spacing: 0.04em; }
+.members-head .gauge { display: flex; gap: 2px; flex: 1; max-width: 96px; }
+.members-head .gauge i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.members-head .gauge i.on { background: var(--accent); }
+.members-head .count { margin-left: auto; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+.members-head.full .gauge i.on { background: var(--danger); }
+.members-head.full .count { color: var(--danger); }
 .member { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 2px; border: 1px solid var(--line);
   border-radius: 999px; font-size: calc(12px * var(--text-scale)); background: var(--surface); }
 .member .avatar { width: 20px; height: 20px; font-size: calc(10px * var(--text-scale)); }
