@@ -72,7 +72,7 @@
   ol li::before { content: counter(step, decimal-leading-zero); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; padding-top: 3px; }
   ol b { display: block; font-size: 17px; margin-bottom: 4px; }
   ol p { margin: 0; color: var(--muted); }
-  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: stretch; }
   .pair figure { margin: 0; }
   figcaption { margin-top: 10px; font-size: 13px; color: var(--muted); }
 
@@ -101,8 +101,8 @@
   }
   /* Product visuals drawn in HTML (sharp at any density, follow the theme). They copy the side panel's look
      (packages/ui/src/App.css) and its wording; keep them in step when the panel changes. */
-  :root { --panel: #f7f7f5; --hover: #efeeea; --on: #3fa56b; --flash: #fff4c7; }
-  @media (prefers-color-scheme: dark) { :root { --panel: #171717; --hover: #2a2a29; --on: #5cc389; --flash: #4a4125; } }
+  :root { --panel: #f7f7f5; --hover: #efeeea; --on: #3fa56b; --flash: #fff4c7; --accent: #3f6b5a; --accent-tint: rgba(63, 107, 90, 0.12); --danger: #b4443c; }
+  @media (prefers-color-scheme: dark) { :root { --panel: #171717; --hover: #2a2a29; --on: #5cc389; --flash: #4a4125; --accent: #8cc4a8; --accent-tint: rgba(140, 196, 168, 0.14); --danger: #e0786f; } }
 
   /* Hero: the host's window and a friend's, kept in step. */
   .scene { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
@@ -136,9 +136,9 @@
   .scene .log { grid-column: 1 / -1; justify-self: center; width: min(100%, 360px); padding: 10px 12px; border-radius: var(--radius);
     background: var(--panel); border: 1px solid var(--line); box-shadow: 0 16px 40px -20px var(--shade); font-size: 12px; }
   .log ul { list-style: none; margin: 0; padding: 0; min-height: 76px; } /* three lines: the card doesn't grow */
-  .log li { padding: 3px 6px; border-radius: 6px; text-align: center; color: var(--muted); }
+  .log li { padding: 3px 6px; border-radius: 6px; }
+  .log li.say { text-align: left; color: var(--fg); }
   .log li.fresh { animation: flash 1.6s ease-out; }
-  .log .stamp { font-size: 11px; margin-left: 4px; font-variant-numeric: tabular-nums; }
   @keyframes flash { from { background: var(--flash); } to { background: transparent; } }
   @media (prefers-reduced-motion: reduce) { .log li.fresh { animation: none; } .pp, .paused-mark { transition: none; } }
   @media (max-width: 520px) {
@@ -147,17 +147,35 @@
     .win-bar, .controls { padding: 7px 8px; gap: 6px; font-size: 11px; }
   }
 
-  /* Steps: the side panel. */
-  .panel { background: var(--panel); color: var(--fg); font-size: 13px; line-height: 1.45; text-align: left; }
+  /* Steps: the side panel (home, and a room with the invite dialog open). */
+  .panel { position: relative; background: var(--panel); color: var(--fg); font-size: 13px; line-height: 1.45; text-align: left; }
   .panel .top { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
   .panel .top b { flex: 1; min-width: 0; font-size: 14px; letter-spacing: -0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .panel .top b span { color: var(--muted); font-weight: 500; }
+  .panel .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--on); flex: none; }
+  .panel .topbar-logo { width: 20px; height: 20px; flex: none; }
   .panel .body { padding: 12px 14px 14px; }
   .panel .ico { display: inline-grid; place-items: center; width: 24px; height: 24px; color: var(--muted); flex: none; }
-  .panel .ico.red { color: #d0453c; }
-  .panel .head { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 4px; }
-  .panel h4 { margin: 0; font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: 0.06em; }
+  .panel h4 { flex: 1; margin: 0; font-size: 12px; font-weight: 650; color: var(--muted); letter-spacing: 0.02em; }
+  .panel h4 small { font-weight: 500; margin-left: 2px; font-size: 12px; }
+  .panel .ghead { display: flex; align-items: center; gap: 2px; margin: 12px 0 6px; padding-left: 4px; }
   .panel .cardm { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .panel .cardm.col { flex-direction: column; align-items: stretch; gap: 8px; }
+  .panel .stackc { display: flex; flex-direction: column; gap: 8px; }
+  .panel .chead { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .panel .chead .lab { font-weight: 600; letter-spacing: 0.04em; flex: none; }
+  .panel .chead .val { margin-left: auto; color: var(--fg); font-size: 12px; }
+  .panel .chead .cnt { margin-left: auto; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .panel .chead .ico { width: 16px; height: 16px; }
+  .panel .gauge { display: flex; gap: 2px; flex: 1; max-width: 96px; }
+  .panel .gauge i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+  .panel .gauge i.on { background: var(--accent); }
+  .panel .boxm { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .panel .boxm > * + * { border-top: 1px solid var(--line); }
+  .panel .itemm { display: flex; align-items: center; gap: 10px; padding: 8px 10px; }
+  .panel .itemm.active { box-shadow: inset 3px 0 0 var(--accent); border-radius: 11px 0 0 11px; }
+  .panel .itemm .av { width: 28px; height: 28px; font-size: 12px; }
+  .panel .nm { font-weight: 560; }
   .panel .rowm { display: flex; align-items: center; gap: 10px; padding: 7px 4px; }
   .panel .grow { flex: 1; min-width: 0; }
   .panel .m { color: var(--muted); font-size: 12px; }
@@ -165,17 +183,27 @@
   .panel .logo { width: 26px; height: 26px; flex: none; }
   .panel .btn { padding: 4px 11px; border-radius: 7px; background: var(--fg); color: var(--bg); font-size: 12px; font-weight: 600; flex: none; }
   .panel .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
-  .panel .count { display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 999px; background: var(--fg); color: var(--bg);
-    font-size: 10px; font-weight: 700; line-height: 16px; vertical-align: 1px; }
   .panel .members { display: flex; flex-wrap: wrap; gap: 4px; }
   .panel .member { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 2px; border: 1px solid var(--line);
     border-radius: 999px; font-size: 12px; background: var(--surface); }
   .panel .member .av { width: 20px; height: 20px; font-size: 10px; }
-  .panel .pill { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
-  .panel .sheet { margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
-    box-shadow: 0 12px 32px -12px var(--shade); }
-  .panel .sheet b { display: block; font-size: 14px; margin-bottom: 6px; }
+  .pair figure { display: flex; flex-direction: column; }
+  .pair .shot { flex: 1; display: flex; }
+  .pair .panel { flex: 1; display: flex; flex-direction: column; }
+  .pair .panel .body { flex: 1; display: flex; flex-direction: column; }
+  .panel .chat { flex: 1; justify-content: flex-end; list-style: none; margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+  .panel .chat li { padding: 3px 6px; }
+  .panel .composer { display: flex; gap: 6px; align-items: center; padding-top: 10px; }
+  .panel .composer span:first-child { flex: 1; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+  .panel .overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / 0.35); }
+  .panel .dialog { width: 100%; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 0.18); }
+  .panel .dialog b { display: block; font-size: 14px; margin-bottom: 6px; }
   .panel .code { font: 600 14px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.06em; }
+  /* Chat lines, as in the room: author, the video time, the text; log lines centred with the time as a chip. */
+  .chat .sys, .log li { text-align: center; color: var(--muted); font-size: 12px; }
+  .chat b, .log b { font-weight: 600; margin-right: 4px; color: var(--fg); }
+  .stamp { font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); margin-right: 4px; }
+  .chip { padding: 0 5px; border-radius: 4px; background: var(--accent-tint); color: var(--accent); font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>
 </head>
 <body>
@@ -243,33 +271,46 @@
         <div class="pair">
           <figure>
             <div class="shot"><div class="panel" role="img" aria-label="Mirattic Sync 패널: 지금 보는 영상, 방 목록, 친구가 지금 보는 영상과 합류 요청 버튼">
-              <div class="top" aria-hidden="true"><b>Mirattic <span>Sync</span></b><span class="av on" style="width:8px;height:8px;border:0;background:var(--on)"></span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span></div>
+              <div class="top" aria-hidden="true"><img class="topbar-logo" src="/landing/logo-64.png" alt="" width="20" height="20"><b>Mirattic <span>Sync</span></b><span class="dot"></span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h18v16H3zM15 4v16"/></svg></span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.8 0"/></svg></span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span></div>
               <div class="body" aria-hidden="true">
-                <div class="cardm"><img class="logo" src="/landing/youtube.png" alt="" width="26" height="26"><div class="grow"><div class="m">지금 보는 영상 · YouTube</div><div class="m el">느린여행</div><div class="el"><b>제주 한 바퀴, 3박 4일 여행 브이로그</b></div></div></div>
-                <div class="head"><h4>방</h4><span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></svg></span></span></div>
-                <div class="rowm"><img class="logo" src="/landing/youtube.png" alt="" width="26" height="26"><div class="grow"><div class="el">제주 한 바퀴, 3박 4일 여행 브이로그<span class="count">3</span></div><div class="m">내가 만든 방 · 2명</div></div><span class="btn">입장</span></div>
-                <div class="head"><h4>친구</h4><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1M19 8v6M22 11h-6"/></svg></span></div>
-                <div class="rowm"><span class="av on">서</span><div class="grow"><div class="el">서연</div><div class="m el">밤산책라디오</div><div class="m el">YouTube · 비 오는 날 듣는 재즈 · 24:10</div></div><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8l4 4-4 4M8 12h8"/></svg></span></div>
-                <div class="rowm"><span class="av on">민</span><div class="grow"><div class="el">민준</div><div class="m">온라인</div></div></div>
-                <div class="rowm"><span class="av">하</span><div class="grow"><div class="el">하린</div><div class="m">오프라인</div></div></div>
+                <div class="cardm"><img class="logo" src="/landing/youtube.png" alt="" width="26" height="26"><div class="grow"><div class="m">지금 보는 영상 · YouTube</div><div class="m el">느린여행</div><div class="el"><b>제주 한 바퀴, 3박 4일 여행 브이로그</b></div></div><span class="ico" style="color:var(--fg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg></span></div>
+                <div class="ghead"><h4>방 <small>1</small></h4><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></svg></span></div>
+                <div class="boxm"><div class="itemm active"><img class="logo" src="/landing/youtube.png" alt="" width="26" height="26"><div class="grow"><div class="nm el">제주 한 바퀴, 3박 4일 여행 브이로그</div><div class="m">내가 만든 방 · 2/8명</div></div><span class="ico" style="color:var(--fg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg></span><span class="ico" style="color:var(--danger)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></span></div></div>
+                <div class="ghead"><h4>친구 <small>3</small></h4><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1M19 8v6M22 11h-6"/></svg></span></div>
+                <div class="boxm">
+                  <div class="itemm"><span class="av on">서</span><div class="grow"><div class="nm el">서연</div><div class="m el">밤산책라디오</div><div class="m el">YouTube · 비 오는 날 듣는 재즈 · 24:10</div></div><span class="ico" style="color:var(--fg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8a8 8 0 0 0 16 0v-3a2 2 0 0 0-4 0"/></svg></span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+                  <div class="itemm"><span class="av on">민</span><div class="grow"><div class="nm el">민준</div><div class="m">온라인</div></div><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+                  <div class="itemm"><span class="av">하</span><div class="grow"><div class="nm el">하린</div><div class="m">오프라인</div></div><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></span></div>
+                </div>
               </div>
             </div></div>
             <figcaption>친구가 지금 뭘 보는지 보이고, 바로 합류를 요청할 수 있어요.</figcaption>
           </figure>
           <figure>
-            <div class="shot"><div class="panel" role="img" aria-label="방 화면: 참여자, 재생 상태, 친구 초대와 방 코드">
-              <div class="top" aria-hidden="true"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></span><b>제주 한 바퀴, 3박 4일 여행 브이로그</b><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1M19 8v6M22 11h-6"/></svg></span><span class="ico red"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></span></div>
+            <div class="shot"><div class="panel" role="img" aria-label="방 화면: 재생 상태, 멤버, 친구 초대와 방 코드">
+              <div class="top" aria-hidden="true"><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></span><b>제주 한 바퀴, 3박 4일 여행 브이로그</b><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h18v16H3zM15 4v16"/></svg></span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21v-1a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1M19 8v6M22 11h-6"/></svg></span><span class="ico" style="color:var(--danger)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></span></div>
               <div class="body" aria-hidden="true">
-                <div class="members"><span class="member"><span class="av on">지</span>지우 <span class="m">(나) · 호스트</span></span><span class="member"><span class="av on">민</span>민준</span></div>
-                <div class="cardm" style="margin-top:8px"><div class="grow"><div style="display:flex;align-items:center;gap:8px"><span class="pill">YouTube</span><b style="font-variant-numeric:tabular-nums">1:38 / 10:34</b><span class="m" style="margin-left:auto">재생 중</span></div><div class="m" style="margin-top:6px">탭에서 재생·일시정지·이동하면 멤버에게 전달됩니다.</div></div></div>
-                <div class="sheet">
-                  <b>방에 초대하기</b>
-                  <div class="rowm"><span class="av">서</span><span class="grow">서연</span><span class="btn">초대</span></div>
-                  <div class="rowm"><span class="av">민</span><span class="grow">민준</span><span class="btn ghost">방에 있음</span></div>
-                  <div class="m" style="margin:8px 0 6px">또는 방 코드로 초대</div>
-                  <div class="cardm"><span class="code grow">CTHD-7HYW</span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></span></div>
+                <div class="stackc">
+                  <div class="cardm"><img class="logo" src="/landing/youtube.png" alt="" width="26" height="26"><b class="grow" style="font-variant-numeric:tabular-nums">1:38 / 10:34</b><span class="m">재생 중</span></div>
+                  <div class="cardm col"><div class="chead"><span class="lab">인식할 탭</span><span class="val el">활성 탭 자동 따라가기</span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span></div></div>
+                  <div class="cardm col"><div class="chead"><span class="lab">멤버</span><span class="gauge"><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="cnt">2 / 8</span></div><div class="members"><span class="member"><span class="av on">지</span>지우</span><span class="member"><span class="av on">민</span>민준</span></div></div>
                 </div>
+                <ul class="chat">
+                  <li class="sys">민준님이 들어왔습니다</li>
+                  <li><b>민준</b><span class="stamp">1:24</span>들어왔어! 화질 진짜 좋다</li>
+                  <li class="sys">지우님이 <span class="chip">1:31</span>에 스탬프를 찍었습니다</li>
+                  <li><b>지우</b><span class="stamp">1:35</span>서연이도 부를게</li>
+                </ul>
+                <div class="composer"><span>메시지</span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="ico" style="color:var(--fg)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg></span></div>
               </div>
+              <div class="overlay" aria-hidden="true"><div class="dialog">
+                <b>방에 초대하기</b>
+                <div class="rowm"><span class="av">서</span><span class="grow">서연</span><span class="btn">초대</span></div>
+                <div class="rowm"><span class="av">민</span><span class="grow">민준</span><span class="btn ghost">방에 있음</span></div>
+                <div class="m" style="margin:8px 0 6px">또는 방 코드로 초대</div>
+                <div class="cardm"><span class="code grow">CTHD-7HYW</span><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></span></div>
+                <div class="m" style="text-align:right;margin-top:10px;font-weight:500">닫기</div>
+              </div></div>
             </div></div>
             <figcaption>초대장을 보내거나, 방 코드를 알려주세요.</figcaption>
           </figure>
@@ -327,11 +368,11 @@
         c.style.transform = 'translateX(' + (((w.pos * (i ? 9 : 6)) % 150) - 25) + '%)';
       });
     };
-    const say = (text, stamp) => {
+    // A room log line (centred), or with an author a chat line: name, the video time, the text, as in the room.
+    const say = (text, author, time) => {
       const li = document.createElement('li');
-      li.className = 'fresh';
-      li.textContent = text;
-      if (stamp) li.insertAdjacentHTML('beforeend', '<span class="stamp">' + stamp + '</span>');
+      li.className = author ? 'fresh say' : 'fresh';
+      li.innerHTML = author ? '<b>' + author + '</b><span class="stamp">' + time + '</span>' + text : text;
       log.append(li);
       while (log.children.length > 3) log.firstElementChild.remove();
     };
@@ -347,14 +388,14 @@
     const still = () => {
       wins.forEach((w) => { w.pos = 160; w.playing = false; draw(w); });
       log.replaceChildren();
-      say('지우님이 1:16에 스탬프를 찍었습니다');
-      say('민준: 여기 바다 색 봐', '2:40');
+      say('지우님이 <span class="chip">1:16</span>에 스탬프를 찍었습니다');
+      say('여기 바다 색 봐', '민준', '2:40');
     };
     const script = [
       // Paused at 1:16 exactly (not wherever the frames got to), so the stamp reads as in the still frame.
-      [4000, () => { act((w) => { w.playing = false; w.pos = 76; }); say('지우님이 1:16에 스탬프를 찍었습니다'); }],
+      [4000, () => { act((w) => { w.playing = false; w.pos = 76; }); say('지우님이 <span class="chip">1:16</span>에 스탬프를 찍었습니다'); }],
       [6500, () => { act((w) => { w.pos = 160; }); }],
-      [8500, () => { act((w) => { w.playing = true; }); say('민준: 여기 바다 색 봐', '2:40'); }],
+      [8500, () => { act((w) => { w.playing = true; }); say('여기 바다 색 봐', '민준', '2:40'); }],
       [13000, () => { wins.forEach((w) => { w.pos = 72; w.playing = true; }); log.replaceChildren(); say('민준님이 들어왔습니다'); }],
     ];
     let start, last, step, frame = 0, pending = 0;
