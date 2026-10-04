@@ -7,7 +7,7 @@ import { clock, PROVIDER_NAMES } from "./format";
 import { Chat } from "./Chat";
 import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
-import { Avatar, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
+import { Avatar, IconButton, PanelWindowButton, ProviderIcon, Icon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 
 /** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
@@ -185,6 +185,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       <div className="room-body">
         <PlayerStatus content={content ?? null} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
           roomType={roomType} onPickSite={pickSite} onRequestPause={() => setAskingPause(true)} />
+        {isHost && <TabPicker type={roomType} />}
         <Members members={room.members} meId={me.id} isHost={isHost} limit={limit}
           onReport={(id, name) => setReporting({ id, name })}
           onManage={(name, action, id) => void manage(name, action, id)} />
@@ -366,16 +367,23 @@ function TabPicker({ type }: { type: MediaProvider | null }) {
   const list = useMemo(() => (type ? all.filter((t) => t.provider === type) : all), [all, type]);
   const followed = useSyncExternalStore(subscribe, () => tabs?.followed() ?? null);
   const auto = useSyncExternalStore(subscribe, () => tabs?.auto() ?? false);
+  const [open, setOpen] = useState(false);
   if (!tabs) return null;
   const current = list.find((t) => t.id === followed);
+  const chosen = auto ? "활성 탭 자동 따라가기" : current?.title ?? (followed !== null ? "영상이 없는 탭 또는 다른 창의 탭" : "없음");
   return (
-    <details className="tab-picker">
-      <summary>
-        인식할 탭 <span className="muted">· {auto ? "활성 탭 자동 따라가기" : current?.title ?? (followed !== null ? "영상이 없는 탭 또는 다른 창의 탭" : "없음")}</span>
-      </summary>
+    // A card like the members': its line shows the choice; it unfolds the options.
+    <section className="card">
+      <button type="button" className="card-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="label">인식할 탭</span>
+        <span className="value ellipsis">{chosen}</span>
+        <Icon name="chevron" />
+      </button>
+      <div className={`fold${open ? "" : " closed"}`} inert={!open}>
+      <div>
       {/* Native radios (arrow keys move between them), drawn as the app's buttons with the chosen one marked; in the
           tab strip's order, automatic always last. */}
-      <div className="stack" role="radiogroup" aria-label="인식할 탭">
+      <div className="stack tab-options" role="radiogroup" aria-label="인식할 탭">
         {list.map((t) => (
           <label key={t.id} title={t.title} className="tab-option">
             <input type="radio" name="followed-tab" checked={!auto && t.id === followed} onChange={() => tabs.choose(t.id)} />
@@ -389,7 +397,9 @@ function TabPicker({ type }: { type: MediaProvider | null }) {
           <span className="grow">활성 탭 자동 따라가기</span>
         </label>
       </div>
-    </details>
+      </div>
+      </div>
+    </section>
   );
 }
 
@@ -588,7 +598,6 @@ function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite,
             {isHost ? "아직 방 영상이 없습니다. 인식할 탭에서 영상을 열면 방 영상이 됩니다." : "아직 방 영상이 없습니다. 방장이 영상을 열면 시작됩니다."}
           </span>
         </div>
-        {isHost && <TabPicker type={roomType} />}
       </section>
     );
   }
@@ -627,7 +636,6 @@ function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite,
         {offerOpen && <IconButton icon="external" label={`${name}에서 이 영상 열기`} onClick={() => platform.open(url!, true)} />}
         {!isHost && <IconButton icon="pause" label="일시정지 요청" disabled={cooldown > 0} onClick={onRequestPause} />}
       </div>
-      {isHost && <TabPicker type={roomType} />}
       {s.canPlay && !isHost && (
         <p className="muted">
           {describeSync(s.sync, s.clockReady)}

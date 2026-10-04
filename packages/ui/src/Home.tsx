@@ -584,43 +584,80 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           )}
         </div>
 
-        <section>
-          <div className="row between">
-            <h2>방</h2>
-            <span className="row">
-              <IconButton icon="plus" label="방 생성" onClick={() => void createRoom()} />
-              <IconButton icon="hash" label="코드로 입장" onClick={() => setJoining(true)} />
-            </span>
+        {(requests.incoming.length > 0 || requests.outgoing.length > 0) && (
+          <section className="group">
+            <div className="group-head"><h2>친구 요청 <span className="count">{requests.incoming.length + requests.outgoing.length}</span></h2></div>
+            <ul className="list box">
+              {requests.incoming.map((r) => (
+                <li key={r.id} className="item">
+                  <Avatar name={r.user.displayName} />
+                  <div className="grow">
+                    <div className="name ellipsis">{r.user.displayName}</div>
+                    <div className="muted">친구 요청을 보냈습니다</div>
+                  </div>
+                  <button className="small" onClick={act(() => api.acceptFriendRequest(r.id))}>수락</button>
+                  <IconButton icon="close" label="거절" onClick={act(() => api.deleteFriendRequest(r.id))} />
+                </li>
+              ))}
+              {requests.outgoing.map((r) => (
+                <li key={r.id} className="item">
+                  <Avatar name={r.user.displayName} />
+                  <div className="grow">
+                    <div className="name ellipsis">{r.user.displayName}</div>
+                    <div className="muted">요청 보냄 · 대기 중</div>
+                  </div>
+                  <IconButton icon="close" label="요청 취소" onClick={act(() => api.deleteFriendRequest(r.id))} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section className="group">
+          <div className="group-head">
+            <h2>방 {rooms.length > 0 && <span className="count">{rooms.length}</span>}</h2>
+            <IconButton icon="plus" label="방 생성" onClick={() => void createRoom()} />
+            <IconButton icon="hash" label="코드로 입장" onClick={() => setJoining(true)} />
           </div>
-          {rooms.length === 0 && <p className="muted">아직 방이 없습니다.</p>}
-            <ul className="list">
+          {rooms.length === 0 ? (
+            <div className="box empty">
+              <p className="muted">아직 방이 없습니다. 영상을 열고 방을 만들거나, 받은 코드로 들어가세요.</p>
+              <span className="row">
+                <button className="small" onClick={() => void createRoom()}>방 만들기</button>
+                <button className="secondary small" onClick={() => setJoining(true)}>코드로 입장</button>
+              </span>
+            </div>
+          ) : (
+            <ul className="list box">
               {rooms.map((r) => {
                 const host = r.members.find((m) => m.role === "HOST");
                 const mine = host?.user.id === me.id;
+                const here = r.id === activeRoom;
                 return (
-                  <li key={r.id} className={`friend${r.id === activeRoom ? " card active" : ""}`}>
+                  <li key={r.id} className={`item${here ? " active" : ""}`}>
                     {r.content ? <ProviderIcon provider={r.content.provider} /> : <span className="provider none" title="영상 없음">·</span>}
                     <div className="grow">
-                      <div className="ellipsis">
-                        <span className="name">{r.content?.title ?? "영상 없음"}</span>
-                      </div>
+                      <div className="name ellipsis">{r.content?.title ?? "영상 없음"}</div>
                       <div className="muted">
-                        {r.id === activeRoom ? "참여 중 · " : ""}
                         {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.length}/{memberLimitOf(r)}명
                       </div>
                     </div>
-                    <button onClick={() => enter(r.id)}>입장</button>
-                    <IconButton icon="logout" tone="danger" label={mine ? "닫기" : "나가기"} onClick={() => void leaveRoom(r.id)} />
+                    {here && <span className="badge">참여 중</span>}
+                    <button className={here ? "secondary small" : "small"} onClick={() => enter(r.id)}>입장</button>
+                    <Menu label={`${r.content?.title ?? "방"} 메뉴`} items={[
+                      { label: mine ? "방 닫기" : "방 나가기", icon: "logout", danger: true, run: () => void leaveRoom(r.id) },
+                    ]} />
                   </li>
                 );
               })}
             </ul>
+          )}
         </section>
         {joining && <JoinByCode onJoined={(id) => { setJoining(false); void reload(); enter(id); }} onClose={() => setJoining(false)} />}
 
-        <section>
-          <div className="row between">
-            <h2>친구</h2>
+        <section className="group">
+          <div className="group-head">
+            <h2>친구 {sorted.length > 0 && <span className="count">{sorted.length}</span>}</h2>
             <IconButton icon="userPlus" label="친구 추가" onClick={() => setAdding((a) => !a)} />
           </div>
           {adding && (
@@ -628,10 +665,19 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               <AddFriend onSent={() => { setAdding(false); void reload(); }} />
             </div>
           )}
-          {sorted.length === 0 && !adding && <p className="muted">아직 친구가 없습니다. 오른쪽 위 버튼으로 친구 코드를 입력하세요.</p>}
-          <ul className="list">
+          {sorted.length === 0 && !adding && (
+            <div className="box empty">
+              <p className="muted">아직 친구가 없습니다. 친구의 코드를 입력하거나 내 코드를 알려 주세요.</p>
+              <span className="row">
+                <button className="small" onClick={() => setAdding(true)}>친구 추가</button>
+                <button className="secondary small" onClick={() => setShowCode(true)}>내 친구 코드</button>
+              </span>
+            </div>
+          )}
+          {sorted.length > 0 && (
+          <ul className="list box">
             {sorted.map((f) => (
-              <li key={f.user.id} className="friend">
+              <li key={f.user.id} className="item">
                 <Avatar name={f.user.displayName} on={f.presence.status !== "OFFLINE"} />
                 <div className="grow">
                   <div className="name ellipsis">{f.user.displayName}</div>
@@ -652,34 +698,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               </li>
             ))}
           </ul>
+          )}
           {reporting && (
             <ReportDialog target={{ userId: reporting.id }} user={{ id: reporting.id, name: reporting.displayName }}
               onClose={() => { setReporting(null); void reload(); }} />
           )}
         </section>
-
-        {(requests.incoming.length > 0 || requests.outgoing.length > 0) && (
-          <section>
-            <h2>친구 요청</h2>
-            <ul className="list">
-              {requests.incoming.map((r) => (
-                <li key={r.id} className="friend">
-                  <Avatar name={r.user.displayName} />
-                  <span className="grow name">{r.user.displayName}</span>
-                  <IconButton icon="check" tone="primary" label="수락" onClick={act(() => api.acceptFriendRequest(r.id))} />
-                  <IconButton icon="close" label="거절" onClick={act(() => api.deleteFriendRequest(r.id))} />
-                </li>
-              ))}
-              {requests.outgoing.map((r) => (
-                <li key={r.id} className="friend">
-                  <Avatar name={r.user.displayName} />
-                  <span className="grow"><span className="name">{r.user.displayName}</span> <span className="muted">· 대기 중</span></span>
-                  <IconButton icon="close" label="취소" onClick={act(() => api.deleteFriendRequest(r.id))} />
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
       </main>
       <footer className="me-bar">
         {showCode && <MyFriendCode me={me} />}
