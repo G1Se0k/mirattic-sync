@@ -26,6 +26,8 @@ export type RoomSyncState = {
   clockReady: boolean;
   /** This app has a player for the room's provider. */
   canPlay: boolean;
+  /** That player's site (the host's: what they watch now): with `snapshot`, which video the browser shows. */
+  playerProvider: MediaProvider | null;
   /** undefined = not read yet: nothing is offered (like "open the video") before we know. */
   snapshot: PlayerSnapshot | null | undefined;
   /**
@@ -70,7 +72,7 @@ export type RoomSyncDeps = {
 /** A room's state before anything is known. */
 export function emptyRoomState(roomId: string): RoomSyncState {
   return {
-    roomId, room: null, closed: false, loadFailed: false, clockReady: false, canPlay: false, snapshot: undefined,
+    roomId, room: null, closed: false, loadFailed: false, clockReady: false, canPlay: false, playerProvider: null, snapshot: undefined,
     away: false, sync: null, switched: null, pauseCooldownUntil: 0, pauseRequest: null,
   };
 }
@@ -283,7 +285,7 @@ export class RoomSync {
     const player = provider ? this.deps.adapter(provider) : undefined;
     if (player !== this.player) {
       this.player = player;
-      this.set({ canPlay: !!player, snapshot: player ? undefined : null });
+      this.set({ canPlay: !!player, playerProvider: player?.provider ?? null, snapshot: player ? undefined : null });
       void this.readSnapshot();
     }
     this.restart();

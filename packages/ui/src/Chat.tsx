@@ -21,6 +21,8 @@ type Props = {
   onSeek?: (positionMs: number) => void;
   /** The room's video (`contentKey`): a timestamp moves playback only on the video it was taken on; none: no stamping. */
   video?: string;
+  /** This browser shows the room's video: stamping is offered (a dialog open when it stops closes). */
+  canStamp: boolean;
   /** Its length, where known: a stamp past it isn't sent. */
   videoMs?: number;
 };
@@ -30,7 +32,7 @@ const NEAR_BOTTOM_PX = 40;
 const FLASH_MS = 1600;
 const STAMP_WAIT_MS = 5000;
 
-export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, videoMs }: Props) {
+export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, canStamp, videoMs }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const shownLines = useMemo(() => messages.filter(visible), [messages]);
   const [text, setText] = useState("");
@@ -89,6 +91,14 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     [roomId, subscribe],
   );
   useEffect(() => () => clearTimeout(stampWait.current?.timer), []);
+  // The video went away (no tab, no video, another one): the dialog closes; a stamp already sent counts as failed here
+  // (its late answer is ignored — the server, which doesn't know what this browser shows, may still post it).
+  useEffect(() => {
+    if (canStamp || stamping === null) return;
+    const sent = !!stampWait.current;
+    closeStamp();
+    if (sent) setFailed("타임스탬프를 찍지 못했습니다: 인식 중인 영상이 없어졌습니다.");
+  }, [canStamp, stamping]);
 
   // Older messages keep the view where it was; new ones (and a line grown in place) follow the bottom only if the
   // user is there.
@@ -250,7 +260,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
         {failed && <p className="error" role="alert">{failed}</p>}
         <form onSubmit={send}>
           <input placeholder="메시지" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
-          <IconButton icon="clock" label="타임스탬프 찍기" disabled={status !== "open" || !video} onClick={() => void openStamp()} />
+          <IconButton icon="clock" label="타임스탬프 찍기" disabled={status !== "open" || !video || !canStamp} onClick={() => void openStamp()} />
           <IconButton icon="send" label="보내기" type="submit" tone="primary" disabled={status !== "open"} />
         </form>
       </div>

@@ -202,7 +202,8 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       </div>
 
       <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
-        subscribe={subscribe} position={position} onSeek={isHost && s.canPlay ? (ms) => handle.seek(ms) : undefined}
+        subscribe={subscribe} position={position} onSeek={isHost && showsRoomVideo(s, content) ? (ms) => handle.seek(ms) : undefined}
+        canStamp={showsRoomVideo(s, content)}
         video={content ? contentKey(content) : undefined} videoMs={content?.durationMs} />
 
       {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
@@ -401,6 +402,14 @@ function TabPicker({ type }: { type: MediaProvider | null }) {
       </div>
     </details>
   );
+}
+
+/**
+ * This browser shows the room's video (the followed tab is on it, same site and id): a time can be stamped, and the
+ * host's click on one moves the room. Not with no tab, a tab with no video, or another one.
+ */
+export function showsRoomVideo(s: Pick<RoomSyncState, "canPlay" | "playerProvider" | "snapshot">, content: RoomContent | null | undefined) {
+  return s.canPlay && !!content && s.playerProvider === content.provider && s.snapshot?.contentId === content.contentId;
 }
 
 /** The room's type as its site's icon; the host's opens the list of sites to switch the room to. */
