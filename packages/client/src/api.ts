@@ -29,6 +29,8 @@ export class ApiError extends Error {
   }
 }
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export type ApiClient = ReturnType<typeof createApi>;
 
 /**
@@ -47,7 +49,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
   // session and must not bring its tokens back.
   let session = 0;
 
-  async function send(method: string, path: string, body: unknown, token: string | null) {
+  /** `timed`: given up after REQUEST_TIMEOUT_MS (a stalled server or network) instead of waiting minutes. */
+  async function send(method: string, path: string, body: unknown, token: string | null, timed = false) {
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
     if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -55,6 +58,7 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: timed ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : undefined,
     });
   }
 
@@ -136,10 +140,16 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     return run;
   }
 
-  async function authed<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /**
+   * `timed`: given up after REQUEST_TIMEOUT_MS — reads only, which can be asked again. A change waits: given up after
+   * the server made it, it would look failed and a retry would make it twice (a second room). Neither are a refresh or
+   * sign-in (their tokens would be lost: a refresh rotates the stored one, so the next fails and signs out), nor `me`
+   * (signing in waits on it: a timeout would show the sign-in screen and leave the worker without its socket).
+   */
+  async function authed<T>(method: string, path: string, body?: unknown, timed = method === "GET"): Promise<T> {
     if (!accessToken && !(await refresh())) throw new ApiError(401, "not signed in");
-    let res = await send(method, path, body, accessToken);
-    if (res.status === 401 && (await refresh())) res = await send(method, path, body, accessToken);
+    let res = await send(method, path, body, accessToken, timed);
+    if (res.status === 401 && (await refresh())) res = await send(method, path, body, accessToken, timed);
     return parse<T>(res);
   }
 
@@ -165,7 +175,7 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
       if (stored) await revoke(stored);
     },
 
-    me: () => authed<Me>("GET", "/api/me"),
+    me: () => authed<Me>("GET", "/api/me", undefined, false),
     updatePrivacy: (presenceVisibility: Visibility, positionVisibility: Visibility) =>
       authed<Me>("PUT", "/api/me/privacy", { presenceVisibility, positionVisibility }),
     /**

@@ -58,3 +58,27 @@ it("a socket closed here (signed out) reports no replacement afterwards", async 
   expect(statuses.at(-1)).toBe("closed");
   vi.unstubAllGlobals();
 });
+
+it("logs a handler's error instead of dropping it as a bad frame, and keeps delivering", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  const seen: string[] = [];
+  connectSocket({
+    url: "ws://x/ws",
+    getTicket: async () => "t",
+    onEvent: (e) => {
+      if (e.type === "boom") throw new Error("handler bug");
+      seen.push(e.type);
+    },
+  });
+  await vi.runAllTimersAsync();
+  FakeSocket.last.onopen?.();
+  FakeSocket.last.onmessage?.({ data: "not json" }); // malformed: ignored quietly
+  FakeSocket.last.onmessage?.({ data: JSON.stringify({ type: "boom", serverTime: 0, payload: null }) });
+  FakeSocket.last.onmessage?.({ data: JSON.stringify({ type: "after", serverTime: 0, payload: null }) });
+  expect(errors).toHaveBeenCalledTimes(1);
+  expect(errors.mock.calls[0][1]).toBe("boom");
+  expect(seen).toEqual(["after"]);
+  errors.mockRestore();
+});

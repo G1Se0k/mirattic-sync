@@ -52,12 +52,20 @@ export function connectSocket(opts: {
       opts.onStatus?.("open");
     };
     ws.onmessage = (m) => {
+      let event;
       try {
-        const event = JSON.parse(m.data);
-        if (event?.type === "session:replaced") replaced = true; // the close follows
-        else opts.onEvent(event);
+        event = JSON.parse(m.data);
       } catch {
-        // ignore malformed frames
+        return; // a malformed frame: ignored
+      }
+      if (event?.type === "session:replaced") replaced = true; // the close follows
+      else {
+        // A handler's bug is logged, not taken for a bad frame; the next events still arrive.
+        try {
+          opts.onEvent(event);
+        } catch (e) {
+          console.error("socket event handler failed", event?.type, e);
+        }
       }
     };
     ws.onclose = (e) => {

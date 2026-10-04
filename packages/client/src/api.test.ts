@@ -151,4 +151,22 @@ describe("createApi", () => {
     expect(loggedOut).toEqual(["r2"]);
     await expect(api.friends()).rejects.toMatchObject({ status: 401 });
   });
+
+  it("gives up on a stalled read, but never on a change, a token refresh or the profile sign-in waits on", async () => {
+    const signals: Record<string, AbortSignal | null | undefined> = {};
+    const fetchMock: typeof fetch = async (url, init) => {
+      const path = String(url).replace("http://api", "");
+      signals[path] = init?.signal;
+      if (path === "/api/auth/refresh") return json(200, { accessToken: "a", refreshToken: "r2", user: { id: "u", displayName: "U" } });
+      return json(200, []);
+    };
+    const api = createApi({ baseUrl: "http://api", store: memoryStore("r1"), fetch: fetchMock });
+    await api.friends();
+    expect(signals["/api/auth/refresh"]).toBeUndefined(); // it rotates the stored token: an answer given up would sign out
+    expect(signals["/api/friends"]).toBeInstanceOf(AbortSignal);
+    await api.me().catch(() => {}); // signing in waits on it
+    expect(signals["/api/me"]).toBeUndefined();
+    await api.createRoom(null, []).catch(() => {}); // a change: given up after the server made it, a retry makes a second room
+    expect(signals["/api/rooms"]).toBeUndefined();
+  });
 });
