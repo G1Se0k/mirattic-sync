@@ -7,6 +7,7 @@ import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.FriendCode;
 import com.mirattic.sync.friend.BlockRepository;
 import com.mirattic.sync.user.UserSummary;
+import com.mirattic.sync.user.Visibility;
 import com.mirattic.sync.ws.ServerEvent;
 import com.mirattic.sync.ws.SocketHub;
 import java.util.ArrayList;
@@ -41,10 +42,11 @@ public class RoomService {
 	 * `type`: the room's type (decision 93), null without one; `typeVersion` rises with each change, `typeSeen` is the
 	 * viewer's seen one — a member (not the host) is asked about the change while it is lower.
 	 */
+	/** `memberLimit`: how many members the room takes, the host included (decision 106). */
 	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, String code,
-			Long expiresInMs, MediaProvider type, long typeVersion, long typeSeen) {
+			Long expiresInMs, MediaProvider type, long typeVersion, long typeSeen, int memberLimit) {
 		RoomView expiring(long ms) {
-			return new RoomView(id, content, members, createdAt, code, ms, type, typeVersion, typeSeen);
+			return new RoomView(id, content, members, createdAt, code, ms, type, typeVersion, typeSeen, memberLimit);
 		}
 	}
 
@@ -65,7 +67,10 @@ public class RoomService {
 		PLAY, PAUSE, SEEK
 	}
 
-	static final int MAX_INVITES = 7;
+	/** Members a room takes, the host included (decision 106). */
+	static final int MAX_MEMBERS = 8;
+	/** The 409 detail of a full room (joining, accepting, or asking a friend in one to let you in). */
+	static final String ROOM_FULL = "room full";
 	/** An invitation counts this long (decision 87); inviting again starts it over. */
 	static final long INVITATION_MS = 30_000;
 	static final int MAX_CHAT_LENGTH = 1000;
@@ -111,15 +116,15 @@ public class RoomService {
 		if (content != null) {
 			requireKnownId(content);
 		}
+		Room fresh = new Room(content, me);
 		Set<String> invitees = new HashSet<>(inviteIds);
 		invitees.remove(me);
-		if (invitees.size() > MAX_INVITES) {
+		if (invitees.size() > memberLimit(fresh) - 1) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "too many invites");
 		}
 		if (!areFriends(me, invitees)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "can only invite friends");
 		}
-		Room fresh = new Room(content, me);
 		// ponytail: check-then-insert; two creations drawing the same code at once still hit the unique index (1 in 31^8)
 		while (rooms.findByCode(fresh.getCode()).isPresent()) {
 			fresh.newCode();
@@ -153,7 +158,11 @@ public class RoomService {
 		Set<String> invitees = new HashSet<>(inviteIds);
 		invitees.removeAll(current);
 		long joining = invitees.stream().filter(joinIds::contains).count();
-		if (invitees.size() > MAX_INVITES || current.size() - 1 + joining > MAX_INVITES) {
+		int limit = memberLimit(room);
+		if (!invitees.isEmpty() && current.size() >= limit) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, ROOM_FULL); // nobody more: no invitation either
+		}
+		if (invitees.size() > limit - 1 || current.size() + joining > limit) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "too many invites");
 		}
 		if (!areFriends(me, invitees)) {
@@ -238,8 +247,8 @@ public class RoomService {
 			if (!before.isEmpty() && !blocks.lockBetween(me, before).isEmpty()) {
 				throw notFound();
 			}
-			if (before.size() > MAX_INVITES) {
-				throw new ResponseStatusException(HttpStatus.CONFLICT, "room full"); // rolled back: still invited
+			if (before.size() >= memberLimit(room)) {
+				throw new ResponseStatusException(HttpStatus.CONFLICT, ROOM_FULL); // rolled back: still invited
 			}
 			members.save(new RoomMember(roomId, me, RoomMember.Role.MEMBER, room.typeVersion()));
 		}
@@ -265,6 +274,44 @@ public class RoomService {
 	 * A new watch request (not its cancel): refused while I'm a member of a room the friend is in right now, where
 	 * their answer would only invite me again.
 	 */
+	/**
+	 * How many members the room takes, the host included (decision 106). ponytail: the same for every room; a premium
+	 * host's larger limit goes here (reading the host's plan) when there is one.
+	 */
+	int memberLimit(Room room) {
+		return MAX_MEMBERS;
+	}
+
+	/**
+	 * A new watch request: refused (409, ROOM_FULL) when the room the friend's answer would invite me into is full. Their
+	 * app picks it like `roomToInvite` (packages/types): a room they host showing what they watch now (or without a video
+	 * yet), any room they host when they watch nothing; none → a new room, which has space. Refused only if every such
+	 * room is full (which one comes first is the app's). `provider` / `contentId`: what they watch (their presence), or null.
+	 * A prediction: the presence can be a moment behind the friend's app (a video changed just now), so the limit itself
+	 * is held when they answer (invite / accept refuse a full room); this only spares asking where that would fail.
+	 */
+	@Transactional(readOnly = true)
+	public void requireRoomFor(String me, String friendId, MediaProvider provider, String contentId) {
+		// What they watch decides it: a friend hiding it (presence visibility not FRIENDS) isn't judged — the answer holds
+		// the limit — so the answer to a request never tells what they hide.
+		if (users.findById(friendId).map(u -> u.getPresenceVisibility() != Visibility.FRIENDS).orElse(true)) {
+			return;
+		}
+		List<Room> answering = members.findByUserId(friendId).stream()
+				.filter(m -> m.getRole() == RoomMember.Role.HOST)
+				.map(m -> rooms.findById(m.getRoomId()).orElse(null))
+				.filter(r -> r != null && (provider == null || r.content() == null
+						|| r.content().provider() == provider && r.content().contentId().equals(contentId)))
+				.toList();
+		// A room I'm already in takes me without anyone more (the answer only tells me).
+		if (!answering.isEmpty() && answering.stream().allMatch(r -> {
+			List<String> in = memberIds(r.getId());
+			return !in.contains(me) && in.size() >= memberLimit(r);
+		})) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, ROOM_FULL);
+		}
+	}
+
 	@Transactional(readOnly = true)
 	public void requireApart(String me, String friendId) {
 		Set<String> mine = members.findByUserId(me).stream().map(RoomMember::getRoomId).collect(Collectors.toSet());
@@ -589,8 +636,8 @@ public class RoomService {
 			if (found.isBanned(me) || !before.isEmpty() && !blocks.lockBetween(me, before).isEmpty()) {
 				throw notFound();
 			}
-			if (before.size() > MAX_INVITES) {
-				throw new ResponseStatusException(HttpStatus.CONFLICT, "room full");
+			if (before.size() >= memberLimit(found)) {
+				throw new ResponseStatusException(HttpStatus.CONFLICT, ROOM_FULL);
 			}
 			members.save(new RoomMember(found.getId(), me, RoomMember.Role.MEMBER, found.typeVersion()));
 			found.uninvite(me); // in by the code: an invitation to it is answered
@@ -763,7 +810,7 @@ public class RoomService {
 				.toList();
 		RoomMember self = list.stream().filter(m -> m.getUserId().equals(viewer)).findFirst().orElse(null);
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), room.getCode(), null, room.type(),
-				room.typeVersion(), self == null ? room.typeVersion() : self.getTypeSeenVersion());
+				room.typeVersion(), self == null ? room.typeVersion() : self.getTypeSeenVersion(), memberLimit(room));
 	}
 
 	private static ResponseStatusException notFound() {

@@ -175,6 +175,7 @@ class RoomFlowTest extends IntegrationTest {
 				"{\"code\":\"%s\"}".formatted(typed)));
 		assertThat(joined.path("id").asString()).isEqualTo(roomId);
 		assertThat(joined.path("members").findValuesAsString("id")).contains(stranger.id());
+		assertThat(joined.path("memberLimit").asInt()).isEqualTo(8); // decision 106
 		assertThat(hostWs.nextOfType("room:update")).isNotNull();
 		call(HttpMethod.POST, "/api/rooms/join", stranger.accessToken(), "{\"code\":\"%s\"}".formatted(code))
 				.andExpect(status().isOk()); // already in
@@ -191,6 +192,64 @@ class RoomFlowTest extends IntegrationTest {
 		}
 		call(HttpMethod.POST, "/api/rooms/join", signup().accessToken(), "{\"code\":\"%s\"}".formatted(code))
 				.andExpect(status().isConflict());
+		// Asking the host to let you in is refused too while they are in this full room (decision 106). A refused try
+		// counts against the 30 s limit (no polling), so each case asks with someone else.
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+		java.util.function.Supplier<TestUser> asking = () -> {
+			try {
+				TestUser u = signup();
+				befriend(host, u);
+				return u;
+			} catch (Exception x) {
+				throw new IllegalStateException(x);
+			}
+		};
+		TestUser asker = asking.get();
+		call(HttpMethod.POST, "/api/rooms/requests", asker.accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
+				.andExpect(status().isConflict())
+				.andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.detail").value("room full"));
+		call(HttpMethod.POST, "/api/rooms/requests", asker.accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
+				.andExpect(status().isTooManyRequests()); // that refusal counted
+		// A presence without a content id is watching nothing to the host's app: any room they host — this full one.
+		hostWs.send(event("presence:update", null, "{\"provider\":\"youtube\",\"title\":\"YouTube\",\"playing\":false,\"capturedAt\":1}"));
+		Thread.sleep(300);
+		call(HttpMethod.POST, "/api/rooms/requests", asking.get().accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
+				.andExpect(status().isConflict());
+		Thread.sleep(300); // the presence rate limit (250 ms)
+		// The host watching another video would answer with a new room: the request goes through.
+		hostWs.send(event("presence:update", null, "{\"provider\":\"youtube\",\"contentId\":\"9bZkp7q19f0\",\"title\":\"Other\",\"playing\":true,\"capturedAt\":1}"));
+		Thread.sleep(300); // the presence lands
+		TestUser other = asking.get();
+		call(HttpMethod.POST, "/api/rooms/requests", other.accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
+				.andExpect(status().isAccepted());
+		call(HttpMethod.DELETE, "/api/rooms/requests/" + host.id(), other.accessToken(), null);
+		Thread.sleep(300);
+		hostWs.send(event("presence:update", null, "null")); // watching nothing again: this full room counts
+		Thread.sleep(300);
+		// A host hiding what they watch (visibility not FRIENDS) isn't judged by it: the answer holds the limit instead.
+		call(HttpMethod.PUT, "/api/me/privacy", host.accessToken(), "{\"presenceVisibility\":\"OFF\",\"positionVisibility\":\"ROOM_ONLY\"}")
+				.andExpect(status().is2xxSuccessful());
+		call(HttpMethod.POST, "/api/rooms/requests", asking.get().accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
+				.andExpect(status().isAccepted());
+		// A full room invites nobody more (an older app could still try).
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"%s\"]}".formatted(asker.id()))
+				.andExpect(status().isConflict());
+		// A member (not the host) in a full room can still be asked: their answer would be a new room.
+		Client strangerWs = connect(stranger);
+		strangerWs.send(event("room:join", roomId, "{}"));
+		strangerWs.nextOfType("playback:update");
+		befriend(stranger, asker);
+		call(HttpMethod.POST, "/api/rooms/requests", asker.accessToken(), "{\"friendId\":\"%s\"}".formatted(stranger.id()))
+				.andExpect(status().isAccepted());
+		// A member of the full room asking its host (online, out of the room): the answer adds nobody, so it goes through.
+		call(HttpMethod.PUT, "/api/me/privacy", host.accessToken(), "{\"presenceVisibility\":\"FRIENDS\",\"positionVisibility\":\"ROOM_ONLY\"}")
+				.andExpect(status().is2xxSuccessful());
+		befriend(host, stranger);
+		hostWs.send(event("room:leave", roomId, "{}"));
+		Thread.sleep(300);
+		call(HttpMethod.POST, "/api/rooms/requests", stranger.accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
+				.andExpect(status().isAccepted());
 
 		TestUser guesser = signup();
 		for (int i = 0; i < RoomController.MAX_CODE_ATTEMPTS_PER_MINUTE; i++) {
@@ -833,13 +892,13 @@ class RoomFlowTest extends IntegrationTest {
 				"{\"content\":%s,\"inviteIds\":[]}".formatted(CONTENT))).path("id").asString();
 		List<String> ids = new ArrayList<>();
 		Map<String, TestUser> friends = new HashMap<>();
-		for (int i = 0; i < 2 * RoomService.MAX_INVITES; i++) {
+		for (int i = 0; i < 2 * (RoomService.MAX_MEMBERS - 1); i++) {
 			TestUser friend = signup();
 			befriend(host, friend);
 			ids.add(friend.id());
 			friends.put(friend.id(), friend);
 		}
-		List<List<String>> batches = List.of(ids.subList(0, RoomService.MAX_INVITES), ids.subList(RoomService.MAX_INVITES, ids.size()));
+		List<List<String>> batches = List.of(ids.subList(0, (RoomService.MAX_MEMBERS - 1)), ids.subList((RoomService.MAX_MEMBERS - 1), ids.size()));
 		CountDownLatch start = new CountDownLatch(1);
 		List<Future<Integer>> results = new ArrayList<>();
 		try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -872,10 +931,10 @@ class RoomFlowTest extends IntegrationTest {
 				accepted.add(a.get());
 			}
 		}
-		assertThat(accepted.stream().filter(st -> st == 200)).hasSize(RoomService.MAX_INVITES);
-		assertThat(accepted.stream().filter(st -> st == 409)).hasSize(RoomService.MAX_INVITES);
+		assertThat(accepted.stream().filter(st -> st == 200)).hasSize((RoomService.MAX_MEMBERS - 1));
+		assertThat(accepted.stream().filter(st -> st == 409)).hasSize((RoomService.MAX_MEMBERS - 1));
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, host.accessToken(), null)).path("members"))
-				.hasSize(1 + RoomService.MAX_INVITES);
+				.hasSize(1 + (RoomService.MAX_MEMBERS - 1));
 
 		TestUser once = signup();
 		befriend(host, once);

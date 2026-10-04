@@ -46,6 +46,11 @@ public class PresenceService {
 		broadcast(userId);
 	}
 
+	/** What the user watches now (their own presence, whatever their visibility), or null. Server-side use only. */
+	public MediaPresence watching(String userId) {
+		return media.get(userId);
+	}
+
 	/** Presence of `owner` as seen by one of their friends. Callers must have checked friendship. */
 	public PresenceView viewOf(User owner) {
 		return view(owner, hub.isOnline(owner.getId()), media.get(owner.getId()));

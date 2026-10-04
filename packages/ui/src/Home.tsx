@@ -9,7 +9,7 @@ import type {
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
-import { episodeLabel, INCOMING_MS, roomToInvite, type IncomingRequest, type WatchingInfo } from "@mirattic/types";
+import { episodeLabel, INCOMING_MS, memberLimitOf, roomToInvite, type IncomingRequest, type WatchingInfo } from "@mirattic/types";
 import { api, platform } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
@@ -289,7 +289,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       setOpenRoom(hosted?.id ?? (await api.createRoom(watching, [friend.id])).id); // no video yet: a room without one
       changeRequest(friend, false); // answered; kept on failure to retry
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
+      // The room filled up since the request (its check is a prediction, decision 106): said plainly.
+      const full = e instanceof ApiError && (e.message === "room full" || e.message === "too many invites");
+      setError(full ? `방이 가득 차서 ${friend.displayName}님을 초대할 수 없습니다 (최대 ${hosted ? memberLimitOf(hosted) : 8}명).`
+        : e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
     }
   }
 
@@ -340,6 +343,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         );
       }
       setError(status === 409 && e instanceof ApiError && e.message === "already in the same room" ? "이미 같은 방에 있습니다."
+        : status === 409 && e instanceof ApiError && e.message === "room full" ? `${friend.displayName}님이 있는 방이 가득 찼습니다.`
         : status === 409 ? "친구가 오프라인입니다." : status === 429 ? "방금 요청했습니다. 잠시 후 다시 시도하세요." : "요청하지 못했습니다.");
     } finally {
       inFlight.current.delete(friend.id);
@@ -602,7 +606,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                       </div>
                       <div className="muted">
                         {r.id === activeRoom ? "참여 중 · " : ""}
-                        {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.filter((m) => m.present).length}명
+                        {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.length}/{memberLimitOf(r)}명
                       </div>
                     </div>
                     <button onClick={() => enter(r.id)}>입장</button>

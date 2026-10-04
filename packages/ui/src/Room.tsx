@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { contentKey, MEDIA_PROVIDERS, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
+import { contentKey, MEDIA_PROVIDERS, memberLimitOf, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, showsRoomVideo, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
@@ -40,6 +40,9 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   const room = s.room;
   const content = room?.content;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
+  // Decision 106: the room's member limit, the host included; full, nobody more can be invited.
+  const limit = room ? memberLimitOf(room) : 8;
+  const full = !!room && room.members.length >= limit;
   // The room's type (decision 93): the host's pick, else its video's site; the warning below is about it.
   const roomType: MediaProvider | null = room?.type ?? content?.provider ?? null;
   const experiment = isExperiment(roomType ?? undefined) ? (roomType as Experiment) : undefined;
@@ -173,12 +176,15 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
         <IconButton icon="back" label="친구 목록" onClick={() => void back()} />
         <h1 title={content?.title}>{content?.title ?? "새 방"}</h1>
         <PanelWindowButton />
-        <IconButton icon="userPlus" label="방에 초대하기" onClick={() => setInviting(true)} />
+        {full
+          ? <IconButton icon="userPlus" label={`방이 가득 찼습니다 (최대 ${limit}명)`} disabled onClick={() => {}} />
+          : <IconButton icon="userPlus" label="방에 초대하기" onClick={() => setInviting(true)} />}
         <IconButton icon="logout" tone="danger" label={isHost ? "방 닫기" : "방 나가기"} onClick={() => void leave()} />
       </header>
 
       <div className="room-body">
         <div className="members">
+          <span className="muted" title="방 인원 / 최대 인원">{room.members.length}/{limit}명</span>
           {room.members.map((m) => (
             <span key={m.user.id} className="member" title={m.role === "HOST" ? "호스트" : m.present ? "참가 중" : "초대됨"}>
               <Avatar name={m.user.displayName} on={m.present} />

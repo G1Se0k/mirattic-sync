@@ -205,6 +205,9 @@ export type RoomRole = "HOST" | "MEMBER";
 /** `present` = has a live connection that joined the room (`room:join`). */
 export type RoomMemberView = { user: UserSummary; role: RoomRole; present: boolean };
 
+/** A room's member limit, the host included: the server's, else 8 (decision 106). */
+export const memberLimitOf = (room: { memberLimit?: number }) => room.memberLimit ?? 8;
+
 export type RoomView = {
   id: string;
   /** null: no video yet (decision 92) — the host's first one becomes it. */
@@ -220,6 +223,8 @@ export type RoomView = {
   /** Rises with each type change; `typeSeen` is mine — while lower, a member (not the host) is asked about it. */
   typeVersion?: number;
   typeSeen?: number;
+  /** Members the room takes, the host included (decision 106); absent from an older server (8 then). */
+  memberLimit?: number;
 };
 
 /** A friend's watch request to me (`watch:request`, incoming list), with its time left (decision 87). */
@@ -265,16 +270,18 @@ export function episodeLabel(p: Pick<MediaPresence, "season" | "episode">) {
 }
 
 /**
- * The room I host to invite a friend into: the one showing what I watch now (the open one first). When I
+ * The room I host to invite a friend into: the one showing what I watch now (the open one first), one with space
+ * before a full one (decision 106 — the server refuses a watch request only when every such room is full). When I
  * watch nothing, any room I host. undefined = start a new room.
  */
 export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string | null, watching: RoomContent | null) {
-  return [...rooms]
+  const fits = [...rooms]
     .sort((a, b) => Number(b.id === openRoom) - Number(a.id === openRoom))
-    .find(
+    .filter(
       (r) =>
         r.members.some((m) => m.user.id === meId && m.role === "HOST") &&
         // (a room without a video yet takes what I watch)
         (!watching || !r.content || (r.content.provider === watching.provider && r.content.contentId === watching.contentId)),
     );
+  return fits.find((r) => r.members.length < memberLimitOf(r)) ?? fits[0];
 }

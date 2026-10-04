@@ -76,3 +76,11 @@ it("reads only the rooms and invitations again for a room change, everything for
   expect(refetchFor("friend:update")).toBe("all");
   for (const type of ["chat:message", "watch:request", "presence:update"]) expect(refetchFor(type)).toBeNull();
 });
+
+it("invites into a matching room with space before a full one, the full one only if all are", () => {
+  const full = (id: string) => ({ ...room(id, video, "me"), memberLimit: 2,
+    members: [{ user: { id: "me", displayName: "me" }, role: "HOST" as const, present: true }, { user: { id: "x", displayName: "x" }, role: "MEMBER" as const, present: true }] });
+  const spare = room("spare", video, "me");
+  expect(roomToInvite([full("open"), spare], "me", "open", video)?.id).toBe("spare"); // the open one is full
+  expect(roomToInvite([full("open"), full("other")], "me", "open", video)?.id).toBe("open"); // all full: as before
+});

@@ -1,5 +1,7 @@
 package com.mirattic.sync.room;
 
+import com.mirattic.sync.presence.MediaPresence;
+import com.mirattic.sync.presence.PresenceService;
 import com.mirattic.sync.presence.MediaProvider;
 import com.mirattic.sync.ws.RoomLog;
 import com.mirattic.sync.ws.ServerEvent;
@@ -84,11 +86,13 @@ class RoomController {
 	private final RoomService rooms;
 	private final SocketHub hub;
 	private final RoomLog roomLog;
+	private final PresenceService presence;
 
-	RoomController(RoomService rooms, SocketHub hub, RoomLog roomLog) {
+	RoomController(RoomService rooms, SocketHub hub, RoomLog roomLog, PresenceService presence) {
 		this.rooms = rooms;
 		this.hub = hub;
 		this.roomLog = roomLog;
+		this.presence = presence;
 	}
 
 	/**
@@ -216,6 +220,11 @@ class RoomController {
 		if (!allowed[0]) {
 			throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
 		}
+		// After the limit: a refused try counts too, so the answer can't be polled. Watching nothing to their app without
+		// a content id (it then takes no video as what it watches).
+		MediaPresence watching = presence.watching(body.friendId());
+		boolean known = watching != null && watching.contentId() != null;
+		rooms.requireRoomFor(me.id(), body.friendId(), known ? watching.provider() : null, known ? watching.contentId() : null);
 		openWatchRequests.values().removeIf(at -> now - at >= OPEN_WATCH_REQUEST_MS);
 		openWatchRequests.put(me.id() + ">" + body.friendId(), now);
 		hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now,
