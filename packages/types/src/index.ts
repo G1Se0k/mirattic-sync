@@ -38,8 +38,6 @@ export type PlayerSnapshot = {
   rate?: number;
   capturedAt: number;
   adPlaying?: boolean;
-  /** The user is holding the page's seek bar (decision 86); absent where the page can't tell. */
-  scrubbing?: boolean;
 };
 
 export type PlaybackState = {
@@ -126,11 +124,11 @@ export type FriendRequests = { incoming: FriendRequestView[]; outgoing: FriendRe
 
 /**
  * A room log line (decision 78), shown centered: someone came in / went out (`text` = their name then), or the
- * host played / paused / moved / changed the video (`text` = its title), removed a member or handed the room over
+ * host changed the video (`text` = its title; play / pause / seek write none, decision 103), removed a member or handed the room over
  * (`kick` / `host`, `text` = that member's name, decision 79), or a member stamped a time (`stamp`, `text` = their
  * name, decision 102). Sent as `chat:log`.
  */
-export type ChatLogKind = "join" | "leave" | "play" | "pause" | "seek" | "content" | "kick" | "host" | "stamp";
+export type ChatLogKind = "join" | "leave" | "content" | "kick" | "host" | "stamp";
 
 /** A chat line someone wrote (`chat:message`), or a room log (`kind`, `chat:log`). */
 export type ChatMessage = {
@@ -239,9 +237,8 @@ export const INCOMING_MS = 30_000;
  * Payload of host `playback:play|pause|seek`. `capturedAt` is the host's estimate of *server* time
  * when `positionMs` was read; the server clamps it to the last few seconds.
  */
-/** `scrubbing`: the host holds the seek bar, so a pause may be the start of a drag (decision 86). */
 /** `rate`: the host's playback speed (1 = normal); absent is normal. */
-export type PlaybackCommand = { positionMs: number; capturedAt: number; scrubbing?: boolean; rate?: number };
+export type PlaybackCommand = { positionMs: number; capturedAt: number; rate?: number };
 
 // WebSocket envelopes. Clients never send userId; the server stamps it from the authenticated session.
 export type ClientEvent<T = unknown> = {

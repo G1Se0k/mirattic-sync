@@ -327,16 +327,11 @@ class SocketHandler extends TextWebSocketHandler {
 				}
 				RoomService.Command command = RoomService.Command.valueOf(
 						type.substring("playback:".length()).toUpperCase(Locale.ROOT));
-				// Whether the host is holding the seek bar (decision 86); absent where the page can't tell.
-				JsonNode scrub = payload.path("scrubbing");
-				Boolean scrubbing = scrub.isBoolean() ? scrub.asBoolean() : null;
-				// Applied and logged in one order per room (two host connections at once): the log sees every
-				// transition in version order. Delivery order across threads isn't guaranteed; clients drop
-				// versions they've passed.
+				// Applied and sent in one order per room, with content changes (two host connections at once). Delivery
+				// order across threads isn't guaranteed; clients drop versions they've passed. Not logged (decision 103).
 				synchronized (roomLog.order(roomId)) {
-					RoomService.Applied applied = rooms.playback(me, roomId, command, position.asLong(), rate, capturedAt.asLong());
-					hub.sendToRoom(roomId, playbackEvent(roomId, applied.state()));
-					roomLog.playback(roomId, me, applied, scrubbing);
+					PlaybackState state = rooms.playback(me, roomId, command, position.asLong(), rate, capturedAt.asLong());
+					hub.sendToRoom(roomId, playbackEvent(roomId, state));
 				}
 			}
 		}

@@ -32,7 +32,6 @@ const STAMP_WAIT_MS = 5000;
 
 export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, videoMs }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  /** What the chat shows: the host's play / pause / seek lines are kept (history, server) but not shown. */
   const shownLines = useMemo(() => messages.filter(visible), [messages]);
   const [text, setText] = useState("");
   const [hasOlder, setHasOlder] = useState(false);
@@ -113,27 +112,16 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     if (atBottom.current) setUnseen(false);
   }
 
-  // Pages of hidden lines only (a long playback stretch): the older ones are read until a shown line (or the start).
-  // A failed read stops it (no retry loop); "이전 메시지" still retries.
-  const autoOlderFailed = useRef(false);
-  useEffect(() => {
-    if (shownLines.length === 0 && messages.length > 0 && hasOlder && !loadingOlder && !autoOlderFailed.current) {
-      void loadOlder().then((ok) => void (autoOlderFailed.current = !ok));
-    }
-  }, [shownLines, messages, hasOlder, loadingOlder]);
-
-  /** @returns whether the page was read. */
   async function loadOlder() {
     const oldest = messages[0];
-    if (!oldest) return false;
+    if (!oldest) return;
     setLoadingOlder(true);
     try {
       const page = await api.messages(roomId, oldest.id);
       setMessages((list) => tombstone(merge(list, page), deleted.current));
       setHasOlder(page.length === PAGE);
-      return true;
     } catch {
-      return false; // stays offered: the next click retries
+      // stays offered: the next click retries
     } finally {
       setLoadingOlder(false);
     }
@@ -231,10 +219,8 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
             <li key={item.id} className={`log${fresh.has(item.id) ? " fresh" : ""}`}>
               {item.kind === "stamp" && item.mediaPositionMs !== undefined ? (
                 <>{item.text}님이 {timestamp(item.mediaPositionMs, item.contentKey)}에 스탬프를 찍었습니다</>
-              ) : item.kind === "seek" && onSeek && item.mediaPositionMs !== undefined ? (
-                <>호스트가 {timestamp(item.mediaPositionMs, item.contentKey)}로 이동했습니다</>
               ) : (
-                <>{logText(item)} {(item.kind === "play" || item.kind === "pause") && timestamp(item.mediaPositionMs, item.contentKey)}</>
+                logText(item)
               )}
             </li>
           ) : (
@@ -340,9 +326,12 @@ export function tombstone(messages: ChatMessage[], deleted: ChatDeleted[]) {
     .map((m) => (deleted.some((d) => d.id === m.id) && !m.deleted ? { ...m, text: "", mediaPositionMs: undefined, deleted: true } : m));
 }
 
-/** Shown in the chat: everything but the host's playback lines (play / pause / seek), which are still logged. */
+/**
+ * Shown in the chat: messages and the log lines this version knows — not a kind it has no text for (an older server's
+ * play / pause / seek, decision 103, or a newer one's).
+ */
 export function visible(m: ChatMessage) {
-  return m.kind !== "play" && m.kind !== "pause" && m.kind !== "seek";
+  return !m.kind || logText(m) !== "";
 }
 
 /** A room log line as shown (decision 78). */
@@ -350,9 +339,6 @@ export function logText(m: ChatMessage) {
   switch (m.kind) {
     case "join": return `${m.text}님이 들어왔습니다`;
     case "leave": return `${m.text}님이 나갔습니다`;
-    case "play": return "호스트가 재생했습니다";
-    case "pause": return "호스트가 일시정지했습니다";
-    case "seek": return `호스트가 ${clock(m.mediaPositionMs ?? 0)}로 이동했습니다`;
     case "content": return `호스트가 영상을 바꿨습니다: ${m.text}`;
     case "kick": return `${m.text}님이 내보내졌습니다`;
     case "host": return `${m.text}님이 호스트가 되었습니다`;

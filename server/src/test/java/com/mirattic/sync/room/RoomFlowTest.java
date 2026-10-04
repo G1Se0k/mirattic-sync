@@ -485,7 +485,7 @@ class RoomFlowTest extends IntegrationTest {
 	RoomLog roomLog;
 
 	@Test
-	void joinsLeavesAndTheHostsPlaybackAreLoggedInTheChat() throws Exception {
+	void joinsLeavesAndVideoChangesAreLoggedInTheChatButNotPlayback() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
 		befriend(host, friend);
@@ -507,35 +507,15 @@ class RoomFlowTest extends IntegrationTest {
 		friendWs2.nextOfType("playback:update");
 		friendWs = friendWs2;
 
+		// The host's play / pause / seek write no line (decision 103): only the playback updates.
 		long now = System.currentTimeMillis();
-		String command = "{\"positionMs\":%d,\"capturedAt\":%d}";
+		String command = "{\"positionMs\":%d,\"capturedAt\":%d,\"scrubbing\":true}";
 		hostWs.send(event("playback:play", roomId, command.formatted(1000, now)));
-		JsonNode play = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(play.path("kind").asString()).isEqualTo("play");
-		assertThat(play.path("mediaPositionMs").asLong()).isEqualTo(1000);
-		hostWs.send(event("playback:play", roomId, command.formatted(2000, now))); // already playing: no line
 		hostWs.send(event("playback:seek", roomId, command.formatted(60_000, now)));
-		JsonNode seek = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(seek.path("kind").asString()).isEqualTo("seek");
-		hostWs.send(event("playback:seek", roomId, command.formatted(90_000, now))); // each move its own line
-		JsonNode next = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(next.path("id").asString()).isNotEqualTo(seek.path("id").asString());
-		assertThat(next.path("mediaPositionMs").asLong()).isEqualTo(90_000);
-		hostWs.send(event("playback:pause", roomId, command.formatted(91_000, now)));
-		// A pause is held a moment (it may be a seek-bar drag); past the hold it is written.
-		for (int i = 0; i < 100 && !loggedKinds(host, roomId).contains("pause"); i++) {
-			roomLog.flushHeld(Long.MAX_VALUE);
-			Thread.sleep(20);
+		hostWs.send(event("playback:pause", roomId, command.formatted(61_000, now)));
+		for (int i = 0; i < 3; i++) {
+			assertThat(friendWs.nextOfType("playback:update")).isNotNull();
 		}
-		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
-		// A "seek" to where it already is (e.g. the tab's title changed) is no move: no line.
-		hostWs.send(event("playback:seek", roomId, command.formatted(91_500, System.currentTimeMillis())));
-		// Past the end: logged where it lands (the 10 min duration); a second one lands there again, no line.
-		hostWs.send(event("playback:seek", roomId, command.formatted(900_000, System.currentTimeMillis())));
-		JsonNode end = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(end.path("kind").asString()).isEqualTo("seek");
-		assertThat(end.path("mediaPositionMs").asLong()).isEqualTo(600_000);
-		hostWs.send(event("playback:seek", roomId, command.formatted(950_000, System.currentTimeMillis())));
 		hostWs.send(event("playback:content-change", roomId,
 				"{\"provider\":\"youtube\",\"contentId\":\"abcdefghijk\",\"title\":\"Next one\"}"));
 		JsonNode content = friendWs.nextOfType("chat:log").path("payload");
@@ -557,93 +537,6 @@ class RoomFlowTest extends IntegrationTest {
 		hostWs.send(event("playback:content-change", roomId,
 				"{\"provider\":\"youtube\",\"contentId\":\"abcdefghijk\",\"title\":\"Next one, the real title\",\"channel\":\"Chan\"}"));
 		assertThat(Collections.frequency(loggedKinds(host, roomId), "content")).isEqualTo(1);
-		Thread.sleep(1_000); // a new second of the playback command budget
-		// Dragging the seek bar: pause, move, play within the hold is one "seek" line, no "pause" / "play".
-		hostWs.send(event("playback:play", roomId, command.formatted(0, System.currentTimeMillis()))); // the new video's first
-		friendWs.nextOfType("playback:update");
-		hostWs.send(event("playback:pause", roomId, command.formatted(500, System.currentTimeMillis())));
-		hostWs.send(event("playback:seek", roomId, command.formatted(20_000, System.currentTimeMillis())));
-		hostWs.send(event("playback:play", roomId, command.formatted(30_000, System.currentTimeMillis())));
-		JsonNode dragged = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(dragged.path("kind").asString()).isEqualTo("seek");
-		assertThat(dragged.path("mediaPositionMs").asLong()).isEqualTo(30_000);
-		// Small steps while held add up to a move.
-		hostWs.send(event("playback:pause", roomId, command.formatted(30_000, System.currentTimeMillis())));
-		for (int step = 31_000; step <= 33_000; step += 1_000) {
-			hostWs.send(event("playback:seek", roomId, command.formatted(step, System.currentTimeMillis())));
-		}
-		long tp = System.currentTimeMillis();
-		hostWs.send(event("playback:play", roomId, command.formatted(33_000, tp)));
-		JsonNode stepped = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(stepped.path("kind").asString()).isEqualTo("seek");
-		assertThat(stepped.path("mediaPositionMs").asLong()).isEqualTo(33_000);
-		// The pause itself moving a little (1 s from where playback was) and one more small step add up.
-		Thread.sleep(1_000); // a new second of the playback command budget
-		long t = tp + 100; // playing from 33 000 at tp: expected 33 100 here
-		hostWs.send(event("playback:pause", roomId, command.formatted(34_100, t)));
-		hostWs.send(event("playback:seek", roomId, command.formatted(35_100, t)));
-		hostWs.send(event("playback:play", roomId, command.formatted(35_100, t)));
-		JsonNode small = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(small.path("kind").asString()).isEqualTo("seek");
-		assertThat(small.path("mediaPositionMs").asLong()).isEqualTo(35_100);
-
-		// The page says whether the seek bar is held (decision 86): a pause without it is written at once...
-		String flagged = "{\"positionMs\":%d,\"capturedAt\":%d,\"scrubbing\":%b}";
-		Thread.sleep(1_000);
-		hostWs.send(event("playback:pause", roomId, flagged.formatted(36_000, System.currentTimeMillis(), false)));
-		JsonNode paused = friendWs.nextOfType("chat:log").path("payload"); // no flush needed
-		assertThat(paused.path("kind").asString()).isEqualTo("pause");
-		assertThat(paused.path("mediaPositionMs").asLong()).isEqualTo(36_000);
-		hostWs.send(event("playback:play", roomId, flagged.formatted(36_000, System.currentTimeMillis(), false)));
-		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("play");
-		// ...one with it waits for the drag: let go and playing is one "seek" line,
-		Thread.sleep(1_000);
-		hostWs.send(event("playback:pause", roomId, flagged.formatted(36_100, System.currentTimeMillis(), true)));
-		hostWs.send(event("playback:seek", roomId, flagged.formatted(50_000, System.currentTimeMillis(), true)));
-		hostWs.send(event("playback:play", roomId, flagged.formatted(50_000, System.currentTimeMillis(), false)));
-		JsonNode scrubbed = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(scrubbed.path("kind").asString()).isEqualTo("seek");
-		assertThat(scrubbed.path("mediaPositionMs").asLong()).isEqualTo(50_000);
-		// Let go a moment before the page plays again (YouTube reports the release while still paused): one "seek" line,
-		Thread.sleep(1_000);
-		long tr = System.currentTimeMillis();
-		hostWs.send(event("playback:pause", roomId, flagged.formatted(50_100, tr, true)));
-		hostWs.send(event("playback:seek", roomId, flagged.formatted(60_000, tr, true)));
-		hostWs.send(event("playback:seek", roomId, flagged.formatted(60_000, tr, false)));
-		hostWs.send(event("playback:play", roomId, flagged.formatted(60_000, System.currentTimeMillis(), false)));
-		JsonNode released = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(released.path("kind").asString()).isEqualTo("seek");
-		assertThat(released.path("mediaPositionMs").asLong()).isEqualTo(60_000);
-		// let go and still paused past the hold time is a pause and a move.
-		Thread.sleep(1_000);
-		long tq = System.currentTimeMillis();
-		hostWs.send(event("playback:pause", roomId, flagged.formatted(60_100, tq, true)));
-		hostWs.send(event("playback:seek", roomId, flagged.formatted(70_000, tq, true)));
-		hostWs.send(event("playback:seek", roomId, flagged.formatted(70_000, tq, false)));
-		int pauses = Collections.frequency(loggedKinds(host, roomId), "pause");
-		for (int i = 0; i < 100 && Collections.frequency(loggedKinds(host, roomId), "pause") == pauses; i++) {
-			roomLog.flushHeld(System.currentTimeMillis() + 2_000); // past the hold time, once the release has landed
-			Thread.sleep(20);
-		}
-		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
-		JsonNode moved = friendWs.nextOfType("chat:log").path("payload");
-		assertThat(moved.path("kind").asString()).isEqualTo("seek");
-		assertThat(moved.path("mediaPositionMs").asLong()).isEqualTo(70_000);
-		// A drag left hanging is written 30 s after it began, however long its moves go on.
-		Thread.sleep(1_000);
-		hostWs.send(event("playback:play", roomId, flagged.formatted(70_000, System.currentTimeMillis(), false)));
-		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("play");
-		Thread.sleep(1_000);
-		long began = System.currentTimeMillis();
-		hostWs.send(event("playback:pause", roomId, flagged.formatted(70_100, began, true)));
-		Thread.sleep(1_000); // still moving a second later
-		hostWs.send(event("playback:seek", roomId, flagged.formatted(90_000, System.currentTimeMillis(), true)));
-		friendWs.nextOfType("playback:update");
-		roomLog.flushHeld(began + RoomLog.SCRUB_HOLD_MS - 1_000); // not yet
-		assertThat(friendWs.nextOfType("chat:log")).isNull();
-		roomLog.flushHeld(began + RoomLog.SCRUB_HOLD_MS + 500); // 30 s since it began, not since the last move
-		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
-		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("seek");
 
 		// Leaving: once the connection is gone for the grace period (0 here, two sweeps).
 		friendWs.session().close();
@@ -662,55 +555,10 @@ class RoomFlowTest extends IntegrationTest {
 		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
 		List<String> kinds = new ArrayList<>();
 		history.forEach(m -> kinds.add(m.path("kind").asString()));
-		assertThat(kinds).containsExactly("join", "join", "play", "seek", "seek", "pause", "seek", "content", "seek", "seek",
-				"seek", "pause", "play", "seek", "seek", "pause", "seek", "play", "pause", "seek", "leave");
-		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/messages/" + play.path("id").asString(), host.accessToken(), null)
+		assertThat(kinds).containsExactly("join", "join", "content", "leave");
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/messages/" + content.path("id").asString(), host.accessToken(), null)
 				.andExpect(status().isNotFound());
 		assertThat(myRoom(friend).path("unread").asLong()).isZero();
-	}
-
-	@Test
-	void aVideoEndingAndTheNextStartingByItselfIsTheContentLineAlone() throws Exception {
-		TestUser host = signup();
-		TestUser friend = signup();
-		befriend(host, friend);
-		String roomId = body(createRoom(host, friend)).path("id").asString(); // 600 000 ms long
-		Client hostWs = connect(host);
-		hostWs.send(event("room:join", roomId, "{}"));
-		hostWs.nextOfType("playback:update");
-		String command = "{\"positionMs\":%d,\"capturedAt\":%d,\"scrubbing\":false}";
-		hostWs.send(event("playback:play", roomId, command.formatted(598_000, System.currentTimeMillis())));
-		hostWs.nextOfType("chat:log"); // a play by the host: "play"
-		hostWs.send(event("playback:pause", roomId, command.formatted(599_500, System.currentTimeMillis()))); // it ended
-		hostWs.send(event("playback:content-change", roomId, """
-				{"provider":"youtube","contentId":"9bZkp7q19f0","title":"Next","durationMs":300000}"""));
-		assertThat(hostWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("content");
-		Thread.sleep(1_000); // a new second of the playback command budget
-		hostWs.send(event("playback:pause", roomId, command.formatted(0, System.currentTimeMillis()))); // loaded paused
-		hostWs.send(event("playback:play", roomId, command.formatted(0, System.currentTimeMillis()))); // then autoplay
-		hostWs.send(event("playback:pause", roomId, command.formatted(100, System.currentTimeMillis()))); // the host
-		assertThat(hostWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("pause");
-		assertThat(loggedKinds(host, roomId)).containsExactly("join", "play", "content", "pause");
-		// A first play from elsewhere in the new video isn't it starting by itself: logged.
-		hostWs.send(event("playback:content-change", roomId, """
-				{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"Third","durationMs":300000}"""));
-		hostWs.nextOfType("chat:log");
-		Thread.sleep(1_000);
-		hostWs.send(event("playback:play", roomId, command.formatted(60_000, System.currentTimeMillis())));
-		assertThat(hostWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("play");
-		// The host pausing near the end with no next video: written once the end's hold passes.
-		Thread.sleep(1_000);
-		hostWs.send(event("playback:seek", roomId, command.formatted(299_000, System.currentTimeMillis())));
-		assertThat(hostWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("seek");
-		hostWs.send(event("playback:pause", roomId, command.formatted(299_100, System.currentTimeMillis())));
-		hostWs.nextOfType("playback:update");
-		hostWs.nextOfType("playback:update");
-		roomLog.flushHeld(System.currentTimeMillis() + 2_000); // the usual hold: not yet
-		assertThat(hostWs.nextOfType("chat:log")).isNull();
-		roomLog.flushHeld(System.currentTimeMillis() + RoomLog.END_HOLD_MS + 1_000);
-		JsonNode ended = hostWs.nextOfType("chat:log").path("payload");
-		assertThat(ended.path("kind").asString()).isEqualTo("pause");
-		assertThat(ended.path("mediaPositionMs").asLong()).isEqualTo(299_100);
 	}
 
 	@Test

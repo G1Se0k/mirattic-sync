@@ -16,12 +16,11 @@ it("orders messages of the same millisecond by id, as the server pages them", ()
 });
 
 it("shows room logs", () => {
-  const seek = { ...msg("s", 2), text: "", kind: "seek" as const, mediaPositionMs: 60_000 };
-  const list = receive([msg("a", 1)], [], { type: "chat:log", roomId: "r", serverTime: 0, payload: seek });
-  expect(list.map((m) => [m.id, m.kind ?? null])).toEqual([["a", null], ["s", "seek"]]);
+  const join = { ...msg("j", 2), text: "민수", kind: "join" as const };
+  const list = receive([msg("a", 1)], [], { type: "chat:log", roomId: "r", serverTime: 0, payload: join });
+  expect(list.map((m) => [m.id, m.kind ?? null])).toEqual([["a", null], ["j", "join"]]);
   expect(logText({ ...msg("j", 1), text: "민수", kind: "join" })).toBe("민수님이 들어왔습니다");
   expect(logText({ ...msg("c", 1), text: "2화", kind: "content" })).toBe("호스트가 영상을 바꿨습니다: 2화");
-  expect(logText({ ...msg("s", 1), text: "", kind: "seek", mediaPositionMs: 754_000 })).toBe("호스트가 12:34로 이동했습니다");
   expect(logText({ ...msg("k", 1), text: "민수", kind: "kick" })).toBe("민수님이 내보내졌습니다");
   expect(logText({ ...msg("t", 1), text: "민수", kind: "stamp", mediaPositionMs: 65_000 })).toBe("민수님이 1:05에 스탬프를 찍었습니다");
 });
@@ -71,7 +70,7 @@ it("a stamp's time as typed", () => {
   for (const bad of ["", "3", "3:7", "3:60", "1:60:00", "a:bc", "-1:00", "1:02:03:04"]) expect(parseClock(bad)).toBeNull();
 });
 
-it("the host's playback lines aren't shown; the rest are", () => {
-  for (const kind of ["play", "pause", "seek"] as const) expect(visible({ ...msg("p", 1), kind })).toBe(false);
-  for (const kind of [null, "join", "content", "stamp"] as const) expect(visible({ ...msg("o", 1), kind })).toBe(true);
+it("doesn't show a log kind it has no text for (an older server's playback lines)", () => {
+  for (const kind of ["play", "pause", "seek"]) expect(visible({ ...msg("p", 1), kind } as unknown as ChatMessage)).toBe(false);
+  for (const kind of [undefined, "join", "content", "stamp"] as const) expect(visible({ ...msg("o", 1), text: "민수", kind })).toBe(true);
 });

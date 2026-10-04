@@ -328,27 +328,6 @@ describe("publishHost", () => {
     expect(sent.at(-1)).toEqual(["playback:pause", { positionMs: 42_000, capturedAt: Date.now(), rate: 1 }]);
   });
 
-  it("says whether the host holds the seek bar, where the page tells (decision 86)", async () => {
-    const clock = new ServerClock();
-    clock.addSample(Date.now(), Date.now(), Date.now());
-    const host = new MockMediaProvider(CONTENT);
-    const snapshot = host.snapshot.bind(host);
-    let scrubbing: boolean | undefined = true;
-    host.getSnapshot = async () => ({ ...snapshot(), scrubbing });
-    const sent: [string, PlaybackCommand][] = [];
-    publishHost(host, clock, (type, cmd) => void sent.push([type, cmd]));
-    await settle();
-    await host.play();
-    await vi.advanceTimersByTimeAsync(200);
-    await host.pause();
-    await vi.advanceTimersByTimeAsync(200);
-    expect(sent.at(-1)).toEqual(["playback:pause", expect.objectContaining({ scrubbing: true })]);
-    scrubbing = undefined; // a page that can't tell: no flag at all
-    await host.play();
-    await vi.advanceTimersByTimeAsync(200);
-    expect(sent.at(-1)?.[1]).not.toHaveProperty("scrubbing");
-  });
-
   it("never publishes an ad's position", async () => {
     const clock = new ServerClock();
     clock.addSample(Date.now(), Date.now(), Date.now());

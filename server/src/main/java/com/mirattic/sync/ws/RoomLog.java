@@ -2,7 +2,6 @@ package com.mirattic.sync.ws;
 
 import com.mirattic.sync.room.ChatMessage;
 import com.mirattic.sync.room.RoomService;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,89 +12,31 @@ import org.springframework.stereotype.Component;
  * The room's log lines in its chat (plan.md decision 78).
  * Joins and leaves: a user joins with their first connection in the room; they leave once none of their
  * connections has been in it for the grace period, so a reconnect or the extension's worker restarting writes nothing.
- * The host's playback: play / pause when the state flips, a seek when the position jumps. Dragging the seek bar
- * pauses, moves and plays again, so that pause is held: a play after it makes one "seek" line (if it moved)
- * instead of "pause" + "play". Where the host's page says whether the seek bar is held (`scrubbing`, decision 86:
- * YouTube), a pause without it is written at once and one with it is held until the drag ends, then a moment more
- * (the page lets go just before it plays again); elsewhere every pause is held a moment.
- * A video ending and the next one starting by itself is the "content" line alone: a pause within END_MS of its length
- * is held END_HOLD_MS and dropped if a new video comes meanwhile (else written: the host paused there), and the next
- * one's first play where it starts (within FIRST_PLAY_MS of the change) isn't written. ponytail: that play can't be told
- * from the host pressing play at the start within those seconds (no such signal from the page) — that one goes unlogged.
+ * The host's play / pause / seek write no line (decision 103); a video change writes its "content" line.
  * ponytail: in memory, single instance; after a server restart everyone reconnecting is logged as joining again.
  * Lines are written under one lock (a few per minute), so a leave can't land after a newer join.
  */
 @Component
 public class RoomLog {
 
-	/** A pause this close to the video's end may be it ending: held END_HOLD_MS, dropped if the next video comes. */
-	static final long END_MS = 2_000;
-	public static final long END_HOLD_MS = 10_000;
-	/** The new video's first play this soon after the change, where it starts: it starting by itself, no line. */
-	static final long FIRST_PLAY_MS = 10_000;
-	/** Room → when its video changed, until its first play (guarded by this). */
-	private final Map<String, Long> changedAt = new ConcurrentHashMap<>();
-	/** A "seek" landing this close to where playback would be anyway (e.g. a title update) is no move: no line. */
-	static final long MIN_JUMP_MS = 2_000;
-
 	private final RoomService rooms;
 	private final SocketHub hub;
 	private final long graceMs;
-	private final long pauseHoldMs;
 	/** "room|user" logged as in the room → since when none of their connections is in it (0 = present). */
 	private final Map<String, Long> inRoom = new ConcurrentHashMap<>();
-	/** Room → the lock its playback commands are applied and logged under (SocketHandler). */
+	/** Room → the lock its playback commands and content changes are applied and sent under (SocketHandler). */
 	private final Map<String, Object> order = new ConcurrentHashMap<>();
-	/** Room → the newest playback version logged: a command applied earlier but arriving here later is dropped. */
+	/** Room → the newest content change logged: one applied earlier but arriving here later is dropped. */
 	private final Map<String, Long> versions = new ConcurrentHashMap<>();
-	/** A pause held while the host holds the seek bar is written anyway after this long (a drag left hanging). */
-	public static final long SCRUB_HOLD_MS = 30_000;
-	/** Room → a pause not written yet (guarded by this). */
-	private final Map<String, Held> held = new ConcurrentHashMap<>();
 
-	private static final class Held {
-		final String userId;
-		final long pausedPosition;
-		/** Where playback was before the pause: every later position is judged against it, so small steps add up. */
-		final long baseline;
-		long position;
-		long lastAt;
-		boolean moved;
-		/** Held because the host's page says the seek bar is held: waits for the drag to end, not the hold time. */
-		boolean scrubbing;
-		/** When the hold started: a drag's hold ends SCRUB_HOLD_MS after it, however long the moves go on. */
-		final long since;
-		/** At the video's end: held this long (a new video meanwhile drops it), not the hold time. */
-		long ending;
-
-		Held(String userId, long pausedPosition, long baseline, long position, long lastAt, boolean moved,
-				boolean scrubbing) {
-			this.userId = userId;
-			this.pausedPosition = pausedPosition;
-			this.baseline = baseline;
-			this.position = position;
-			this.lastAt = lastAt;
-			this.moved = moved;
-			this.scrubbing = scrubbing;
-			this.since = lastAt;
-		}
-
-		/** Past its time: a drag SCRUB_HOLD_MS after it began, otherwise the hold time after the last command. */
-		boolean due(long now, long pauseHoldMs) {
-			return scrubbing ? now - since >= SCRUB_HOLD_MS : now - lastAt >= Math.max(pauseHoldMs, ending);
-		}
-	}
-
-	RoomLog(RoomService rooms, SocketHub hub, @Value("${app.room-log-grace-ms:10000}") long graceMs,
-			@Value("${app.room-log-pause-hold-ms:1000}") long pauseHoldMs) {
+	RoomLog(RoomService rooms, SocketHub hub, @Value("${app.room-log-grace-ms:10000}") long graceMs) {
 		this.rooms = rooms;
 		this.hub = hub;
 		this.graceMs = graceMs;
-		this.pauseHoldMs = pauseHoldMs;
 	}
 
 	/**
-	 * Held while a room's playback command is applied and then logged, so lines follow the versions' order.
+	 * Held while a room's playback command or content change is applied and sent, so they follow the versions' order.
 	 * Taken before the room row and this log's lock, never while holding them.
 	 * ponytail: one object per room ever played in, until restart.
 	 */
@@ -151,71 +92,11 @@ public class RoomLog {
 		}
 	}
 
-	/**
-	 * After a host's playback command was applied. `scrubbing`: whether the host holds the seek bar, null where
-	 * their page can't tell.
-	 */
-	synchronized void playback(String roomId, String me, RoomService.Applied a, Boolean scrubbing) {
-		if (!newer(roomId, a.state().version())) {
-			return;
-		}
-		long now = System.currentTimeMillis();
-		boolean jumped = Math.abs(a.landed() - a.expected()) >= MIN_JUMP_MS;
-		// Kept through the new video's first paused reports (it loads paused, then plays): decided by its first play.
-		Long changed = a.state().playing() ? changedAt.remove(roomId) : changedAt.get(roomId);
-		if (changed != null && now - changed < FIRST_PLAY_MS && !a.wasPlaying() && a.state().playing() && !jumped) {
-			return; // the new video starting by itself, where it starts (one played from elsewhere is a play, logged)
-		}
-		Held h = held.get(roomId);
-		// Held past its time (the sweep hasn't run yet), or another host now: written as it was.
-		if (h != null && (h.due(now, pauseHoldMs) || !h.userId.equals(me))) {
-			writeHeld(roomId, held.remove(roomId));
-			h = null;
-		}
-		if (h != null) {
-			h.moved |= jumped || Math.abs(a.landed() - h.baseline) >= MIN_JUMP_MS;
-			h.position = a.landed();
-			h.lastAt = now; // still dragging: keep holding
-			if (a.state().playing()) { // played again soon: one "seek" line if it moved, else nothing
-				held.remove(roomId);
-				if (h.moved) {
-					post(roomId, rooms.log(roomId, me, "seek", "", a.landed()));
-				}
-			} else if (Boolean.FALSE.equals(scrubbing)) {
-				// The bar let go, still paused: YouTube plays again a moment later, so held the hold time from now
-				// like any pause — a real pause (+ move) is written once it passes.
-				h.scrubbing = false;
-			}
-			return;
-		}
-		Long duration = a.state().durationMs();
-		if (a.wasPlaying() && !a.state().playing()) {
-			// Paused somewhere else (the drag's first report): the pause is where it was, the move comes after.
-			Held pause = new Held(me, jumped ? a.expected() : a.landed(), a.expected(), a.landed(), now, jumped,
-					Boolean.TRUE.equals(scrubbing));
-			if (duration != null && a.landed() >= duration - END_MS) {
-				pause.ending = END_HOLD_MS; // it ended, if the next video comes (contentChanged drops it)
-				held.put(roomId, pause);
-			} else if (Boolean.FALSE.equals(scrubbing)) {
-				writeHeld(roomId, pause); // not the seek bar: a pause, now
-			} else {
-				held.put(roomId, pause);
-			}
-		} else if (!a.wasPlaying() && a.state().playing()) {
-			post(roomId, rooms.log(roomId, me, "play", "", a.landed()));
-		} else if (jumped) {
-			post(roomId, rooms.log(roomId, me, "seek", "", a.landed()));
-		}
-	}
-
-	/** A new video: a pause still held is about the old one, and the "content" line says what happened. */
+	/** A new video: its "content" line, unless a newer change was logged already. */
 	synchronized void contentChanged(String roomId, long version, ChatMessage.View log) {
-		if (!newer(roomId, version)) {
-			return;
+		if (newer(roomId, version)) {
+			post(roomId, log);
 		}
-		held.remove(roomId);
-		changedAt.put(roomId, System.currentTimeMillis()); // ponytail: one entry per room until its next play
-		post(roomId, log);
 	}
 
 	private boolean newer(String roomId, long version) {
@@ -226,29 +107,6 @@ public class RoomLog {
 		// ponytail: one entry per room ever played in, until restart; prune with closed rooms if it grows.
 		versions.put(roomId, version);
 		return true;
-	}
-
-	@Scheduled(fixedDelayString = "${app.room-log-hold-sweep-ms:200}")
-	public void flushHeld() {
-		flushHeld(System.currentTimeMillis());
-	}
-
-	/** Writes the pauses held past the hold time (a test passes a far `now`). */
-	public synchronized void flushHeld(long now) {
-		for (Iterator<Map.Entry<String, Held>> it = held.entrySet().iterator(); it.hasNext();) {
-			Map.Entry<String, Held> e = it.next();
-			if (e.getValue().due(now, pauseHoldMs)) {
-				it.remove();
-				writeHeld(e.getKey(), e.getValue());
-			}
-		}
-	}
-
-	private void writeHeld(String roomId, Held h) {
-		post(roomId, rooms.log(roomId, h.userId, "pause", "", h.pausedPosition));
-		if (h.moved) {
-			post(roomId, rooms.log(roomId, h.userId, "seek", "", h.position));
-		}
 	}
 
 	/** To the connections in the room; the others see it in the history. */

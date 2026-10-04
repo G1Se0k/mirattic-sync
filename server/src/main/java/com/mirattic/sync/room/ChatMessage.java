@@ -12,7 +12,7 @@ public class ChatMessage {
 
 	/**
 	 * Mirrors `ChatMessage` in packages/types. `kind` null = a message someone wrote; else a room log (decision 78):
-	 * "join" / "leave" (text = the name then), "play" / "pause" / "seek" by the host, "content" (text = the title),
+	 * "join" / "leave" (text = the name then), "content" (text = the title), "kick" / "host" (text = that member's name),
 	 * "stamp" (a member's timestamp, text = their name then). `contentKey`: the video a position belongs to.
 	 */
 	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, String kind,

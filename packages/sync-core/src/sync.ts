@@ -212,7 +212,6 @@ export function publishHost(
     const fresh = !last || s.contentId !== last.contentId || s.playing !== last.playing;
     const type = fresh ? (s.playing ? "playback:play" : "playback:pause") : "playback:seek";
     const command: PlaybackCommand = { positionMs: Math.round(s.positionMs), capturedAt: Math.round(clock.toServer(s.capturedAt)) };
-    if (s.scrubbing !== undefined) command.scrubbing = s.scrubbing;
     if (s.rate !== undefined) command.rate = s.rate;
     if (send(type, command, s) !== false) last = s;
   };

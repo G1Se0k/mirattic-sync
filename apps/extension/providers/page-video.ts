@@ -31,10 +31,6 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
   protected adPlaying() {
     return false;
   }
-  /** Whether the user holds the page's seek bar, where the page shows it (YouTube); undefined elsewhere. */
-  protected scrubbing(): boolean | undefined {
-    return undefined;
-  }
   /** Runs with every check (every second at least): for page chores of a provider. */
   protected tick() {}
 
@@ -94,7 +90,6 @@ export abstract class PageVideoAdapter implements MediaProviderAdapter {
       rate: video.playbackRate,
       capturedAt: Date.now(),
       adPlaying: this.adPlaying(),
-      scrubbing: this.scrubbing(),
     };
   }
 

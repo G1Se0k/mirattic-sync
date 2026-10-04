@@ -421,13 +421,6 @@ public class RoomService {
 		return room.playback();
 	}
 
-	/**
-	 * A playback command's new state, with what the chat log (RoomLog) needs: whether it was playing before, where
-	 * it would have been without the command (`expected`) and where it is now (`landed`, clamped to the duration).
-	 */
-	public record Applied(PlaybackState state, Command command, boolean wasPlaying, long expected, long landed) {
-	}
-
 	/** A content change's new state and its "content" line. */
 	/** `type`: the room's new type when the video's site changed it (decision 93), else null. */
 	/** `state` null: the same video, only its line retitled. */
@@ -448,30 +441,17 @@ public class RoomService {
 	}
 
 	@Transactional
-	public Applied playback(String me, String roomId, Command command, long positionMs, double rate, long capturedAt) {
+	public PlaybackState playback(String me, String roomId, Command command, long positionMs, double rate, long capturedAt) {
 		Room room = lockAsHost(me, roomId);
-		boolean wasPlaying = room.isPlaying();
 		long now = System.currentTimeMillis();
 		long at = capturedAt > now || capturedAt < now - MAX_CAPTURE_AGE_MS ? now : capturedAt;
-		long expected = room.positionAt(at);
 		boolean playing = switch (command) {
 			case PLAY -> true;
 			case PAUSE -> false;
 			case SEEK -> room.isPlaying();
 		};
 		room.applyPlayback(me, positionMs, playing, rate, at);
-		return new Applied(room.playback(), command, wasPlaying, expected, room.positionAt(at));
-	}
-
-	/** A room log line (decision 78); null if the room is gone. */
-	@Transactional
-	public ChatMessage.View log(String roomId, String userId, String kind, String text, Long positionMs) {
-		// Under the room lock, like chat: read marks see every line inserted before them.
-		Room room = rooms.findForUpdate(roomId).orElse(null);
-		if (room == null) {
-			return null;
-		}
-		return messages.save(new ChatMessage(roomId, userId, text, positionMs, kind, room)).view();
+		return room.playback();
 	}
 
 	/**
