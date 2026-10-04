@@ -51,6 +51,12 @@ export class SyncFollower {
   private queued: boolean | null = null;
   /** When the speed was last set: a page that keeps resetting it is tried once a recheck, not on its every event. */
   private rateAt = -Infinity;
+  /**
+   * After a seek of ours, until `until`: where it landed is checked. A player lands late (it buffers there while the
+   * room goes on — longer in a hidden window), which can leave a drift in the tolerated band for good; such a landing
+   * is sought again ahead by what it missed (`aheadMs`), at most LANDING_RETRIES times.
+   */
+  private landing: { until: number; retries: number; aheadMs: number } | null = null;
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -73,6 +79,7 @@ export class SyncFollower {
     if (state.version <= this.version) return false;
     this.state = state;
     this.confirming = false;
+    this.landing = null;
     this.rateAt = -Infinity; // the host's own change: followed at once
     void this.check(true);
     return true;
@@ -148,9 +155,21 @@ export class SyncFollower {
     }
     if (action === "immediate" || (action === "seek" && (hostEvent || this.confirming))) {
       this.confirming = false;
+      this.landing = { until: Date.now() + LANDING_MS, retries: LANDING_RETRIES, aheadMs: 0 };
       // Re-estimate: play()/getSnapshot() may have taken a while on a real player.
       await adapter.seek(estimatePosition(state, clock.serverNow()));
       this.schedule(); // real players land imprecisely; verify
+      return onStatus?.({ kind: "corrected", driftMs });
+    }
+    const landing = this.landing;
+    if (landing && Date.now() >= landing.until) this.landing = null;
+    else if (landing && action === "recheck" && landing.retries > 0) {
+      // Our seek landed short of the room (or past it): again, ahead by what it missed, while playing.
+      landing.retries--;
+      landing.until = Date.now() + LANDING_MS;
+      if (state.playing) landing.aheadMs = Math.max(-MAX_AHEAD_MS, Math.min(MAX_AHEAD_MS, landing.aheadMs - driftMs));
+      await adapter.seek(estimatePosition(state, clock.serverNow()) + (state.playing ? landing.aheadMs : 0));
+      this.schedule();
       return onStatus?.({ kind: "corrected", driftMs });
     }
     if (action === "seek") {
@@ -170,6 +189,12 @@ export class SyncFollower {
     this.timer = setTimeout(() => void this.check(false), delayMs);
   }
 }
+
+/** How long after a seek of ours its landing is checked, and how many times it is sought again. */
+const LANDING_MS = 5_000;
+const LANDING_RETRIES = 2;
+/** A landing is never aimed further ahead (or behind) than this. */
+const MAX_AHEAD_MS = 3_000;
 
 export type PlaybackCommandType = "playback:play" | "playback:pause" | "playback:seek";
 

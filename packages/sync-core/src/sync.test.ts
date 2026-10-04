@@ -145,6 +145,7 @@ describe("SyncFollower", () => {
     const m = member();
     m.follower.apply(state({ positionMs: 100_000, playing: true }));
     await settle();
+    await vi.advanceTimersByTimeAsync(5_000); // past the check of where the joining seek landed
 
     await m.player.seek(m.player.positionMs() + 300);
     await settle();
@@ -166,8 +167,36 @@ describe("SyncFollower", () => {
 
     await m.player.seek(0); // far off: no confirmation wait
     await settle();
-    expect(m.statuses).toContainEqual({ kind: "corrected", driftMs: -102_000 });
-    expect(m.player.positionMs()).toBe(102_000);
+    expect(m.statuses).toContainEqual({ kind: "corrected", driftMs: -107_000 }); // 7 s in (the landing check's 5 s too)
+    expect(m.player.positionMs()).toBe(107_000);
+  });
+
+  it("seeks again, ahead by what it missed, when its own seek lands late (a hidden window)", async () => {
+    const m = member();
+    const seek = m.player.seek.bind(m.player);
+    m.player.seek = (ms) => seek(ms - 1_460); // buffers there while the room goes on: 1.46 s short
+    m.follower.apply(state({ positionMs: 100_000, playing: true }));
+    await settle();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "synced" });
+    const target = 100_000 + 2_000;
+    expect(Math.abs(m.player.positionMs() - target)).toBeLessThan(500); // not stuck 1.46 s behind
+  });
+
+  it("seeks again at most twice after its own seek, then leaves a tolerated drift be", async () => {
+    const m = member();
+    let seeks = 0;
+    const seek = m.player.seek.bind(m.player);
+    const start = Date.now();
+    // Wherever it is aimed, it lands 1 s behind the room: in the tolerated band every time.
+    m.player.seek = () => (seeks++, seek(100_000 + (Date.now() - start) - 1_000));
+    m.follower.apply(state({ positionMs: 100_000, playing: true }));
+    await settle();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(seeks).toBe(3); // the correction and two landings again
+    expect(m.statuses.at(-1)).toMatchObject({ kind: "rechecking" });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(seeks).toBe(3); // then left be: no endless seeking
   });
 
   it("corrects a seek-band drift at once when the host caused it", async () => {
