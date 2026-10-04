@@ -8,7 +8,7 @@ const CONTENT = { contentId: "c1", title: "Fake", durationMs: 600_000 };
 
 function state(over: Partial<PlaybackState> = {}): PlaybackState {
   return {
-    provider: "mock", contentId: "c1", durationMs: 600_000, positionMs: 0, playing: false,
+    provider: "laftel", contentId: "c1", durationMs: 600_000, positionMs: 0, playing: false,
     capturedAt: Date.now(), sourceUserId: "host", version: 1, ...over,
   };
 }

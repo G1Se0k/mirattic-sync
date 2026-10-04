@@ -114,14 +114,11 @@ export function PanelWindowButton() {
     : <IconButton icon="external" label="창으로 분리" onClick={() => w.toggle()} />;
 }
 
-/** A streaming site's logo (square, transparent; the mock player gets a plain mark). */
-const PROVIDER_LOGOS: Partial<Record<MediaProvider, string>> = { youtube, netflix, laftel };
+/** A streaming site's logo (square, transparent). */
+const PROVIDER_LOGOS: Record<MediaProvider, string> = { youtube, netflix, laftel };
 
 export function ProviderIcon({ provider }: { provider: MediaProvider }) {
-  const logo = PROVIDER_LOGOS[provider];
-  return logo
-    ? <img className="provider" src={logo} alt={PROVIDER_NAMES[provider]} title={PROVIDER_NAMES[provider]} />
-    : <span className="provider mock" title={PROVIDER_NAMES[provider]}>M</span>;
+  return <img className="provider" src={PROVIDER_LOGOS[provider]} alt={PROVIDER_NAMES[provider]} title={PROVIDER_NAMES[provider]} />;
 }
 
 /** Initials in a circle: a face for a name without pictures. */

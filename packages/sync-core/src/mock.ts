@@ -3,11 +3,11 @@ import type { MediaPresence, MediaProviderAdapter, PlayerSnapshot } from "@mirat
 export type MockContent = { contentId: string; title: string; durationMs: number };
 
 /**
- * A fake player driven by a clock: no media, just position arithmetic.
- * Emits `onChange` only on play / pause / seek, like real adapters must.
+ * Tests' fake player (not exported): driven by a clock, no media, just position arithmetic. Emits `onChange` only on
+ * play / pause / seek, like real adapters must. It says it's Laftel's: the sync doesn't tell sites apart.
  */
 export class MockMediaProvider implements MediaProviderAdapter {
-  readonly provider = "mock" as const;
+  readonly provider = "laftel" as const;
   private basePositionMs = 0;
   private baseAt: number;
   private playing = false;

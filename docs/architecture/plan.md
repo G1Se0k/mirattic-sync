@@ -1,6 +1,6 @@
 # Architecture Plan (승인: 2026-09-28)
 
-원 기획: `Mirattic_Sync_PLAN.md`. 이 문서는 승인된 결정만 기록한다.
+원 기획(`Mirattic_Sync_PLAN.md`)은 git 이력에 있다 (`git log -- Mirattic_Sync_PLAN.md`, 2026-10-04 삭제). 이 문서는 승인된 결정만 기록한다.
 
 ## 결정 사항
 
@@ -26,7 +26,7 @@
 | 18 | Desktop refresh token은 OS 키체인 (`keyring` crate) | webview 저장소에 장기 토큰을 두지 않음 |
 | 19 | 사용자는 UID(`users.id`)로만 식별하고, 로그인 수단은 `user_identities`로 분리 | OAuth 대비. 아래 참고 |
 | 20 | 친구 추가는 친구 코드로만 (이메일 검색 제거), 재발급 가능 | 이메일 가입 여부 노출 방지, 이메일 없는 OAuth 사용자 지원 |
-| 21 | `MediaProvider`에 `"mock"` 추가 | MockMediaProvider도 같은 adapter 인터페이스와 서버 검증을 그대로 통과해야 함 |
+| 21 | (2026-10-04 없어짐: `"mock"`은 운영 타입 · 서버 enum에서 빠지고 MockMediaProvider는 sync-core 테스트에서만 Laftel로 씀, V25가 남은 mock 방 삭제) `MediaProvider`에 `"mock"` 추가 | MockMediaProvider도 같은 adapter 인터페이스와 서버 검증을 그대로 통과해야 함 |
 | 22 | 방 playback 상태와 version은 DB(`rooms` 행)에 저장, 명령마다 행 잠금 | 서버 재시작 후에도 version이 줄지 않아야 클라이언트가 새 상태를 버리지 않음 |
 | 23 | 초대 = 멤버십 부여 (수락 단계 없음). 방 참가 여부(present)는 서버 메모리 | 친구끼리의 비공개 방이라 충분. 참가 여부는 휘발성 |
 | 24 | 방 변경은 `room:update`만 보내고 클라이언트가 다시 조회 | 결정 14와 같은 패턴 |

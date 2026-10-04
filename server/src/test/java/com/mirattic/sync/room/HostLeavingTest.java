@@ -16,7 +16,7 @@ import tools.jackson.databind.JsonNode;
 class HostLeavingTest extends IntegrationTest {
 
 	private static final String CONTENT = """
-			{"provider":"mock","contentId":"c1","title":"Fake","durationMs":600000}""";
+			{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"Fake","durationMs":600000}""";
 
 	/** A room of `host` that `member` joined by its code; both connected and in it. */
 	private record Room(String id, Client hostWs, Client memberWs) {

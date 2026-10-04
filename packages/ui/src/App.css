@@ -70,7 +70,7 @@ section { margin-top: 4px; }
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); font-size: calc(12px * var(--text-scale)); }
 .tip-wrap:hover .tip, .tip-wrap:focus-within .tip { display: flex; }
 .provider { flex: none; width: 28px; height: 28px; object-fit: contain; }
-.provider.mock { display: inline-grid; place-items: center; border-radius: 7px; background: var(--muted); color: #fff;
+.provider.none { display: inline-grid; place-items: center; border-radius: 7px; background: var(--muted); color: #fff;
   font-weight: 700; font-size: calc(13px * var(--text-scale)); }
 .home { min-height: 100vh; display: flex; flex-direction: column; }
 .home > main { flex: 1; width: 100%; box-sizing: border-box; }

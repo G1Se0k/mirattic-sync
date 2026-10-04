@@ -14,7 +14,7 @@ Key rules:
 - drift behavior follows `docs/protocol/websocket.md`
 - host commands are coalesced in 200ms windows
 - server rate limit is 20 playback commands/sec
-- MockMediaProvider must remain usable for sync testing
+- MockMediaProvider (sync-core tests only, not exported; it says it is Laftel's) must remain usable for sync testing
 - provider-specific behavior stays isolated
 
 Do not redefine protocol events here; update `docs/protocol/websocket.md`.

@@ -1,8 +1,7 @@
 // Provider-agnostic types shared by the extension's parts and (by contract) the server.
 // All timestamps are UTC epoch milliseconds.
 
-/** "mock" is the fake player in @mirattic/sync-core, used to develop and test sync without a real provider. */
-export const MEDIA_PROVIDERS = ["youtube", "netflix", "laftel", "mock"] as const;
+export const MEDIA_PROVIDERS = ["youtube", "netflix", "laftel"] as const;
 export type MediaProvider = (typeof MEDIA_PROVIDERS)[number];
 
 export type MediaPresence = {
@@ -82,7 +81,7 @@ export interface MediaProviderAdapter {
   setRate?(rate: number): Promise<void>;
 
   onChange(callback: (snapshot: PlayerSnapshot) => void): () => void;
-  /** The video went away (left the watch page, tab closed). Optional: the mock player never goes. */
+  /** The video went away (left the watch page, tab closed). Optional: a player that never goes (the tests' fake) needn't have it. */
   onGone?(callback: () => void): () => void;
   /**
    * A member following the room's `contentId`: at the end of that episode, stay on the credits instead of letting
@@ -176,7 +175,7 @@ const LAFTEL_ID = /^\d{1,10}\/\d{1,10}$/;
 
 /**
  * Where to watch a content, built from its provider-scoped id — never from a URL another user sent,
- * so a room can't point members at an arbitrary site. undefined = no page to open (mock, unknown id).
+ * so a room can't point members at an arbitrary site. undefined = no page to open (an unknown id).
  */
 export function watchUrl(content: { provider: MediaProvider; contentId: string }): string | undefined {
   if (content.provider === "youtube" && YOUTUBE_VIDEO_ID.test(content.contentId)) {
@@ -225,7 +224,7 @@ export type RoomView = {
 
 /** A friend's watch request to me (`watch:request`, incoming list), with its time left (decision 87). */
 export type IncomingRequest = UserSummary & { expiresInMs?: number };
-export const PROVIDER_NAMES: Record<MediaProvider, string> = { youtube: "YouTube", netflix: "Netflix", laftel: "Laftel", mock: "Mock" };
+export const PROVIDER_NAMES: Record<MediaProvider, string> = { youtube: "YouTube", netflix: "Netflix", laftel: "Laftel" };
 
 /** How long an invitation or a watch request counts (decision 87): the server's, assumed when not sent. */
 export const INCOMING_MS = 30_000;

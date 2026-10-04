@@ -28,7 +28,7 @@ class ReplacedSessionFrameTest extends IntegrationTest {
 		TestUser friend = signup();
 		befriend(me, friend);
 		String roomId = body(call(HttpMethod.POST, "/api/rooms", me.accessToken(),
-				"{\"content\":{\"provider\":\"mock\",\"contentId\":\"c1\",\"title\":\"Fake\",\"durationMs\":600000},"
+				"{\"content\":{\"provider\":\"youtube\",\"contentId\":\"dQw4w9WgXcQ\",\"title\":\"Fake\",\"durationMs\":600000},"
 						+ "\"inviteIds\":[\"" + friend.id() + "\"]}")).path("id").asString();
 		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invitation", friend.accessToken(), null)
 				.andExpect(status().isOk());

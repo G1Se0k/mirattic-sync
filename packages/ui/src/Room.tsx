@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { contentKey, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
+import { contentKey, MEDIA_PROVIDERS, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
@@ -88,10 +88,10 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   }, [experiment, experimentOn]);
 
   /** The host picks a site: the room's type changes (members told), and its tab here is followed or it opens. */
-  const [pendingSite, setPendingSite] = useState<Site | null>(null);
+  const [pendingSite, setPendingSite] = useState<MediaProvider | null>(null);
   const typeWrites = useRef<Promise<void>>(Promise.resolve());
   /** `turnedOn`: its control was just turned on here (the shared state saying so may not be back yet). */
-  function pickSite(site: Site, turnedOn = false) {
+  function pickSite(site: MediaProvider, turnedOn = false) {
     if (isExperiment(site) && !turnedOn && !platform.experimental?.enabled(site)) {
       setPendingSite(site); // turned on first (asked), then picked
       return setAsking(site);
@@ -403,10 +403,8 @@ function TabPicker({ type }: { type: MediaProvider | null }) {
   );
 }
 
-type Site = Exclude<MediaProvider, "mock">;
-const SITES: Site[] = ["youtube", "netflix", "laftel"];
 /** The room's type as its site's icon; the host's opens the list of sites to switch the room to. */
-function RoomType({ type, onPick }: { type: MediaProvider | null; onPick?: (site: Site) => void }) {
+function RoomType({ type, onPick }: { type: MediaProvider | null; onPick?: (site: MediaProvider) => void }) {
   // Where it opens: fixed under the button, so the scrolling room body doesn't clip it under the chat.
   const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
   useEffect(() => {
@@ -421,7 +419,7 @@ function RoomType({ type, onPick }: { type: MediaProvider | null; onPick?: (site
       document.removeEventListener("scroll", close, true);
     };
   }, [open]);
-  const icon = type ? <ProviderIcon provider={type} /> : <span className="provider mock" title="플랫폼 없음">·</span>;
+  const icon = type ? <ProviderIcon provider={type} /> : <span className="provider none" title="플랫폼 없음">·</span>;
   if (!onPick) return icon;
   return (
     <span className="menu">
@@ -435,7 +433,7 @@ function RoomType({ type, onPick }: { type: MediaProvider | null; onPick?: (site
       </button>
       {open && (
         <div className="menu-items left" role="menu" style={{ position: "fixed", top: open.top, left: open.left }}>
-          {SITES.map((site) => (
+          {MEDIA_PROVIDERS.map((site) => (
             <button key={site} role="menuitem" onClick={() => { setOpen(null); onPick(site); }}>
               <ProviderIcon provider={site} /> {PROVIDER_NAMES[site]}
               {site === type && <span className="muted">· 지금</span>}
@@ -455,7 +453,7 @@ function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite,
   isHost: boolean;
   experimentOff: boolean;
   roomType: MediaProvider | null;
-  onPickSite: (site: Site) => void;
+  onPickSite: (site: MediaProvider) => void;
   onRequestPause: () => void;
 }) {
   const followed = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.tabs?.followed() ?? null);

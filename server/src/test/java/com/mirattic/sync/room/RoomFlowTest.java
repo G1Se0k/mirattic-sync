@@ -28,7 +28,7 @@ import tools.jackson.databind.JsonNode;
 class RoomFlowTest extends IntegrationTest {
 
 	private static final String CONTENT = """
-			{"provider":"mock","contentId":"c1","title":"Fake","durationMs":600000}""";
+			{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"Fake","durationMs":600000}""";
 
 	@Test
 	void onlyFriendsCanBeInvitedAndRoomsAreHiddenFromOthers() throws Exception {
@@ -49,7 +49,7 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(body(call(HttpMethod.GET, "/api/rooms", stranger.accessToken(), null))).isEmpty();
 		call(HttpMethod.GET, "/api/rooms/" + roomId, stranger.accessToken(), null).andExpect(status().isNotFound());
 		call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
-				{"content":{"provider":"mock","contentId":"c1","title":"x","canonicalUrl":"http://a"},"inviteIds":[]}""")
+				{"content":{"provider":"youtube","contentId":"dQw4w9WgXcQ","title":"x","canonicalUrl":"http://a"},"inviteIds":[]}""")
 				.andExpect(status().isBadRequest());
 	}
 
@@ -364,18 +364,18 @@ class RoomFlowTest extends IntegrationTest {
 		hostWs.send(event("room:join", roomId, "{}"));
 		hostWs.nextOfType("playback:update");
 
-		hostWs.send(event("chat:message", roomId, "{\"text\":\"  look at this  \",\"mediaPositionMs\":83000,\"contentKey\":\"mock:c1\"}"));
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"  look at this  \",\"mediaPositionMs\":83000,\"contentKey\":\"youtube:dQw4w9WgXcQ\"}"));
 		JsonNode message = friendWs.nextOfType("chat:message");
 		assertThat(message.path("userId").asString()).isEqualTo(host.id());
 		assertThat(message.path("payload").path("text").asString()).isEqualTo("look at this");
 		assertThat(message.path("payload").path("mediaPositionMs").asLong()).isEqualTo(83000);
 		// The video the position belongs to, the room's then (decision 102): never on a line without a position.
 		String key = message.path("payload").path("contentKey").asString();
-		assertThat(key).isEqualTo("mock:c1");
+		assertThat(key).isEqualTo("youtube:dQw4w9WgXcQ");
 		assertThat(hostWs.nextOfType("chat:message")).isNotNull(); // the sender gets it back too
 		friendWs.send(event("chat:message", roomId, "{\"text\":\"no position\"}"));
 		JsonNode unplaced = hostWs.nextOfType("chat:message").path("payload");
-		friendWs.send(event("chat:message", roomId, "{\"text\":\"old one\",\"mediaPositionMs\":5000,\"contentKey\":\"mock:old\"}"));
+		friendWs.send(event("chat:message", roomId, "{\"text\":\"old one\",\"mediaPositionMs\":5000,\"contentKey\":\"youtube:9bZkp7q19f0\"}"));
 		JsonNode stale = hostWs.nextOfType("chat:message").path("payload"); // sent as the host moved on: just a time
 		assertThat(stale.path("mediaPositionMs").asLong()).isEqualTo(5000);
 		assertThat(stale.has("contentKey")).isFalse();
@@ -383,13 +383,13 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(unplaced.path("contentKey").isNull() || unplaced.path("contentKey").isMissingNode()).isTrue();
 
 		// A member's timestamp: a "stamp" line with their name, the position and the video, to those in the room.
-		friendWs.send(event("chat:stamp", roomId, "{\"mediaPositionMs\":65000,\"contentKey\":\"mock:c1\"}").replaceFirst("\\{", "{\"reqId\":\"s1\","));
+		friendWs.send(event("chat:stamp", roomId, "{\"mediaPositionMs\":65000,\"contentKey\":\"youtube:dQw4w9WgXcQ\"}").replaceFirst("\\{", "{\"reqId\":\"s1\","));
 		JsonNode answered = friendWs.nextOfType("chat:stamp"); // to the sender: that attempt went through
 		assertThat(answered.path("payload").path("reqId").asString()).isEqualTo("s1");
 		JsonNode stamp = hostWs.nextOfType("chat:log").path("payload");
 		assertThat(answered.path("payload").path("id").asString()).isEqualTo(stamp.path("id").asString());
 		// The same attempt again (its answer lost): answered again, not posted twice.
-		friendWs.send(event("chat:stamp", roomId, "{\"mediaPositionMs\":65000,\"contentKey\":\"mock:c1\"}").replaceFirst("\\{", "{\"reqId\":\"s1\","));
+		friendWs.send(event("chat:stamp", roomId, "{\"mediaPositionMs\":65000,\"contentKey\":\"youtube:dQw4w9WgXcQ\"}").replaceFirst("\\{", "{\"reqId\":\"s1\","));
 		assertThat(friendWs.nextOfType("chat:stamp").path("payload").path("id").asString()).isEqualTo(stamp.path("id").asString());
 		assertThat(Collections.frequency(loggedKinds(host, roomId), "stamp")).isEqualTo(1);
 		assertThat(stamp.path("kind").asString()).isEqualTo("stamp");
@@ -399,10 +399,10 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(stamp.path("mediaPositionMs").asLong()).isEqualTo(65000);
 		assertThat(stamp.path("contentKey").asString()).isEqualTo(key);
 		Thread.sleep(1_000); // a new second of the chat budget
-		for (String bad : new String[] {"{}", "{\"mediaPositionMs\":-1,\"contentKey\":\"mock:c1\"}",
-				"{\"mediaPositionMs\":\"1\",\"contentKey\":\"mock:c1\"}",
-				"{\"mediaPositionMs\":600001,\"contentKey\":\"mock:c1\"}", // past the video's end
-				"{\"mediaPositionMs\":1000,\"contentKey\":\"mock:old\"}", "{\"mediaPositionMs\":1000}"}) { // not the room's video
+		for (String bad : new String[] {"{}", "{\"mediaPositionMs\":-1,\"contentKey\":\"youtube:dQw4w9WgXcQ\"}",
+				"{\"mediaPositionMs\":\"1\",\"contentKey\":\"youtube:dQw4w9WgXcQ\"}",
+				"{\"mediaPositionMs\":600001,\"contentKey\":\"youtube:dQw4w9WgXcQ\"}", // past the video's end
+				"{\"mediaPositionMs\":1000,\"contentKey\":\"youtube:9bZkp7q19f0\"}", "{\"mediaPositionMs\":1000}"}) { // not the room's video
 			Thread.sleep(250); // within the chat budget (5 a second)
 			friendWs.send(event("chat:stamp", roomId, bad));
 			assertThat(friendWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
@@ -421,15 +421,6 @@ class RoomFlowTest extends IntegrationTest {
 
 		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", friend.accessToken(), null));
 		assertThat(written(history)).containsExactly("look at this", "no position", "old one");
-
-		// The longest id a room accepts fits a line's video too.
-		String longest = "x".repeat(512);
-		hostWs.send(event("playback:content-change", roomId, """
-				{"provider":"mock","contentId":"%s","title":"Long"}""".formatted(longest)));
-		hostWs.nextOfType("playback:update");
-		Thread.sleep(1_000); // a new second of the chat budget
-		hostWs.send(event("chat:message", roomId, "{\"text\":\"long\",\"mediaPositionMs\":1000,\"contentKey\":\"mock:" + longest + "\"}"));
-		assertThat(hostWs.nextOfType("chat:message").path("payload").path("contentKey").asString()).isEqualTo("mock:" + longest);
 	}
 
 	@Test
@@ -897,7 +888,7 @@ class RoomFlowTest extends IntegrationTest {
 		try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
 			// A room creation that has checked the friendship and added the friend, but not committed yet.
 			Future<String> room = pool.submit(() -> new TransactionTemplate(transactions).execute(tx -> {
-				String id = roomService.create(host.id(), new RoomContent(MediaProvider.mock, "c1", "Fake", null, null, null, null),
+				String id = roomService.create(host.id(), new RoomContent(MediaProvider.youtube, "dQw4w9WgXcQ", "Fake", null, null, null, null),
 						List.of(friend.id()), List.of(friend.id())).id(); // joining at once (a watch request answered)
 				created.countDown();
 				try {

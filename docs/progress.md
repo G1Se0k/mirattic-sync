@@ -7,6 +7,12 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### 정리: 예전 기획서 삭제 · 테스트 전용 mock 제공자 제거 (2026-10-04, 사용자 요청)
+- `Mirattic_Sync_PLAN.md`(923줄, 데스크톱 시절 기획) 삭제 — git 이력에 남음, `plan.md` 첫머리에 위치 안내. README의 sync-core 설명도 수정
+- `"mock"`을 `MEDIA_PROVIDERS` · `PROVIDER_NAMES` · 서버 `MediaProvider` enum에서 삭제. `MockMediaProvider`는 sync-core 패키지 밖으로 내보내지 않고 테스트에서만(사이트는 Laftel로 — 동기화는 사이트를 구분하지 않음). 영상 없는 방 아이콘 클래스 `provider mock` → `provider none`, `Room.tsx`의 `Exclude<…, "mock">` 삭제
+- V25: 영상이 `mock`인 방만 삭제(확장에는 mock 플레이어가 없어 실제로는 없을 것). 유형만 `mock`인 방(예전 API는 유형을 영상과 따로 정할 수 있었음)은 지우지 않고 유형을 영상의 사이트로(영상이 없으면 없음) — Codex 지적. 테스트: MockRoomsMigrationTest(V24 → V25). 서버 테스트의 `mock` 콘텐츠는 YouTube ID로, 512자 ID 테스트는 삭제(이제 어떤 사이트의 ID 형식으로도 받을 수 없는 길이)
+- `background.ts`의 방 유형 확인 로직 분리는 하지 않음: background 상태 · 함수 10여 개에 묶여 있어 떼어 내면 연결 코드만 늘고 비동기 순서가 바뀔 위험
+
 ### 클라이언트: 소켓 처리 오류 기록 · 요청 15초 제한 (2026-10-04, 사용자 요청)
 - `socket.ts`: JSON 파싱만 무시하고, 이벤트 처리 중 예외는 `console.error`로 남김(전에는 깨진 프레임과 함께 조용히 삼킴). 다음 이벤트는 그대로 처리
 - `api.ts`: 조회(GET)만 15초 뒤 포기(`AbortSignal.timeout`) — 다시 물어도 되는 것만. 바꾸는 요청(POST · PUT · DELETE)은 끝까지 기다림: 서버가 처리한 뒤 포기하면 실패로 보이고 다시 하면 두 번 됨(방 두 개, Codex 지적). 토큰 갱신 · 로그인(handoff)도 제한 없음(갱신은 저장된 토큰을 바꾸므로 답을 버리면 다음 갱신이 실패해 로그아웃), 내 정보(`me`)도 제한 없음(로그인 · 워커 시작이 기다림: 제한에 걸리면 로그인 화면 · 소켓 없는 워커가 됨, Codex 지적)

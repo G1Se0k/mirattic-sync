@@ -595,7 +595,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 const mine = host?.user.id === me.id;
                 return (
                   <li key={r.id} className={`friend${r.id === activeRoom ? " card active" : ""}`}>
-                    {r.content ? <ProviderIcon provider={r.content.provider} /> : <span className="provider mock" title="영상 없음">·</span>}
+                    {r.content ? <ProviderIcon provider={r.content.provider} /> : <span className="provider none" title="영상 없음">·</span>}
                     <div className="grow">
                       <div className="ellipsis">
                         <span className="name">{r.content?.title ?? "영상 없음"}</span>

@@ -8,7 +8,7 @@ afterEach(() => vi.useRealTimers());
 
 const room = (hostId: string): RoomView => ({
   id: "r1", createdAt: 0,
-  content: { provider: "mock", contentId: "c1", title: "Fake", durationMs: 600_000 },
+  content: { provider: "laftel", contentId: "c1", title: "Fake", durationMs: 600_000 },
   members: [
     { user: { id: "host", displayName: "Host" }, role: hostId === "host" ? "HOST" : "MEMBER", present: true },
     { user: { id: "me", displayName: "Me" }, role: hostId === "me" ? "HOST" : "MEMBER", present: true },
@@ -71,7 +71,7 @@ it("shows the host a member's pause request for 30 seconds", async () => {
 });
 
 it("tells the room when the host's video gets its details later (same video, no restart)", async () => {
-  let watching: { provider: "mock"; contentId: string; title: string; series?: string } | null = { provider: "mock", contentId: "c1", title: "Fake" };
+  let watching: { provider: "laftel"; contentId: string; title: string; series?: string } | null = { provider: "laftel", contentId: "c1", title: "Fake" };
   const sent: ClientEvent[] = [];
   const player = new MockMediaProvider({ contentId: "c1", title: "Fake", durationMs: 600_000 });
   const sync = new RoomSync({
@@ -94,7 +94,7 @@ it("tells the room when the host's video gets its details later (same video, no 
   sync.setConnected(true);
   expect(sent.filter((e) => e.type === "playback:content-change").at(-1)?.payload).toEqual(watching);
   const before = sent.filter((e) => e.type === "playback:content-change").length;
-  watching = { provider: "mock", contentId: "c2", title: "Next" }; // another video: the publisher announces it
+  watching = { provider: "laftel", contentId: "c2", title: "Next" }; // another video: the publisher announces it
   sync.watchingChanged();
   expect(sent.filter((e) => e.type === "playback:content-change")).toHaveLength(before);
   sync.dispose();
@@ -228,7 +228,7 @@ it("opens the room's video in a new tab when a member enters without it, never o
 
 it("a room without a video takes the host's first one; the host's player is the site they watch now", async () => {
   // Decision 92: rooms aren't per site. The host's player follows what they watch (any provider).
-  type Watching = { provider: "mock" | "youtube"; contentId: string; title: string };
+  type Watching = { provider: "laftel" | "youtube"; contentId: string; title: string };
   let watching: Watching | null = null;
   const sent: ClientEvent[] = [];
   const player = new MockMediaProvider({ contentId: "c1", title: "Fake", durationMs: 600_000 });
@@ -237,23 +237,23 @@ it("a room without a video takes the host's first one; the host's player is the 
   const sync = new RoomSync({
     roomId: "r1", meId: "me", loadRoom: async () => empty, isGone: () => false,
     send: (e) => (sent.push(e), true),
-    adapter: (provider) => (asked.push(provider), provider === "mock" ? player : undefined),
+    adapter: (provider) => (asked.push(provider), provider === "laftel" ? player : undefined),
     nowWatching: () => watching, open: () => {}, onChange: () => {},
   });
   sync.setConnected(true);
   await measured({ sync, sent, player, event: (e) => sync.handle({ serverTime: Date.now(), payload: null, type: "", ...e } as ServerEvent) });
   expect(sync.state.canPlay).toBe(false); // nothing watched, no room video: no player
 
-  watching = { provider: "mock", contentId: "c1", title: "Fake" };
+  watching = { provider: "laftel", contentId: "c1", title: "Fake" };
   sync.refreshPlayer(); // the platform says what is watched changed
-  expect(asked.at(-1)).toBe("mock");
+  expect(asked.at(-1)).toBe("laftel");
   await player.play();
   await vi.advanceTimersByTimeAsync(500);
   expect(sent.filter((e) => e.type === "playback:content-change").map((e) => e.payload)).toEqual([watching]);
 
   watching = { provider: "youtube", contentId: "dQw4w9WgXcQ", title: "Other site" };
   sync.refreshPlayer();
-  expect(asked.at(-1)).toBe("youtube"); // the room's video is still "mock": the host's player is the new site's
+  expect(asked.at(-1)).toBe("youtube"); // the room's video is still Laftel's: the host's player is the new site's
   sync.dispose();
 });
 
@@ -389,12 +389,12 @@ it("a type change without a new video drops a pending prompt to follow (until co
 });
 
 it("a member isn't synced (no playback applied) until they confirm the room's type change", async () => {
-  let view: RoomView = { ...room("host"), type: "mock", typeVersion: 1, typeSeen: 0 };
+  let view: RoomView = { ...room("host"), type: "laftel", typeVersion: 1, typeSeen: 0 };
   const m = start("me", "host");
   m.sync["deps"].loadRoom = async () => view;
   await m.sync.reload();
   await measured(m);
-  m.event({ type: "playback:update", roomId: "r1", payload: { provider: "mock", contentId: "c1", positionMs: 300_000, playing: true, capturedAt: Date.now(), version: 5 } });
+  m.event({ type: "playback:update", roomId: "r1", payload: { provider: "laftel", contentId: "c1", positionMs: 300_000, playing: true, capturedAt: Date.now(), version: 5 } });
   await vi.advanceTimersByTimeAsync(3_000);
   expect((await m.player.getSnapshot())!.playing).toBe(false); // not driven while unconfirmed
   view = { ...view, typeSeen: 1 }; // confirmed

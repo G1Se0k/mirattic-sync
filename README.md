@@ -10,7 +10,7 @@ apps/extension    WXT (Chrome MV3) — content script + side panel
 packages/types    공통 타입 (MediaPresence, PlaybackState, WebSocket envelope, MediaProviderAdapter, REST DTO)
 packages/client   REST + WebSocket 클라이언트 (토큰 갱신, 재연결)
 packages/ui       확장 side panel 화면 (React)
-packages/sync-core 동기화 엔진 (서버 시계 추정, drift 정책, SyncFollower, publishHost) + MockMediaProvider
+packages/sync-core 동기화 엔진 (서버 시계 추정, drift 정책, SyncFollower, publishHost; 테스트용 가짜 플레이어는 내부 전용)
 server            Spring Boot 4 / Java 21 / MySQL (Maven)
 docs              architecture / platform-policy / protocol / progress.md
 ```
