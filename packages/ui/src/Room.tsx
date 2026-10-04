@@ -88,11 +88,11 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     return (
       <main className="room">
         <header className="topbar">
-          <IconButton icon="back" label="친구 목록" onClick={() => void back()} />
+          <IconButton icon="back" label="목록으로" onClick={back} />
           <h1>{s.loadFailed ? "방을 불러오지 못했습니다" : "불러오는 중…"}</h1>
           {s.loadFailed && <IconButton icon="refresh" label="다시 시도" onClick={() => handle.retry()} />}
         </header>
-        {asker.dialog /* back may ask the host here too */}
+        {asker.dialog}
       </main>
     );
   }
@@ -151,7 +151,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   return (
     <main className="room">
       <header className="topbar">
-        <IconButton icon="back" label="친구 목록" onClick={() => void back()} />
+        <IconButton icon="back" label="목록으로" onClick={back} />
         <h1 title={content?.title}>{content?.title ?? "새 방"}</h1>
         <PanelWindowButton />
         {full

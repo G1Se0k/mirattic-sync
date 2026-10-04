@@ -25,6 +25,8 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [requests, setRequests] = useState<FriendRequests>({ incoming: [], outgoing: [] });
   const [blocked, setBlocked] = useState<UserSummary[]>([]);
   const [rooms, setRooms] = useState<RoomView[]>([]);
+  // The first full load is in: until then empty lists are only not loaded yet (no "아직 없습니다" flashing).
+  const [loaded, setLoaded] = useState(false);
   // The extension may still be in a room from before the panel was closed: back into it.
   const [openRoom, setOpenRoom] = useState<string | null>(() => platform.activeRoom?.() ?? null);
   const [screen, setScreen] = useState<"home" | "settings">("home");
@@ -180,6 +182,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       setFriends(f);
       setRequests(r);
       setBlocked(b);
+      setLoaded(true);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onSignedOut();
     }
@@ -619,7 +622,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             <IconButton icon="plus" label="방 생성" onClick={() => void createRoom()} />
             <IconButton icon="hash" label="코드로 입장" onClick={() => setJoining(true)} />
           </div>
-          {rooms.length === 0 ? (
+          {rooms.length === 0 ? loaded && (
             <div className="box empty">
               <p className="muted">아직 방이 없습니다. 영상을 열고 방을 만들거나, 받은 코드로 들어가세요.</p>
               <span className="row">
@@ -662,7 +665,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               <AddFriend onSent={() => { setAdding(false); void reload(); }} />
             </div>
           )}
-          {sorted.length === 0 && !adding && (
+          {loaded && sorted.length === 0 && !adding && (
             <div className="box empty">
               <p className="muted">아직 친구가 없습니다. 친구의 코드를 입력하거나 내 코드를 알려 주세요.</p>
               <span className="row">
