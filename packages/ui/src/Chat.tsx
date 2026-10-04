@@ -90,20 +90,18 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   );
   useEffect(() => () => clearTimeout(stampWait.current?.timer), []);
 
-  // Older messages keep the view where it was; new ones follow the bottom only if the user is there.
+  // Older messages keep the view where it was; new ones (and a line grown in place) follow the bottom only if the
+  // user is there.
   useLayoutEffect(() => {
     const el = list.current;
     const prev = shown.current;
-    const first = shownLines[0]?.id;
     const last = shownLines[shownLines.length - 1];
-    if (el) {
-      if (first !== prev.first && last?.id === prev.last) el.scrollTop += el.scrollHeight - prev.height;
-      else if (last?.id !== prev.last) {
-        if (atBottom.current || last?.userId === meId) el.scrollTo({ top: el.scrollHeight });
-        else setUnseen(true);
-      }
-    }
-    shown.current = { first, last: last?.id, height: el?.scrollHeight ?? 0 };
+    const next = { first: shownLines[0]?.id, last: last?.id, height: el?.scrollHeight ?? 0 };
+    const action = el ? scrollFor(prev, next, atBottom.current, last?.userId === meId) : null;
+    if (action === "keep") el!.scrollTop += next.height - prev.height;
+    else if (action === "bottom") el!.scrollTo({ top: next.height });
+    else if (action === "unseen") setUnseen(true);
+    shown.current = next;
   }, [shownLines, meId]);
 
   function onScroll() {
@@ -332,6 +330,20 @@ export function tombstone(messages: ChatMessage[], deleted: ChatDeleted[]) {
  */
 export function visible(m: ChatMessage) {
   return !m.kind || logText(m) !== "";
+}
+
+type Shown = { first?: string; last?: string; height: number };
+
+/**
+ * What the chat's scroll does after the lines changed: older ones loaded above keep the view ("keep"); a new last line
+ * follows the bottom if the user is there or wrote it ("bottom"), else says there is more below ("unseen"); lines
+ * changed in place that changed the height (a video-change line retitled into two lines) follow the bottom too, if the
+ * user is there.
+ */
+export function scrollFor(prev: Shown, next: Shown, atBottom: boolean, mine: boolean): "keep" | "bottom" | "unseen" | null {
+  if (next.first !== prev.first && next.last === prev.last) return "keep";
+  if (next.last !== prev.last) return atBottom || mine ? "bottom" : "unseen";
+  return atBottom && next.height !== prev.height ? "bottom" : null;
 }
 
 /** A room log line as shown (decision 78). */

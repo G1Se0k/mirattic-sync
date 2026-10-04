@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ChatMessage } from "@mirattic/types";
-import { logText, merge, receive, reconcile, tombstone, visible, without } from "./Chat";
+import { logText, merge, receive, reconcile, scrollFor, tombstone, visible, without } from "./Chat";
 import { parseClock } from "./format";
 
 const msg = (id: string, createdAt: number): ChatMessage => ({ id, roomId: "r", userId: "u", text: id, createdAt });
@@ -73,4 +73,15 @@ it("a stamp's time as typed", () => {
 it("doesn't show a log kind it has no text for (an older server's playback lines)", () => {
   for (const kind of ["play", "pause", "seek"]) expect(visible({ ...msg("p", 1), kind } as unknown as ChatMessage)).toBe(false);
   for (const kind of [undefined, "join", "content", "stamp"] as const) expect(visible({ ...msg("o", 1), text: "민수", kind })).toBe(true);
+});
+
+it("follows the bottom when a line there grows in place (a video-change line retitled into two lines)", () => {
+  const before = { first: "a", last: "z", height: 400 };
+  expect(scrollFor(before, { ...before, height: 418 }, true, false)).toBe("bottom"); // grew, the user at the bottom
+  expect(scrollFor(before, { ...before, height: 418 }, false, false)).toBeNull(); // reading older ones: stays
+  expect(scrollFor(before, before, true, false)).toBeNull();
+  expect(scrollFor(before, { ...before, last: "new", height: 430 }, true, false)).toBe("bottom");
+  expect(scrollFor(before, { ...before, last: "new", height: 430 }, false, false)).toBe("unseen");
+  expect(scrollFor(before, { ...before, last: "new", height: 430 }, false, true)).toBe("bottom"); // mine
+  expect(scrollFor(before, { ...before, first: "older", height: 900 }, false, false)).toBe("keep");
 });

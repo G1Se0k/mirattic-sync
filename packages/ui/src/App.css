@@ -13,6 +13,7 @@
   --strong: #1c1c1e;
   --on-strong: #ffffff;
   --accent: #3f6b5a;
+  --accent-tint: rgba(63, 107, 90, 0.12);
   --danger: #b4443c;
   --on: #3fa56b;
   --flash: #fff4c7;
@@ -22,7 +23,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --fg: #ececea; --bg: #171717; --surface: #202020; --muted: #9b9b98; --line: #2e2e2d; --hover: #2a2a29;
-    --strong: #ececea; --on-strong: #171717; --accent: #8cc4a8; --danger: #e0786f; --on: #5cc389; --flash: #4a4125;
+    --strong: #ececea; --on-strong: #171717; --accent: #8cc4a8; --accent-tint: rgba(140, 196, 168, 0.14); --danger: #e0786f; --on: #5cc389; --flash: #4a4125;
   }
 }
 * { box-sizing: border-box; }
@@ -163,7 +164,9 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 @keyframes flash { from { background: var(--flash); } to { background: transparent; } }
 .chat .deleted { color: var(--muted); text-decoration: line-through; }
 .chat .stamp { font-size: calc(11px * var(--text-scale)); color: var(--muted); margin-right: 4px; }
-button.stamp { padding: 0 2px; background: none; color: var(--accent); font-weight: 500; }
+/* A time the host can click (the room's video): an accent chip, apart from the plain grey ones. */
+.chat button.stamp { padding: 0 5px; border-radius: 4px; background: var(--accent-tint); color: var(--accent); font-weight: 600; }
+.chat button.stamp:hover { background: var(--hover); }
 .message { white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer { padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 4px; }
 .composer form { display: flex; gap: 6px; align-items: center; }
