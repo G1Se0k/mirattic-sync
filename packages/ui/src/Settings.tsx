@@ -1,9 +1,9 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Me, UserSummary } from "@mirattic/types";
 import { DeleteAccount, Privacy } from "./Privacy";
 import { ExperimentalSettings } from "./Experimental";
 import { FeedbackSection } from "./Feedback";
-import { Avatar, IconButton } from "./Icons";
+import { Avatar, Icon, IconButton } from "./Icons";
 import { useAsk } from "./Dialog";
 import { platform, TEXT_SIZE } from "./session";
 
@@ -16,7 +16,7 @@ type Props = {
   onClose: () => void;
 };
 
-/** Everything that isn't watching together: my code, visibility, experiments, blocks, the account. */
+/** Everything that isn't watching together, in groups: a row each, its text left and its control right. */
 export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onClose }: Props) {
   const [showBlocked, setShowBlocked] = useState(false);
   return (
@@ -25,45 +25,69 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
         <IconButton icon="back" label="돌아가기" onClick={onClose} />
         <h1>설정</h1>
       </header>
-      <main className="container">
-        <section className="row">
+      <main className="container settings">
+        <section className="profile">
           <Avatar name={me.displayName} />
           <div className="grow">
             <strong>{me.displayName}</strong>
             <div className="muted ellipsis">{me.email}</div>
           </div>
-          <IconButton icon="logout" label="로그아웃" onClick={onSignedOut} />
-        </section>
-        <section>
           {/* A new tab of the user's own (not the followed one): the account is edited on Mirattic Auth itself. */}
-          <button className="secondary" onClick={() => window.open(ACCOUNT_URL, "_blank", "noopener")}>계정 정보 수정</button>
+          <button className="secondary small" onClick={() => window.open(ACCOUNT_URL, "_blank", "noopener")}>계정 정보 수정</button>
         </section>
-        <Privacy me={me} onChange={onMeChange} />
-        <TextSize />
-        <AskOnSwitch />
-        <ExperimentalSettings />
-        <section>
-          <button className="secondary" aria-expanded={showBlocked} onClick={() => setShowBlocked((v) => !v)}>
-            차단한 사용자 ({blocked.length}) {showBlocked ? "닫기" : "보기"}
-          </button>
-          {showBlocked && blocked.length === 0 && <p className="muted reveal">없습니다.</p>}
-          {showBlocked && (
-            <ul className="list reveal">
-              {blocked.map((u) => (
-                <li key={u.id} className="friend">
-                  <Avatar name={u.displayName} />
-                  <span className="grow name">{u.displayName}</span>
-                  <button className="secondary" onClick={() => onUnblock(u.id)}>차단 해제</button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-        <Updates />
-        <FeedbackSection />
-        <DeleteAccount onDeleted={onSignedOut} />
+        <Group title="같이 보기">
+          <Privacy me={me} onChange={onMeChange} />
+          <AskOnSwitch />
+        </Group>
+        {platform.textSize && <Group title="화면"><TextSize /></Group>}
+        {platform.experimental && <Group title="실험 기능"><ExperimentalSettings /></Group>}
+        <Group title="개인정보">
+          <div>
+            <button className="item" aria-expanded={showBlocked} onClick={() => setShowBlocked((v) => !v)}>
+              <span className="text">차단한 사용자</span>
+              <span className="muted">{blocked.length}명</span>
+              <Icon name="chevron" />
+            </button>
+            <div className={`fold${showBlocked ? "" : " closed"}`} inert={!showBlocked}>
+              <div>
+                {blocked.length === 0 ? <p className="muted fold-body">없습니다.</p> : (
+                  <ul className="list fold-body">
+                    {blocked.map((u) => (
+                      <li key={u.id} className="row">
+                        <Avatar name={u.displayName} />
+                        <span className="grow ellipsis">{u.displayName}</span>
+                        <button className="secondary small" onClick={() => onUnblock(u.id)}>차단 해제</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        </Group>
+        <Group title="정보 · 지원">
+          <Updates />
+          <FeedbackSection />
+          <div className="item">
+            <span className="text">로그아웃</span>
+            <button className="secondary small" onClick={onSignedOut}>로그아웃</button>
+          </div>
+        </Group>
+        <Group title="계정 삭제" danger>
+          <DeleteAccount onDeleted={onSignedOut} />
+        </Group>
       </main>
     </>
+  );
+}
+
+/** A titled card of setting rows. */
+function Group({ title, danger, children }: { title: string; danger?: boolean; children: ReactNode }) {
+  return (
+    <section className="group">
+      <h2>{title}</h2>
+      <div className={`box${danger ? " danger" : ""}`}>{children}</div>
+    </section>
   );
 }
 
@@ -88,20 +112,20 @@ function TextSize() {
     );
   };
   return (
-    <section>
-      <div className="row text-size-row">
-        <span className="grow">글자 크기</span>
-        <button className="secondary" aria-label="글자 작게" disabled={percent <= TEXT_SIZE.min}
-          onClick={() => choose(percent - TEXT_SIZE.step)}>−</button>
-        <strong className="text-size" aria-live="polite">{percent}%</strong>
-        <button className="secondary" aria-label="글자 크게" disabled={percent >= TEXT_SIZE.max}
-          onClick={() => choose(percent + TEXT_SIZE.step)}>+</button>
-        <button className="secondary" disabled={percent === TEXT_SIZE.normal && !failed} onClick={() => choose(TEXT_SIZE.normal)}>
-          기본
-        </button>
-      </div>
-      {failed && <p className="error" role="alert">글자 크기를 저장하지 못했습니다. 패널을 다시 열면 이전 크기로 돌아갈 수 있습니다.</p>}
-    </section>
+    <div className="item">
+      <span className="text">
+        글자 크기
+        {failed && <span className="error" role="alert">저장하지 못했습니다. 패널을 다시 열면 이전 크기로 돌아갈 수 있습니다.</span>}
+      </span>
+      {(percent !== TEXT_SIZE.normal || failed) && (
+        <button className="secondary small" onClick={() => choose(TEXT_SIZE.normal)}>기본</button>
+      )}
+      <span className="stepper">
+        <button aria-label="글자 작게" disabled={percent <= TEXT_SIZE.min} onClick={() => choose(percent - TEXT_SIZE.step)}>−</button>
+        <output aria-live="polite">{percent}%</output>
+        <button aria-label="글자 크게" disabled={percent >= TEXT_SIZE.max} onClick={() => choose(percent + TEXT_SIZE.step)}>+</button>
+      </span>
+    </div>
   );
 }
 
@@ -111,13 +135,16 @@ function AskOnSwitch() {
   const ask = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => prefs?.askOnSwitch() ?? true);
   if (!prefs) return null;
   return (
-    <section>
-      <label className="row">
-        <input type="checkbox" checked={ask} onChange={(e) => void prefs.setAskOnSwitch(e.target.checked)} />
-        <span className="grow">호스트가 다른 영상으로 옮기면 따라갈지 물어보기</span>
-      </label>
-      <p className="muted">끄면 묻지 않고 따라갑니다. 같은 재생목록·작품의 다음 영상은 켜 두어도 묻지 않고 따라갑니다.</p>
-    </section>
+    <label className="item">
+      <span className="text">
+        다른 영상으로 옮길 때 묻기
+        <span className="muted">호스트가 다른 영상으로 옮기면 따라갈지 묻습니다. 끄면 묻지 않고 따라가고, 같은 재생목록·작품의 다음 영상은 켜 두어도 묻지 않습니다.</span>
+      </span>
+      <span className="switch">
+        <input type="checkbox" role="switch" checked={ask} onChange={(e) => void prefs.setAskOnSwitch(e.target.checked)} />
+        <span aria-hidden="true" />
+      </span>
+    </label>
   );
 }
 
@@ -157,20 +184,19 @@ function Updates() {
     : state === "failed" ? "확인할 수 없습니다. 스토어에서 설치한 확장에서만 확인할 수 있습니다."
     : null;
   return (
-    <section>
-      <h2>버전</h2>
-      <div className="row">
-        <span className="grow">Mirattic Sync {updates.version}</span>
-        {ready
-          ? <button onClick={() => void apply()}>지금 업데이트</button>
-          : typeof state === "object" ? null
-          : <button className="secondary" disabled={state === "checking"} onClick={() => void check()}>
-              {state === "checking" ? "확인 중…" : "업데이트 확인"}
-            </button>}
-      </div>
-      {note && <p className="muted" role="status">{note}</p>}
+    <div className="item">
+      <span className="text">
+        <span>버전 <span className="num">{updates.version}</span></span>
+        {note && <span className="muted" role="status">{note}</span>}
+      </span>
+      {ready
+        ? <button className="small" onClick={() => void apply()}>지금 업데이트</button>
+        : typeof state === "object" ? null
+        : <button className="secondary small" disabled={state === "checking"} onClick={() => void check()}>
+            {state === "checking" ? "확인 중…" : "업데이트 확인"}
+          </button>}
       {asker.dialog}
-    </section>
+    </div>
   );
 }
 

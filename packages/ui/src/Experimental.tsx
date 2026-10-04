@@ -3,6 +3,7 @@ import type { MediaProvider } from "@mirattic/types";
 import { platform } from "./session";
 import { PROVIDER_NAMES } from "./format";
 import { Actions, Dialog } from "./Dialog";
+import { Icon } from "./Icons";
 
 const noSubscribe = () => () => {};
 
@@ -99,24 +100,34 @@ function RiskDetails({ provider }: { provider: Experiment }) {
   );
 }
 
-/** Settings: one button per site; its risks show while the pointer is on it (or it has focus). */
+/** Settings: a row per site with its state; opened, its risks and the button to turn it on or off. */
 function ExperimentSection({ provider }: { provider: Experiment }) {
   const on = useExperiment(provider);
+  const [open, setOpen] = useState(false);
   if (on === undefined) return null;
   const name = PROVIDER_NAMES[provider];
   return (
-    <section className="row between">
-      <h2>실험 기능 · {name} 제어 {on ? "(켜짐)" : "(꺼짐)"}</h2>
-      <span className="tip-wrap">
-        <button className={on ? "secondary" : undefined} aria-describedby={`risk-${provider}`}
-          onClick={() => void platform.experimental!.setEnabled(provider, !on)}>
-          {on ? `${name} 제어 끄기` : "위험을 이해하고 켜기"}
-        </button>
-        <div className="tip stack" role="tooltip" id={`risk-${provider}`}>
-          <RiskDetails provider={provider} />
+    <div>
+      <button className="item" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="text">
+          <span>{name} 제어 <span className={`pill${on ? " on" : ""}`}>{on ? "켜짐" : "꺼짐"}</span></span>
+          <span className="muted">{on ? "끄려면 펼치세요" : "켜기 전에 위험을 확인하세요"}</span>
+        </span>
+        <Icon name="chevron" />
+      </button>
+      <div className={`fold${open ? "" : " closed"}`} inert={!open}>
+        <div>
+          <div className="fold-body risk stack">
+            <RiskDetails provider={provider} />
+            <div>
+              <button className={`small${on ? " secondary" : ""}`} onClick={() => void platform.experimental!.setEnabled(provider, !on)}>
+                {on ? `${name} 제어 끄기` : "위험을 이해하고 켜기"}
+              </button>
+            </div>
+          </div>
         </div>
-      </span>
-    </section>
+      </div>
+    </div>
   );
 }
 

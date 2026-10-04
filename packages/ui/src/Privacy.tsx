@@ -11,15 +11,15 @@ export function Privacy({ me, onChange }: { me: Me; onChange: (me: Me) => void }
   const update = (presence: Visibility) => api.updatePrivacy(presence, me.positionVisibility).then(onChange, () => {});
 
   return (
-    <section>
-      <h2>공개 범위</h2>
-      <label className="row between">
-        시청 중인 콘텐츠
-        <select value={me.presenceVisibility} onChange={(e) => update(e.target.value as Visibility)}>
+    <label className="item">
+      <span className="text">
+        시청 중인 콘텐츠 공개
+        <span className="muted">지금 보는 영상을 보여 줄 범위</span>
+      </span>
+      <select value={me.presenceVisibility} onChange={(e) => update(e.target.value as Visibility)}>
           {(["FRIENDS", "ROOM_ONLY", "OFF"] as const).map((v) => <option key={v} value={v}>{LABELS[v]}</option>)}
-        </select>
-      </label>
-    </section>
+      </select>
+    </label>
   );
 }
 
@@ -51,12 +51,14 @@ export function DeleteAccount({ onDeleted }: { onDeleted: () => void }) {
   }
 
   return (
-    <section>
+    <div className="item">
       {asker.dialog}
-      <h2>계정 삭제</h2>
-      <p className="muted">Mirattic 계정 자체는 남고, Mirattic Sync의 데이터만 삭제됩니다.</p>
-      <button className="link danger" onClick={remove} disabled={busy}>계정과 데이터 삭제…</button>
-      {error && <p className="error" role="alert">{error}</p>}
-    </section>
+      <span className="text">
+        Mirattic Sync 데이터 삭제
+        <span className="muted">Mirattic 계정 자체는 남고, Sync의 데이터만 삭제됩니다.</span>
+        {error && <span className="error" role="alert">{error}</span>}
+      </span>
+      <button className="link danger" onClick={remove} disabled={busy}>삭제…</button>
+    </div>
   );
 }

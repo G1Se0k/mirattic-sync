@@ -9,6 +9,7 @@ import laftel from "./assets/laftel.png";
 // A small stroke icon set (24px grid, drawn at 16px), inline so no icon font or package is needed.
 const PATHS = {
   back: <path d="M15 18l-6-6 6-6" />,
+  chevron: <path d="M9 6l6 6-6 6" />,
   settings: (
     <>
       <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />

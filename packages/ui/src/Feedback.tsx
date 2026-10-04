@@ -9,11 +9,11 @@ type Kind = "FEEDBACK" | "BUG";
 export function FeedbackSection() {
   const [open, setOpen] = useState(false);
   return (
-    <section>
-      <h2>피드백 및 버그 리포트</h2>
-      <button className="secondary" onClick={() => setOpen(true)}>의견 보내기</button>
+    <div className="item">
+      <span className="text">피드백 및 버그 리포트</span>
+      <button className="secondary small" onClick={() => setOpen(true)}>의견 보내기</button>
       {open && <FeedbackDialog onClose={() => setOpen(false)} />}
-    </section>
+    </div>
   );
 }
 
