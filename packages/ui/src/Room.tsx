@@ -490,6 +490,9 @@ function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite,
           <span className="muted grow">{name} 제어(실험)가 꺼져 있어 동기화하지 않습니다. 설정에서 켤 수 있습니다.</span>
         ) : !s.canPlay ? (
           <span className="muted grow">Chrome 확장 프로그램에서 함께 볼 수 있습니다.</span>
+        ) : !isHost && s.hostVideo === false ? (
+          // The host's browser shows no room video (decision 105): they're looking for the next one.
+          <span className="muted grow">호스트가 영상을 고르고 있습니다.</span>
         ) : here && snapshot ? (
           <>
             <span className="time grow">{clock(snapshot.positionMs)}{snapshot.durationMs !== undefined && ` / ${clock(snapshot.durationMs)}`}</span>
