@@ -31,12 +31,8 @@ const PATHS = {
       <path d="M10 10l5 3-5 3z" />
     </>
   ),
-  join: (
-    <>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 8l4 4-4 4M8 12h8" />
-    </>
-  ),
+  /** A raised hand: asking to join (unlike `login`, entering a room). */
+  join: <path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8a8 8 0 0 0 16 0v-3a2 2 0 0 0-4 0" />,
   plus: <path d="M12 5v14M5 12h14" />,
   hash: <path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" />,
   send: <path d="M22 2L11 13M22 2l-7 20-4-9-9-4z" />,

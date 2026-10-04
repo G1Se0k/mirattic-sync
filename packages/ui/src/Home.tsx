@@ -9,7 +9,7 @@ import type {
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
-import { episodeLabel, INCOMING_MS, memberLimitOf, roomToInvite, type IncomingRequest, type WatchingInfo } from "@mirattic/types";
+import { contentKey, episodeLabel, INCOMING_MS, memberLimitOf, roomToInvite, type IncomingRequest, type WatchingInfo } from "@mirattic/types";
 import { api, platform } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
@@ -17,6 +17,7 @@ import { MyFriendCode, Settings } from "./Settings";
 import { latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
+import logo from "./assets/mirattic.png";
 
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
 
@@ -25,8 +26,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [requests, setRequests] = useState<FriendRequests>({ incoming: [], outgoing: [] });
   const [blocked, setBlocked] = useState<UserSummary[]>([]);
   const [rooms, setRooms] = useState<RoomView[]>([]);
-  // The first full load is in: until then empty lists are only not loaded yet (no "아직 없습니다" flashing).
+  // The first full load is in (friends): until then an empty list is only not loaded yet (no "아직 없습니다" flashing).
   const [loaded, setLoaded] = useState(false);
+  // A room list is in (the one applied, not a load that a newer one made stale): the rooms' empty state and the
+  // watching card's action wait for it.
+  const [roomsLoaded, setRoomsLoaded] = useState(false);
   // The extension may still be in a room from before the panel was closed: back into it.
   const [openRoom, setOpenRoom] = useState<string | null>(() => platform.activeRoom?.() ?? null);
   const [screen, setScreen] = useState<"home" | "settings">("home");
@@ -134,6 +138,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const applyRooms = useCallback((rs: RoomView[]) => {
     current.current.rooms = rs;
     setRooms(rs);
+    setRoomsLoaded(true);
   }, []);
 
   const subscribe = useCallback((listener: (event: ServerEvent) => void) => {
@@ -300,6 +305,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   }
 
   /** "방 생성": at once, with what I watch now or no video yet (decision 92: whatever I open next becomes it). */
+  // My rooms on what I watch: the one I'm in first (two rooms may show the same video).
+  const onThisVideo = watching
+    ? rooms.filter((r) => r.content && contentKey(r.content) === contentKey(watching) && r.members.some((m) => m.user.id === me.id))
+    : [];
+  const watchingRoom = onThisVideo.find((r) => r.id === activeRoom) ?? onThisVideo[0];
+
   async function createRoom() {
     if (creating.current) return;
     setError(null);
@@ -557,6 +568,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     <div className="home">
       {asker.dialog}
       <header className="topbar">
+        <img className="topbar-logo" src={logo} alt="" />
         <span className="wordmark grow">Mirattic <span>Sync</span></span>
         <span className={`dot ${status === "open" ? "on" : ""}`} title={status === "open" ? "연결됨" : "연결 중"} />
         <PanelWindowButton />
@@ -581,6 +593,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 <div className="ellipsis"><strong>{info?.title ?? watching.title}</strong></div>
                 {info && episodeLabel(info) && <div className="muted">{episodeLabel(info)}</div>}
               </div>
+              {/* A room of mine on this video: back into it; else a new one with it (as the rooms' "+"). */}
+              {/* Only once the rooms are in: before that a room of mine on it would look missing. */}
+              {!roomsLoaded ? null : watchingRoom
+                ? <IconButton icon="login" tone="primary" label="이 영상의 방으로 돌아가기" onClick={() => enter(watchingRoom.id)} />
+                : <IconButton icon="plus" tone="primary" label="이 영상으로 방 만들기" onClick={() => void createRoom()} />}
             </div>
           ) : (
             <div className="muted">YouTube · Netflix · Laftel 영상을 열면 친구와 같이 볼 수 있습니다.</div>
@@ -622,7 +639,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             <IconButton icon="plus" label="방 생성" onClick={() => void createRoom()} />
             <IconButton icon="hash" label="코드로 입장" onClick={() => setJoining(true)} />
           </div>
-          {rooms.length === 0 ? loaded && (
+          {rooms.length === 0 ? roomsLoaded && (
             <div className="box empty">
               <p className="muted">아직 방이 없습니다. 영상을 열고 방을 만들거나, 받은 코드로 들어가세요.</p>
               <span className="row">
