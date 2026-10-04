@@ -43,7 +43,7 @@ class ChatReadMigrationTest extends IntegrationTest {
 		db.update("INSERT INTO " + SCHEMA + ".room_members (room_id, user_id, role, joined_at, last_read_at)"
 				+ " VALUES ('r', 'host', 'HOST', 0, 0), ('r', 'reader', 'MEMBER', 0, 250)");
 
-		Flyway.configure().dataSource(root).schemas(SCHEMA).load().migrate();
+		Flyway.configure().dataSource(root).schemas(SCHEMA).target("8").load().migrate(); // read marks went in V24
 
 		Long unread = db.queryForObject("SELECT COUNT(*) FROM " + SCHEMA + ".chat_messages m JOIN " + SCHEMA
 				+ ".room_members rm ON rm.room_id = m.room_id AND rm.user_id = 'reader' WHERE m.seq > rm.last_read_seq", Long.class);

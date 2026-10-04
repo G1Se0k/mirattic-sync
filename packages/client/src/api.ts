@@ -248,7 +248,6 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** Feedback or a bug report (Settings), kept for operators. 429 after 10 a day. */
     feedback: (kind: "FEEDBACK" | "BUG", text: string) => authed<void>("POST", "/api/feedback", { kind, text }),
     /** My chat notifications for the room. */
-    muteRoom: (id: string, muted: boolean) => authed<void>("PUT", `/api/rooms/${id}/members/me/muted`, { muted }),
 
     wsTicket: () => authed<{ ticket: string }>("POST", "/api/ws-ticket").then((r) => r.ticket),
   };

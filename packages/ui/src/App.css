@@ -112,9 +112,6 @@ label { padding: 4px 0; }
 .text-size { min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; }
 code.code { font-size: calc(14px * var(--text-scale)); font-weight: 600; }
 input.code::placeholder { font-family: inherit; letter-spacing: normal; }
-.badge { display: inline-block; margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--strong);
-  color: var(--on-strong); font-size: calc(10px * var(--text-scale)); font-weight: 700; text-align: center; line-height: 16px; vertical-align: 1px; }
-.badge.quiet { background: var(--line); color: var(--fg); }
 .pill { font-size: calc(11px * var(--text-scale)); color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
 .banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
 

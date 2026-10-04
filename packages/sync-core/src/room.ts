@@ -184,12 +184,6 @@ export class RoomSync {
     }
   }
 
-  /** A local change (mute) wins over loads already in flight. */
-  setMuted(muted: boolean) {
-    this.loads++;
-    if (this.state.room) this.set({ room: { ...this.state.room, muted } });
-  }
-
   private contentChanged(before: RoomContent | null | undefined, content: RoomContent | null, confirmed = false) {
     // Another video (or none): a prompt to follow an earlier one is over.
     if (this.state.switched && (this.state.switched.provider !== content?.provider || this.state.switched.contentId !== content.contentId)) {
@@ -341,9 +335,6 @@ export class RoomSync {
     }
     if (event.roomId !== this.deps.roomId) return;
     if (event.type === "room:update") {
-      // Muted from another app of mine: applied before the refetch returns.
-      const muted = (event.payload as { muted?: unknown } | null)?.muted;
-      if (typeof muted === "boolean") this.setMuted(muted);
       void this.reload();
     }
     if (event.type === "playback:update") {

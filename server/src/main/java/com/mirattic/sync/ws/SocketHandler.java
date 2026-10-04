@@ -9,7 +9,6 @@ import com.mirattic.sync.room.RoomService;
 import com.mirattic.sync.user.UserRepository;
 import jakarta.validation.Validator;
 import java.time.Instant;
-import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
 import java.util.Map;
@@ -114,7 +113,6 @@ class SocketHandler extends TextWebSocketHandler {
 		try {
 			for (String roomId : joined(session)) {
 				hub.leaveRoom(roomId, out(session));
-				rooms.read(userId(session), roomId);
 				pauseIfHostGone(userId(session), roomId);
 				rooms.announce(roomId, rooms.memberIds(roomId));
 			}
@@ -159,10 +157,14 @@ class SocketHandler extends TextWebSocketHandler {
 					hub.acknowledge(userId(session), "room:closed", roomId);
 				}
 			}
+			case "room:read" -> {
+				// Read marks are gone (decision 104); extensions before it (1.1.1) still send this. ponytail: drop the case
+				// once they're gone from the store.
+			}
 			case "sync:request" -> hub.send(out(session), new ServerEvent("sync:response", null, null, null,
 					System.currentTimeMillis(), Map.of("reqId", reqId == null ? "" : reqId)));
 			case "room:join", "room:leave", "playback:play", "playback:pause", "playback:seek",
-					"playback:content-change", "chat:message", "chat:stamp", "pause:request", "room:read" -> {
+					"playback:content-change", "chat:message", "chat:stamp", "pause:request" -> {
 				if (roomId == null) {
 					error(session, reqId, "bad_payload");
 					return;
@@ -194,23 +196,15 @@ class SocketHandler extends TextWebSocketHandler {
 				});
 				joined(session).add(roomId);
 				roomLog.joined(roomId, me);
-				rooms.read(me, roomId); // outside joinRoom: never wait on the room row lock inside the hub's entry lock
 				hub.send(out(session), playbackEvent(roomId, state));
 				rooms.announce(roomId, rooms.memberIds(roomId));
 			}
 			case "room:leave" -> {
 				if (joined(session).remove(roomId)) {
 					hub.leaveRoom(roomId, out(session));
-					rooms.read(me, roomId);
 					pauseIfHostGone(me, roomId);
 					rooms.announce(roomId, rooms.memberIds(roomId));
 				}
-			}
-			case "room:read" -> {
-				// The extension stays joined with its panel closed: it marks what the user actually saw.
-				rooms.requireMembership(me, roomId);
-				rooms.read(me, roomId);
-				rooms.announce(roomId, List.of(me)); // my other apps refetch their counts
 			}
 			case "pause:request" -> {
 				JsonNode reason = payload.path("reason");
@@ -254,7 +248,8 @@ class SocketHandler extends TextWebSocketHandler {
 				JsonNode key = payload.path("contentKey"); // the video the position is on (absent: an older client)
 				ChatMessage.View message = rooms.chat(me, roomId, text.asString(),
 						position.canConvertToLong() ? position.asLong() : null, key.isString() ? key.asString() : null);
-				// To every member, live in the room or not: the others count it as unread (and may be notified).
+				// To every member's connections, in the room or not yet: one rejoining (a reconnect) doesn't miss it
+				// between reading the history and its join landing.
 				ServerEvent event = new ServerEvent("chat:message", roomId, me, null, message.createdAt(), message);
 				rooms.memberIds(roomId).forEach(id -> hub.sendEvent(id, event));
 			}

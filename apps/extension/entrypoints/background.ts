@@ -213,9 +213,6 @@ export default defineBackground(() => {
     // With its room: a restart restores it only for that same room.
     void browser.storage.session.set({ [roomSiteEntry]: { roomId: of, site } }).catch(() => {});
   }
-  /** Panels showing a room, and which one. */
-  const viewers = new Map<Browser.runtime.Port, string>();
-  let readTimer: ReturnType<typeof setTimeout> | undefined;
   let platform: Watch | null = null;
   let watching: Promise<Watch> | null = null;
   let socket: Socket | null = null;
@@ -658,7 +655,6 @@ export default defineBackground(() => {
             .then(() => mine === session && s.send({ type: 'room:closed:ack', roomId, payload: null }), () => {});
         }
         alertFor(event);
-        if (event.type === 'chat:message' && event.roomId === room?.state.roomId) markRead(500);
       },
     });
     socket = s;
@@ -701,23 +697,6 @@ export default defineBackground(() => {
     if (event.type === 'pause:request' && asked && asked.userId === event.userId) {
       alert('pause', room!.state.roomId, PAUSE_REQUEST_SHOWN_MS, `${asked.name}님이 일시정지를 요청했습니다`, asked.reason);
     }
-  }
-
-  const viewing = () => !!room && [...viewers.values()].includes(room.state.roomId);
-
-  /**
-   * The server marks a room read on join and leave; the extension stays joined with the panel closed, so it
-   * marks what the user saw while a panel shows the room (on opening it, as messages arrive, on leaving it).
-   */
-  function markRead(delayMs = 0) {
-    clearTimeout(readTimer);
-    const send = () => {
-      if (room && viewing()) socket?.send({ type: 'room:read', roomId: room.state.roomId, payload: {} });
-    };
-    // Without a delay (opening, leaving the screen, the panel closing): now, while the panel still counts as
-    // viewing — this also covers a delayed one still pending.
-    if (delayMs === 0) send();
-    else readTimer = setTimeout(send, delayMs);
   }
 
   /** `entering`: the user opened it now, not the worker restoring it after a restart. */
@@ -1183,14 +1162,7 @@ export default defineBackground(() => {
           await replacedLoaded; // replaced in an earlier worker: known before any room opens
           if (!(await (panelAllowed.get(port) ?? true))) break; // lost meanwhile (a newer panel opened)
           openRoom(m.roomId, !m.resume);
-          viewers.set(port, m.roomId);
           if (room) post(port, { kind: 'room', state: room.state });
-          markRead();
-          break;
-        case 'room:close':
-          if (viewers.get(port) !== m.roomId) break;
-          markRead(); // up to now it was on screen
-          viewers.delete(port);
           break;
         case 'closed:seen':
           // Marked even if it isn't here yet (a restarted worker still reading its store): the read merges into it.
@@ -1228,9 +1200,7 @@ export default defineBackground(() => {
       }
     });
     port.onDisconnect.addListener(() => {
-      if (viewers.has(port)) markRead(); // the panel closed while showing the room
       ports.delete(port);
-      viewers.delete(port);
       panelWindows.delete(port);
       panelAllowed.delete(port);
       panelOn.delete(port);

@@ -19,7 +19,7 @@ export const experimentKey = (provider: 'netflix' | 'laftel') => `mirattic.exper
 export const ASK_ON_SWITCH_KEY = 'mirattic.askOnSwitch';
 
 export const ROOM_ACTIONS = ['requestPause', 'dismissPauseRequest', 'pauseAll', 'seek', 'openSwitched', 'dismissSwitched',
-  'setMuted', 'reload'] as const;
+  'reload'] as const;
 export type RoomAction = (typeof ROOM_ACTIONS)[number];
 
 export type FromPanel =
@@ -36,8 +36,6 @@ export type FromPanel =
   | { op: 'send'; event: ClientEvent }
   /** `resume`: a panel restating its room after a worker restart, not the user entering it (no video tab). */
   | { op: 'room:open'; roomId: string; resume?: boolean }
-  // With the room they are about: another window's panel may have made a different room the active one.
-  | { op: 'room:close'; roomId: string }
   | { op: 'room:exit'; roomId: string }
   | { op: 'room:act'; roomId: string; name: RoomAction; args: unknown[] }
   | { op: 'open'; url: string; newTab?: boolean }

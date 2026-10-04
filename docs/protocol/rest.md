@@ -70,18 +70,18 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 | DELETE | `/api/rooms/requests/incoming/{friendId}` | → 204. 받은 합류 요청 무시: 다시 나오지 않고 이후의 초대는 그 응답으로 치지 않음. 요청한 사람에게 `watch:decline`(열린 요청이 있을 때 한 번) |
 | POST | `/api/rooms/join` | `{ code }` → `RoomView`. 방 코드(대소문자·`-` 무시)를 아는 누구나 MEMBER로 입장, 이미 멤버면 그대로(결정 77). 없는 코드·기존 멤버와 차단 관계 404, 8명 가득 409, 사용자당 분당 10번 초과 429. 새로 들어오면 기존 멤버에게 `room:update` |
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
-| GET | `/api/rooms/{id}` | `RoomView` `{ id, content(영상 없는 방은 null), members: [{ user, role, present }], createdAt, unread, muted, code }` (`code` = 방 코드 8자, 결정 77) |
+| GET | `/api/rooms/{id}` | `RoomView` `{ id, content(영상 없는 방은 null), members: [{ user, role, present }], createdAt, code }` (`code` = 방 코드 8자, 결정 77) |
 | GET | `/api/rooms/{id}/messages?before=` | 채팅 100개 `ChatMessage[]`(방 기록 `kind` 줄 포함, 결정 78), 오래된 순: 최근 것, 또는 메시지 ID `before`보다 앞 (`createdAt`, `id` 순). 멤버가 아니거나 `before`가 이 방 메시지가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/{userId}` | 204. 호스트만(403), 자기 자신 400, 멤버 아님 404. 내보내기(결정 79): 멤버십 삭제, 그 사람의 연결을 방에서 뺌, 방 코드 재입장 금지(호스트 초대로 풀림). `chat:log` `kick`, 기존 멤버 전원(내보낸 사람 포함)에게 `room:update` |
 | PUT | `/api/rooms/{id}/type` | `{ type: MediaProvider }` → 204. 호스트만(403). 방 타입(결정 93): 바뀌면 `typeVersion` + 1, 호스트를 뺀 멤버에게 `room:type` + `room:update`, 같으면 아무것도 안 함. 다른 사이트 영상으로 콘텐츠가 바뀔 때도 타입이 그 사이트로 바뀜. `RoomView.type` = 방 타입(없으면 null), `typeVersion`, `typeSeen`(보는 사람이 확인한 버전 — 합류할 때의 버전부터) |
 | POST | `/api/rooms/{id}/type/seen` | `{ version }` → 204. 멤버만. 그 버전까지 확인(방의 버전을 넘지 않음, 줄지 않음) |
 | POST | `/api/rooms/{id}/host` | `{ userId }` → 204. 호스트만(403), 자기 자신 400, 멤버 아님 404. 호스트 넘기기(결정 79): 역할 교환, `chat:log` `host`, 모든 멤버에게 `room:update` |
-| DELETE | `/api/rooms/{id}/messages/{messageId}` | 204. 보낸 사람 또는 방 호스트만 (아니면 403). 멤버가 아니거나 이 방 메시지가 아니거나 이미 삭제됐거나 방 기록(`kind`)이면 404. 소프트 삭제(결정 71): `text` ""·`mediaPositionMs`·`contentKey` 없음·`deleted: true`로 기록에 남음, 읽지 않은 수에서 제외. 모든 멤버의 연결에 `chat:delete { id }` |
-| PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204. 이 방의 내 채팅 알림 끄기/켜기. 저장 후 **내 모든 연결에만** `room:update { muted }` (다른 앱이 조회를 기다리지 않고 새 설정으로 알림). 멤버가 아니면 404 |
+| DELETE | `/api/rooms/{id}/messages/{messageId}` | 204. 보낸 사람 또는 방 호스트만 (아니면 403). 멤버가 아니거나 이 방 메시지가 아니거나 이미 삭제됐거나 방 기록(`kind`)이면 404. 소프트 삭제(결정 71): `text` ""·`mediaPositionMs`·`contentKey` 없음·`deleted: true`로 기록에 남음. 모든 멤버의 연결에 `chat:delete { id }` |
+| PUT | `/api/rooms/{id}/members/me/muted` | `{ muted }` → 204, 아무것도 하지 않음 (결정 104로 알림 끄기 없어짐, 1.1.1 확장 호환용). 멤버가 아니면 404, `muted` 없으면 400 |
 | POST | `/api/rooms/{id}/back` | `{ confirmed }` → `{ closed }`. 방 화면에서 목록으로 돌아감 (결정 90): 지금 HOST면 `confirmed: true`일 때 방 삭제("방 닫기"와 같음, 다른 멤버에게 `room:closed`), 아니면 409(`detail`: `the host closes the room: confirm first`, 앱이 확인창 뒤 다시 보냄). 멤버면 아무것도 안 함(`closed: false`, 방에 남음). 방 잠금 안에서 판단(호스트 넘김과 겹치지 않음). 멤버가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/me` (`?asMember=true`) | 나가기 / 초대 거절. HOST가 나가면 방 삭제, 다른 멤버에게 `room:closed`(결정 90). 모든 멤버에게 `room:update`. `asMember=true`(방 타입 알림의 "방 나가기", 결정 93): 그새 HOST가 됐으면 409, 아무것도 바뀌지 않음 |
 
-`RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만), series?([A-Za-z0-9_-] 1–128자) }`. `series`가 같으면 같은 묶음(YouTube 재생목록, Laftel 작품, Netflix의 이어 본 화들)이라 멤버가 호스트의 다음 영상으로 묻지 않고 따라감 (결정 67). `unread`(다른 사람이 쓴 메시지 중 내가 마지막으로 방을 연 뒤의 수, 방 기록 `kind` 줄과 삭제된 메시지 제외)와 `muted`는 요청한 사람 기준 (초대 이벤트·초대 응답의 `RoomView`에서는 0 / false). 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
+`RoomContent` = `{ provider, contentId, title, durationMs?, canonicalUrl?(https만), series?([A-Za-z0-9_-] 1–128자) }`. `series`가 같으면 같은 묶음(YouTube 재생목록, Laftel 작품, Netflix의 이어 본 화들)이라 멤버가 호스트의 다음 영상으로 묻지 않고 따라감 (결정 67). 초대 = 멤버십 부여이며 별도 수락 단계는 없다.
 
 ## Reports (Phase 9)
 

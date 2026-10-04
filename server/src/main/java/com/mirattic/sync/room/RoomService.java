@@ -36,16 +36,15 @@ public class RoomService {
 	public record MemberView(UserSummary user, RoomMember.Role role, boolean present) {
 	}
 
-	/** `unread` and `muted` are the viewer's own (0 / false in a view sent to someone else). */
 	/** `expiresInMs`: an invitation's time left (in invitation lists and `room:invite`), else absent. */
 	/**
 	 * `type`: the room's type (decision 93), null without one; `typeVersion` rises with each change, `typeSeen` is the
 	 * viewer's seen one — a member (not the host) is asked about the change while it is lower.
 	 */
-	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, long unread,
-			boolean muted, String code, Long expiresInMs, MediaProvider type, long typeVersion, long typeSeen) {
+	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, String code,
+			Long expiresInMs, MediaProvider type, long typeVersion, long typeSeen) {
 		RoomView expiring(long ms) {
-			return new RoomView(id, content, members, createdAt, unread, muted, code, ms, type, typeVersion, typeSeen);
+			return new RoomView(id, content, members, createdAt, code, ms, type, typeVersion, typeSeen);
 		}
 	}
 
@@ -385,24 +384,6 @@ public class RoomService {
 	}
 
 	/**
-	 * Joining or leaving the room live (`room:join`, `room:leave`, disconnect): what arrived until now has been
-	 * seen. Marked on the server, before the change is announced, so a list refetched after it is already current.
-	 */
-	@Transactional
-	public void read(String me, String roomId) {
-		// The room lock orders this against chat() inserts; taken first, before any read fixes the snapshot.
-		if (rooms.findForUpdate(roomId).isEmpty()) {
-			return;
-		}
-		members.findByRoomIdAndUserId(roomId, me).ifPresent(m -> m.read(messages.lastSeq(roomId)));
-	}
-
-	@Transactional
-	public void mute(String me, String roomId, boolean muted) {
-		requireMember(me, roomId).mute(muted);
-	}
-
-	/**
 	 * The host's last connection left the room (window or side panel closed, left the room screen): the members
 	 * stop where the host was instead of playing on alone. null if nothing changed (not the host, or paused).
 	 */
@@ -518,7 +499,7 @@ public class RoomService {
 	 */
 	@Transactional
 	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs, String contentKey) {
-		// Under the room lock, so a read mark (read(), join()) sees every message inserted before it and none after.
+		// Under the room lock, like a kick: a member kicked meanwhile can't post after it.
 		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		requireMember(me, roomId);
 		String trimmed = text == null ? "" : text.strip();
@@ -763,7 +744,7 @@ public class RoomService {
 		return members.findByRoomIdAndUserId(roomId, me).orElseThrow(RoomService::notFound);
 	}
 
-	/** `viewer` gets their unread count and mute; null = a view for someone else. */
+	/** `viewer` gets their own `typeSeen`; null = a view for someone else. */
 	private RoomView view(Room room, List<RoomMember> list, String viewer) {
 		Map<String, User> byId = users.findAllById(list.stream().map(RoomMember::getUserId).toList()).stream()
 				.collect(Collectors.toMap(User::getId, Function.identity()));
@@ -774,12 +755,8 @@ public class RoomService {
 						present.contains(m.getUserId())))
 				.toList();
 		RoomMember self = list.stream().filter(m -> m.getUserId().equals(viewer)).findFirst().orElse(null);
-		long unread = self == null ? 0
-				: messages.countByRoomIdAndUserIdNotAndKindIsNullAndDeletedFalseAndSeqGreaterThan(room.getId(), viewer,
-						self.getLastReadSeq());
-		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), unread,
-				self != null && self.isMuted(), room.getCode(), null, room.type(), room.typeVersion(),
-				self == null ? room.typeVersion() : self.getTypeSeenVersion());
+		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), room.getCode(), null, room.type(),
+				room.typeVersion(), self == null ? room.typeVersion() : self.getTypeSeenVersion());
 	}
 
 	private static ResponseStatusException notFound() {

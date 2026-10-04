@@ -23,15 +23,13 @@ type Props = {
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   /** Back to the list; the extension stays in the room. */
   onClose: () => void;
-  /** The room list decides notifications with it: tell it at once, not at its next refetch. */
-  onMuted: (muted: boolean) => void;
 };
 
 /**
  * Room screen: a view of the room's live side (`RoomHandle`). The host's player drives everyone else's; players
  * are the user's own provider pages, driven by the extension.
  */
-export function Room({ roomId, me, handle, socket, status, subscribe, onClose, onMuted }: Props) {
+export function Room({ roomId, me, handle, socket, status, subscribe, onClose }: Props) {
   const s = useSyncExternalStore(handle.subscribe, handle.state);
   const [reporting, setReporting] = useState<{ id: string; name: string } | null>(null);
   const [askingPause, setAskingPause] = useState(false);
@@ -116,17 +114,6 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     );
   }
 
-  async function toggleMute() {
-    const muted = !room!.muted;
-    try {
-      await api.muteRoom(roomId, muted);
-      handle.setMuted(muted);
-      onMuted(muted);
-    } catch {
-      void asker.tell("알림 설정을 바꾸지 못했습니다", "다시 시도해 주세요.");
-    }
-  }
-
   /** Host only (decision 79). The room's refetch (room:update) shows the result. */
   async function manage(name: string, action: "host" | "kick", userId: string) {
     const yes = action === "host"
@@ -185,8 +172,6 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
         <h1 title={content?.title}>{content?.title ?? "새 방"}</h1>
         <PanelWindowButton />
         <IconButton icon="userPlus" label="방에 초대하기" onClick={() => setInviting(true)} />
-        <IconButton icon={room.muted ? "bellOff" : "bell"} label={room.muted ? "채팅 알림 켜기" : "채팅 알림 끄기"}
-          onClick={() => void toggleMute()} />
         <IconButton icon="logout" tone="danger" label={isHost ? "방 닫기" : "방 나가기"} onClick={() => void leave()} />
       </header>
 

@@ -6,7 +6,7 @@ import { latest } from "./format";
 
 const content = (provider: RoomContent["provider"], contentId: string): RoomContent => ({ provider, contentId, title: contentId });
 const room = (id: string, c: RoomContent, hostId: string): RoomView => ({
-  id, content: c, createdAt: 0, unread: 0, muted: false,
+  id, content: c, createdAt: 0,
   members: [{ user: { id: hostId, displayName: hostId }, role: "HOST", present: true }],
 });
 

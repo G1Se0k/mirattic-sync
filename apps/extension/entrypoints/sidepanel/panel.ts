@@ -312,11 +312,9 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
         seek: (ms) => act('seek', ms),
         openSwitched: (always) => act('openSwitched', always),
         dismissSwitched: () => act('dismissSwitched'),
-        setMuted: (muted) => act('setMuted', muted),
         retry: () => act('reload'),
         close: () => {
           mine.shown = false;
-          send({ op: 'room:close', roomId });
         },
         exit: () => send({ op: 'room:exit', roomId }),
       };

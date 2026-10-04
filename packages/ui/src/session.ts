@@ -14,9 +14,8 @@ export type RoomHandle = {
   /** `always`: in this room, follow the host's next videos without asking. */
   openSwitched(always?: boolean): void;
   dismissSwitched(): void;
-  setMuted(muted: boolean): void;
   retry(): void;
-  /** The screen shows it (again): the extension counts it as seen (read marks). */
+  /** The screen shows it (again): the extension opens the room (`room:open`). */
   show(): void;
   /** The screen went away. The extension stays in the room: its background keeps syncing. */
   close(): void;

@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
-  ChatDeleted,
-  ChatMessage,
   FriendRequests,
   FriendView,
   Me,
@@ -16,7 +14,6 @@ import { api, platform } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
 import { MyFriendCode, Settings } from "./Settings";
-import { without } from "./Chat";
 import { latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
@@ -127,34 +124,14 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   // Read by the socket handler, which outlives renders.
   const current = useRef({ rooms, openRoom, asked });
   current.current = { rooms, openRoom, asked };
-  // Room lists answer in any order; one started before a count changed locally must not overwrite it.
+  // Room lists answer in any order: only the latest one started is applied.
   const roomsLoad = useRef(latest()).current;
-  const refetchRooms = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  /** Recent deletions: a message whose delivery was overtaken by its deletion isn't counted. */
-  const deletedChats = useRef<ChatDeleted[]>([]);
-
-  /** A local change to the list, visible to the socket handler at once; loads started before it are dropped. */
-  const updateRooms = useCallback((change: (list: RoomView[]) => RoomView[]) => {
-    roomsLoad.invalidate();
-    current.current.rooms = change(current.current.rooms);
-    setRooms(change);
-  }, [roomsLoad]);
 
   /** The server's list (its unread counts include messages of rooms not listed here yet). */
   const applyRooms = useCallback((rs: RoomView[]) => {
     current.current.rooms = rs;
     setRooms(rs);
   }, []);
-
-  /** The server's counts, once a burst of chat events settles. */
-  const settleRooms = useCallback(() => {
-    clearTimeout(refetchRooms.current);
-    refetchRooms.current = setTimeout(async () => {
-      const fresh = roomsLoad.begin();
-      const rs = await api.rooms().catch(() => null);
-      if (rs && fresh()) applyRooms(rs);
-    }, ROOMS_REFETCH_MS);
-  }, [roomsLoad, applyRooms]);
 
   const subscribe = useCallback((listener: (event: ServerEvent) => void) => {
     listeners.current.add(listener);
@@ -213,11 +190,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       },
       onEvent: (event: ServerEvent) => {
         listeners.current.forEach((l) => l(event));
-        if (event.type === "room:update" && typeof (event.payload as { muted?: unknown } | null)?.muted === "boolean") {
-          // Muted from another app of mine: applied now, so no message notifies by the old setting meanwhile.
-          const muted = (event.payload as { muted: boolean }).muted;
-          updateRooms((list) => list.map((r) => (r.id === event.roomId ? { ...r, muted } : r)));
-        }
         if (event.type === "friend:update" || event.type === "room:invite" || event.type === "room:update") {
           void reload();
         }
@@ -245,22 +217,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           if (inFlight.current.has(event.userId)) pendingDeclines.current.set(event.userId, declinedAt);
           else decline(event.userId, declinedAt);
         }
-        if (event.type === "chat:message" && without([event.payload as ChatMessage], deletedChats.current).length) {
-          const m = event.payload as ChatMessage;
-          // The open room shows it; my own messages are never unread.
-          if (m.roomId !== current.current.openRoom && m.userId !== me.id) {
-            const room = current.current.rooms.find((r) => r.id === m.roomId);
-            // Known room: counted now. A room not listed yet (just invited): the refetch brings its count.
-            if (room) updateRooms((list) => list.map((r) => (r.id === m.roomId ? { ...r, unread: r.unread + 1 } : r)));
-            settleRooms();
-          }
-        }
-        // A deleted message may have been unread (the server's count).
-        if (event.type === "chat:delete") {
-          const d = event.payload as ChatDeleted;
-          deletedChats.current = [...deletedChats.current, d].slice(-MAX_DELETED);
-          settleRooms();
-        }
         if (event.type === "presence:update" && event.userId) {
           const presence = event.payload as PresenceView;
           setFriends((list) => list.map((f) => (f.user.id === event.userId ? { ...f, presence } : f)));
@@ -271,11 +227,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     const socket: Socket = platform.connect(handlers);
     setSocket(socket);
     return () => {
-      clearTimeout(refetchRooms.current);
       socket.close();
       platform.connected?.(null);
     };
-  }, [reload, me.id, updateRooms, settleRooms]);
+  }, [reload, me.id]);
 
   // Every action refetches; the other side learns via `friend:update`.
   const act = (fn: () => Promise<unknown>) => async () => {
@@ -306,9 +261,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     await act(() => api.leaveRoom(id))();
   }
 
-  /** Opening a room reads its chat (the server marks it on `room:join`). */
   function enter(id: string) {
-    updateRooms((list) => list.map((r) => (r.id === id ? { ...r, unread: 0 } : r)));
     setOpenRoom(id);
   }
 
@@ -563,11 +516,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         {askLine && <div className="ask-wrap">{askLine}</div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
         <Room key={openRoom} roomId={openRoom} me={me} handle={handle} socket={socket} status={status} subscribe={subscribe}
-          onClose={closeRoom}
-          onMuted={(muted) => {
-            // A list read before the change would bring the old setting back: updateRooms drops it.
-            updateRooms((list) => list.map((r) => (r.id === openRoom ? { ...r, muted } : r)));
-          }} />
+          onClose={closeRoom} />
         {/* After the room: an invitation or watch request shows over its dialogs (same layer, later on top). */}
         {incoming}
         {endedNotice}
@@ -640,14 +589,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                     <div className="grow">
                       <div className="ellipsis">
                         <span className="name">{r.content?.title ?? "영상 없음"}</span>
-                        {r.unread > 0 && (
-                          <span className={`badge ${r.muted ? "quiet" : ""}`} title="읽지 않은 메시지">{r.unread > 99 ? "99+" : r.unread}</span>
-                        )}
                       </div>
                       <div className="muted">
                         {r.id === activeRoom ? "참여 중 · " : ""}
                         {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.filter((m) => m.present).length}명
-                        {r.muted && " · 알림 꺼짐"}
                       </div>
                     </div>
                     <button onClick={() => enter(r.id)}>입장</button>
@@ -843,8 +788,6 @@ export function applyRequestChanges(list: UserSummary[], changes: RequestChange[
   );
 }
 
-const ROOMS_REFETCH_MS = 500;
-const MAX_DELETED = 100;
 /** How long "요청이 거절되었습니다" shows. */
 const DECLINED_SHOWN_MS = 5_000;
 /** Without a video this long (a page between videos may load meanwhile): a watch request shown is dismissed. */

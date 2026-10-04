@@ -232,26 +232,17 @@ class RoomFlowTest extends IntegrationTest {
 	private com.mirattic.sync.ws.EmptyRooms emptyRooms;
 
 	@Test
-	void aMemberStillInTheRoomMarksWhatItSawAsRead() throws Exception {
+	void anOlderExtensionsReadMarkIsAcceptedAndDoesNothing() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
-		TestUser stranger = signup();
 		befriend(host, friend);
 		String roomId = body(createRoom(host, friend)).path("id").asString();
 		Client friendWs = connect(friend);
-		friendWs.send(event("room:join", roomId, "{}"));
-		friendWs.nextOfType("playback:update");
-		Client hostWs = connect(host);
-		hostWs.send(event("chat:message", roomId, "{\"text\":\"while the panel was closed\"}"));
-		friendWs.nextOfType("chat:message");
-		assertThat(roomService.mine(friend.id()).get(0).unread()).isEqualTo(1); // joined, but not seen
-
+		// Read marks are gone (decision 104); 1.1.1 still sends this: no error, no refetch.
 		friendWs.send(event("room:read", roomId, "{}"));
-		assertThat(friendWs.nextOfType("room:update")).isNotNull(); // my other apps refetch their counts
-		assertThat(roomService.mine(friend.id()).get(0).unread()).isZero();
-		Client strangerWs = connect(stranger);
-		strangerWs.send(event("room:read", roomId, "{}"));
-		assertThat(strangerWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("not_member");
+		assertThat(friendWs.nextOfType("error")).isNull();
+		assertThat(friendWs.nextOfType("room:update")).isNull();
+		assertThat(myRoom(friend).has("unread")).isFalse();
 	}
 
 	@Test
@@ -368,6 +359,7 @@ class RoomFlowTest extends IntegrationTest {
 		String roomId = body(createRoom(host, friend)).path("id").asString();
 		Client friendWs = connect(friend);
 		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
 		Client hostWs = connect(host);
 		hostWs.send(event("room:join", roomId, "{}"));
 		hostWs.nextOfType("playback:update");
@@ -441,12 +433,12 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
-	void messagesReachMembersOutsideTheRoomAndCountAsUnreadUntilSeen() throws Exception {
+	void messagesReachMembersOutsideTheRoom() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
 		befriend(host, friend);
 		String roomId = body(createRoom(host, friend)).path("id").asString();
-		Client friendWs = connect(friend); // online, but not in the room
+		Client friendWs = connect(friend); // online, but not in the room (e.g. rejoining after a reconnect)
 		Client hostWs = connect(host);
 		hostWs.send(event("room:join", roomId, "{}"));
 		hostWs.nextOfType("playback:update");
@@ -456,29 +448,6 @@ class RoomFlowTest extends IntegrationTest {
 		// Reactions are gone (decision 78).
 		hostWs.send(event("reaction:add", roomId, "{\"emoji\":\"🔥\"}"));
 		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("unknown_type");
-
-		// My own messages and the room's logs (the host's join) don't count.
-		assertThat(myRoom(friend).path("unread").asLong()).isEqualTo(1);
-		assertThat(myRoom(host).path("unread").asLong()).isZero();
-
-		friendWs.send(event("room:join", roomId, "{}"));
-		friendWs.nextOfType("playback:update");
-		hostWs.nextOfType("room:update"); // the join's announcement: the next one is the leave's
-		assertThat(myRoom(friend).path("unread").asLong()).isZero();
-		hostWs.send(event("chat:message", roomId, "{\"text\":\"seen live\"}"));
-		friendWs.nextOfType("chat:message");
-		friendWs.send(event("room:leave", roomId, "{}"));
-		assertThat(hostWs.nextOfType("room:update")).isNotNull(); // announced after the read mark
-		assertThat(myRoom(friend).path("unread").asLong()).isZero();
-
-		friendWs.send(event("room:join", roomId, "{}"));
-		friendWs.nextOfType("playback:update");
-		hostWs.nextOfType("room:update"); // the join's announcement: the next one is the leave's
-		hostWs.send(event("chat:message", roomId, "{\"text\":\"seen before closing\"}"));
-		friendWs.nextOfType("chat:message");
-		friendWs.session().close();
-		assertThat(hostWs.nextOfType("room:update")).isNotNull();
-		assertThat(myRoom(friend).path("unread").asLong()).isZero();
 	}
 
 	@Autowired
@@ -551,14 +520,13 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(left.path("kind").asString()).isEqualTo("leave");
 		assertThat(left.path("userId").asString()).isEqualTo(friend.id());
 
-		// Logs are in the history, can't be deleted or reported, and are never unread.
+		// Logs are in the history and can't be deleted or reported.
 		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
 		List<String> kinds = new ArrayList<>();
 		history.forEach(m -> kinds.add(m.path("kind").asString()));
 		assertThat(kinds).containsExactly("join", "join", "content", "leave");
 		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/messages/" + content.path("id").asString(), host.accessToken(), null)
 				.andExpect(status().isNotFound());
-		assertThat(myRoom(friend).path("unread").asLong()).isZero();
 	}
 
 	@Test
@@ -635,20 +603,7 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
-	void aMessageRightAfterAReadMarkIsUnreadEvenInTheSameMillisecond() throws Exception {
-		TestUser host = signup();
-		TestUser friend = signup();
-		befriend(host, friend);
-		String roomId = body(createRoom(host, friend)).path("id").asString();
-		for (int i = 0; i < 200; i++) {
-			roomService.read(friend.id(), roomId);
-			chatMessages.save(new ChatMessage(roomId, host.id(), "m" + i, null, null));
-			assertThat(roomService.mine(friend.id()).get(0).unread()).as("message %d", i).isEqualTo(1);
-		}
-	}
-
-	@Test
-	void membersMuteTheirOwnChatNotifications() throws Exception {
+	void anOlderExtensionsMuteIsAcceptedAndDoesNothing() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
 		TestUser stranger = signup();
@@ -656,18 +611,11 @@ class RoomFlowTest extends IntegrationTest {
 		String roomId = body(createRoom(host, friend)).path("id").asString();
 		String path = "/api/rooms/" + roomId + "/members/me/muted";
 		Client mine = connect(friend);
-		Client hostWs = connect(host);
 
+		// Muting is gone with unread counts (decision 104); 1.1.1 still sends it.
 		call(HttpMethod.PUT, path, friend.accessToken(), "{\"muted\":true}").andExpect(status().isNoContent());
-		// My connection refetches (and applies the new setting at once); nobody else is told.
-		JsonNode update = mine.nextOfType("room:update");
-		assertThat(update.path("roomId").asString()).isEqualTo(roomId);
-		assertThat(update.path("payload").path("muted").asBoolean()).isTrue(); // applied before any refetch
-		assertThat(hostWs.nextOfType("room:update")).isNull();
-		assertThat(myRoom(friend).path("muted").asBoolean()).isTrue();
-		assertThat(myRoom(host).path("muted").asBoolean()).isFalse();
-		call(HttpMethod.PUT, path, friend.accessToken(), "{\"muted\":false}").andExpect(status().isNoContent());
-		assertThat(myRoom(friend).path("muted").asBoolean()).isFalse();
+		assertThat(mine.nextOfType("room:update")).isNull();
+		assertThat(myRoom(friend).has("muted")).isFalse();
 		call(HttpMethod.PUT, path, friend.accessToken(), "{}").andExpect(status().isBadRequest());
 		call(HttpMethod.PUT, path, stranger.accessToken(), "{\"muted\":true}").andExpect(status().isNotFound());
 	}

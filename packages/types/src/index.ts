@@ -206,15 +206,12 @@ export type RoomRole = "HOST" | "MEMBER";
 /** `present` = has a live connection that joined the room (`room:join`). */
 export type RoomMemberView = { user: UserSummary; role: RoomRole; present: boolean };
 
-/** `unread` (others' messages since I last had the room open) and `muted` are mine: 0 / false in an invite. */
 export type RoomView = {
   id: string;
   /** null: no video yet (decision 92) — the host's first one becomes it. */
   content: RoomContent | null;
   members: RoomMemberView[];
   createdAt: number;
-  unread: number;
-  muted: boolean;
   /** Join code (decision 77); absent for rooms made before codes. */
   code?: string;
   /** An invitation's time left (invitation lists and `room:invite`, decision 87). */

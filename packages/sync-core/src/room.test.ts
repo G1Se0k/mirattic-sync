@@ -7,7 +7,7 @@ beforeEach(() => vi.useFakeTimers({ now: 1_000_000 }));
 afterEach(() => vi.useRealTimers());
 
 const room = (hostId: string): RoomView => ({
-  id: "r1", createdAt: 0, unread: 0, muted: false,
+  id: "r1", createdAt: 0,
   content: { provider: "mock", contentId: "c1", title: "Fake", durationMs: 600_000 },
   members: [
     { user: { id: "host", displayName: "Host" }, role: hostId === "host" ? "HOST" : "MEMBER", present: true },

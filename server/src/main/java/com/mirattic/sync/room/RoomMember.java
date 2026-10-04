@@ -27,9 +27,6 @@ public class RoomMember {
 	@Enumerated(EnumType.STRING)
 	private Role role;
 	private long joinedAt;
-	/** Others' messages with a higher `seq` count as unread. */
-	private long lastReadSeq;
-	private boolean muted;
 	/** The room type version they have seen (confirmed, or joined at; decision 93): a higher one is asked about. */
 	private long typeSeenVersion;
 
@@ -52,11 +49,7 @@ public class RoomMember {
 	public String getRoomId() { return roomId; }
 	public String getUserId() { return userId; }
 	public Role getRole() { return role; }
-	public long getLastReadSeq() { return lastReadSeq; }
-	public boolean isMuted() { return muted; }
 	public long getTypeSeenVersion() { return typeSeenVersion; }
 
-	void read(long seq) { lastReadSeq = Math.max(lastReadSeq, seq); }
-	void mute(boolean muted) { this.muted = muted; }
 	void role(Role role) { this.role = role; }
 }

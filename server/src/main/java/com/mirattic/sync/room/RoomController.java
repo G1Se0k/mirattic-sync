@@ -381,18 +381,17 @@ class RoomController {
 		rooms.deleteMessage(jwt.getSubject(), id, messageId);
 		ServerEvent event = new ServerEvent("chat:delete", id, jwt.getSubject(), null, System.currentTimeMillis(),
 				Map.of("id", messageId));
-		rooms.memberIds(id).forEach(member -> hub.sendEvent(member, event));
+		rooms.memberIds(id).forEach(member -> hub.sendEvent(member, event)); // like the messages
 	}
 
-	/** My chat notifications for this room. */
+	/**
+	 * Muting is gone with unread counts (decision 104): kept for extensions before it (1.1.1), which still send it.
+	 * ponytail: remove once those versions are gone from the store.
+	 */
 	@PutMapping("/{id}/members/me/muted")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void mute(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody Mute body) {
-		rooms.mute(jwt.getSubject(), id, body.muted());
-		// After the commit, to my own connections only. The new value rides along, so they apply
-		// it before their refetch returns and no message notifies by the old setting meanwhile.
-		hub.sendEvent(jwt.getSubject(), new ServerEvent("room:update", id, null, null, System.currentTimeMillis(),
-				Map.of("muted", body.muted())));
+		rooms.requireMembership(jwt.getSubject(), id);
 	}
 
 	/**
