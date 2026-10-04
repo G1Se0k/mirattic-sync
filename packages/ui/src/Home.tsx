@@ -126,8 +126,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   current.current = { rooms, openRoom, asked };
   // Room lists answer in any order: only the latest one started is applied.
   const roomsLoad = useRef(latest()).current;
+  const roomsSoon = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  /** The server's list (its unread counts include messages of rooms not listed here yet). */
+  /** The server's list. */
   const applyRooms = useCallback((rs: RoomView[]) => {
     current.current.rooms = rs;
     setRooms(rs);
@@ -143,17 +144,19 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     setError(null);
   }, []);
 
-  const reload = useCallback(async () => {
+  /** Everything the screen lists; `roomsOnly`: just the rooms and invitations (what `room:update` / `room:invite` change). */
+  const reload = useCallback(async (roomsOnly = false) => {
     try {
       const fresh = roomsLoad.begin();
       const invites = ++invitationLoads.current;
-      const asks = ++requestLoads.current;
+      const asks = roomsOnly ? 0 : ++requestLoads.current; // a rooms-only load leaves a full one's requests be
       const since = requestSeq.current;
       // Timed lists keep when they arrived: their time left counts from then, not from the slowest request.
       const arrived = <T,>(p: Promise<T>) => p.then((v) => [v, Date.now()] as const);
-      const [f, r, b, rs, [inv, invAt], [wr, wrAt]] = await Promise.all([
-        api.friends(), api.friendRequests(), api.blocked(), api.rooms(), arrived(api.invitations()),
-        arrived(api.incomingWatchRequests().catch(() => null)), // a server without it yet: the live events only
+      const [rs, [inv, invAt], rest] = await Promise.all([
+        api.rooms(), arrived(api.invitations()),
+        roomsOnly ? null : Promise.all([api.friends(), api.friendRequests(), api.blocked(),
+          arrived(api.incomingWatchRequests().catch(() => null))]), // a server without it yet: the live events only
       ]);
       // Only the newest load, and not one started before I answered an invitation: it would bring it back.
       if (invites === invitationLoads.current) {
@@ -162,6 +165,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           ? invAt + room.expiresInMs : platform.alertUntil?.("invite", room.id) ?? invAt + INCOMING_MS));
         setInvitations(inv);
       }
+      if (fresh()) applyRooms(rs);
+      if (!rest) return;
+      const [f, r, b, [wr, wrAt]] = rest;
       // Likewise the newest for watch requests, with what came, was cancelled, answered or dismissed meanwhile.
       if (wr && asks === requestLoads.current) {
         // A request that came, went or was answered meanwhile keeps the deadline its event set.
@@ -174,7 +180,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       setFriends(f);
       setRequests(r);
       setBlocked(b);
-      if (fresh()) applyRooms(rs);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) onSignedOut();
     }
@@ -190,8 +195,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       },
       onEvent: (event: ServerEvent) => {
         listeners.current.forEach((l) => l(event));
-        if (event.type === "friend:update" || event.type === "room:invite" || event.type === "room:update") {
-          void reload();
+        const scope = refetchFor(event.type);
+        if (scope === "all") void reload();
+        else if (scope === "rooms") {
+          // A burst (a hand-over, members coming and going): one look.
+          clearTimeout(roomsSoon.current);
+          roomsSoon.current = setTimeout(() => void reload(true), ROOMS_REFETCH_MS);
         }
         if (event.type === "watch:request") {
           const from = event.payload as IncomingRequest;
@@ -227,6 +236,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     const socket: Socket = platform.connect(handlers);
     setSocket(socket);
     return () => {
+      clearTimeout(roomsSoon.current);
       socket.close();
       platform.connected?.(null);
     };
@@ -516,7 +526,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         {askLine && <div className="ask-wrap">{askLine}</div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
         <Room key={openRoom} roomId={openRoom} me={me} handle={handle} socket={socket} status={status} subscribe={subscribe}
-          onClose={closeRoom} />
+          onClose={closeRoom} onInvited={() => void reload()} />
         {/* After the room: an invitation or watch request shows over its dialogs (same layer, later on top). */}
         {incoming}
         {endedNotice}
@@ -781,6 +791,17 @@ export type RequestChange = { n: number; user: UserSummary; open: boolean };
 const MAX_REQUEST_CHANGES = 100;
 
 /** The watch requests after these changes, in order: an open one goes last (newest), a closed one goes. */
+/**
+ * What a socket event makes the screen read again: rooms and invitations for a room change (`room:update`,
+ * `room:invite`); everything for `friend:update` (friends, requests, blocks — a block or an account deletion also
+ * sends it). Watch requests come with their own events.
+ */
+export function refetchFor(type: string): "all" | "rooms" | null {
+  if (type === "friend:update") return "all";
+  if (type === "room:update" || type === "room:invite") return "rooms";
+  return null;
+}
+
 export function applyRequestChanges(list: UserSummary[], changes: RequestChange[]): UserSummary[] {
   return changes.reduce(
     (acc, c) => [...acc.filter((u) => u.id !== c.user.id), ...(c.open ? [c.user] : [])],
@@ -790,6 +811,8 @@ export function applyRequestChanges(list: UserSummary[], changes: RequestChange[
 
 /** How long "요청이 거절되었습니다" shows. */
 const DECLINED_SHOWN_MS = 5_000;
+/** Room changes within this are read once. */
+const ROOMS_REFETCH_MS = 300;
 /** Without a video this long (a page between videos may load meanwhile): a watch request shown is dismissed. */
 const VIDEO_FREE_CONFIRM_MS = 3_000;
 

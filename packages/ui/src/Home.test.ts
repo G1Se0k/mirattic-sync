@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import type { RoomContent, RoomView } from "@mirattic/types";
 import { roomToInvite } from "@mirattic/types";
-import { applyRequestChanges, describe as lines } from "./Home";
+import { applyRequestChanges, describe as lines, refetchFor } from "./Home";
 import { latest } from "./format";
 
 const content = (provider: RoomContent["provider"], contentId: string): RoomContent => ({ provider, contentId, title: contentId });
@@ -68,4 +68,11 @@ it("keeps a listed watch request when another comes live while the list loads, a
   const after = applyRequestChanges(fetched, [{ n: 1, user: b, open: true }, { n: 2, user: { id: "c", displayName: "" }, open: false }]);
   expect(after.map((u) => u.id)).toEqual(["a", "b"]);
   expect(applyRequestChanges([a], [{ n: 3, user: a, open: true }])).toEqual([a]); // no duplicate
+});
+
+it("reads only the rooms and invitations again for a room change, everything for a friend change", () => {
+  expect(refetchFor("room:update")).toBe("rooms");
+  expect(refetchFor("room:invite")).toBe("rooms");
+  expect(refetchFor("friend:update")).toBe("all");
+  for (const type of ["chat:message", "watch:request", "presence:update"]) expect(refetchFor(type)).toBeNull();
 });

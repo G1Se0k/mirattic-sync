@@ -23,13 +23,15 @@ type Props = {
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
   /** Back to the list; the extension stays in the room. */
   onClose: () => void;
+  /** A friend was invited: it may answer their watch request to me, which the server tells only them (`watch:answer`). */
+  onInvited: () => void;
 };
 
 /**
  * Room screen: a view of the room's live side (`RoomHandle`). The host's player drives everyone else's; players
  * are the user's own provider pages, driven by the extension.
  */
-export function Room({ roomId, me, handle, socket, status, subscribe, onClose }: Props) {
+export function Room({ roomId, me, handle, socket, status, subscribe, onClose, onInvited }: Props) {
   const s = useSyncExternalStore(handle.subscribe, handle.state);
   const [reporting, setReporting] = useState<{ id: string; name: string } | null>(null);
   const [askingPause, setAskingPause] = useState(false);
@@ -224,7 +226,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose }:
         && <Switched content={s.switched} handle={handle} />}
       {inviting && (
         <Invite roomId={roomId} code={room.code} isHost={isHost} memberIds={room.members.map((m) => m.user.id)}
-          onClose={() => setInviting(false)} />
+          onClose={() => setInviting(false)} onInvited={onInvited} />
       )}
       {askingPause && <RequestPause handle={handle} onClose={() => setAskingPause(false)} />}
       {s.pauseRequest && isHost && <PauseRequest request={s.pauseRequest} handle={handle} />}
@@ -247,12 +249,13 @@ function PauseRequest({ request, handle }: { request: NonNullable<RoomSyncState[
 }
 
 /** Friends to invite (host only, as on the server), then the room's code for anyone. */
-function Invite({ roomId, code, isHost, memberIds, onClose }: {
+function Invite({ roomId, code, isHost, memberIds, onClose, onInvited }: {
   roomId: string;
   code?: string;
   isHost: boolean;
   memberIds: string[];
   onClose: () => void;
+  onInvited: () => void;
 }) {
   const [friends, setFriends] = useState<FriendView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -275,6 +278,7 @@ function Invite({ roomId, code, isHost, memberIds, onClose }: {
     tick((n) => n + 1);
     try {
       await api.inviteToRoom(roomId, [userId]);
+      onInvited();
     } catch (e) {
       invitedAt.delete(`${roomId}|${userId}`);
       setError(e instanceof ApiError && e.status === 409 ? "방이 가득 찼습니다." : "초대하지 못했습니다.");
