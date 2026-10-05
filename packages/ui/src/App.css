@@ -245,6 +245,7 @@ textarea { resize: vertical; }
 
 /* Settings: groups of rows, each row its text left and its control right. */
 .settings { display: flex; flex-direction: column; gap: 14px; }
+html:has(main.settings) { scrollbar-width: none; } /* the page still scrolls (wheel, keys), with no bar */
 .settings .profile { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin: 0; }
 .settings .profile .avatar { width: 40px; height: 40px; font-size: calc(15px * var(--text-scale)); }
 .group { display: flex; flex-direction: column; gap: 6px; }
