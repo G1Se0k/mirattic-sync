@@ -46,6 +46,12 @@ public class Room {
 	private long createdAt;
 	/** Joining by code (decision 77). */
 	private String code;
+	/** The host's name for it (decision 109); null: the video's title shows. */
+	private String name;
+	/** Members it takes, the host included (decision 109): 2 to `RoomService.MAX_MEMBERS`. */
+	private int memberLimit = RoomService.MAX_MEMBERS;
+	/** Shown in the public list, where anyone may join (decision 110). */
+	private boolean isPublic;
 	/** Kicked by the host (decision 79): not back by the code; the host's invite lifts it. */
 	@ElementCollection
 	@CollectionTable(name = "room_bans", joinColumns = @JoinColumn(name = "room_id"))
@@ -84,6 +90,16 @@ public class Room {
 	public String getId() { return id; }
 	public long getCreatedAt() { return createdAt; }
 	public String getCode() { return code; }
+	String getName() { return name; }
+	int getMemberLimit() { return memberLimit; }
+	boolean isPublic() { return isPublic; }
+
+	/** The host's settings (decision 109–110), already checked. */
+	void configure(String name, int memberLimit, boolean isPublic) {
+		this.name = name;
+		this.memberLimit = memberLimit;
+		this.isPublic = isPublic;
+	}
 
 	void newCode() { this.code = FriendCode.generate(); }
 

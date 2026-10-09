@@ -58,7 +58,7 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 
 | Method | Path | 설명 |
 |---|---|---|
-| POST | `/api/rooms` | `{ content?: RoomContent \| null, inviteIds: string[] }` → `RoomView`. `content` 없음/null = 영상 없는 방(결정 92), 방장의 첫 `playback:content-change`가 방 영상이 됨. 만든 사람이 HOST. 참가 중인 사람이 1–2분 동안 없으면 서버가 닫음(결정 75). 초대는 수락된 친구만(아니면 400), 최대 7명. 초대받은 친구는 초대장만 받고 입장해야 멤버(결정 85). `youtube` 콘텐츠는 `contentId`가 11자 영상 ID, `netflix`는 1–12자리 숫자, `laftel`은 `작품ID/에피소드ID`(각 1–10자리 숫자)(아니면 400). 초대받은 사람에게 `room:invite` |
+| POST | `/api/rooms` | `{ content?: RoomContent \| null, inviteIds: string[], name?, memberLimit?, isPublic? }` → `RoomView`(`name`, `memberLimit`, `isPublic` 포함). 설정이 빠지면 이름 없음 · 8명 · 비공개(결정 109~110). `content` 없음/null = 영상 없는 방(결정 92), 방장의 첫 `playback:content-change`가 방 영상이 됨. 만든 사람이 HOST. 참가 중인 사람이 1–2분 동안 없으면 서버가 닫음(결정 75). 초대는 수락된 친구만(아니면 400), 최대 7명. 초대받은 친구는 초대장만 받고 입장해야 멤버(결정 85). `youtube` 콘텐츠는 `contentId`가 11자 영상 ID, `netflix`는 1–12자리 숫자, `laftel`은 `작품ID/에피소드ID`(각 1–10자리 숫자)(아니면 400). 초대받은 사람에게 `room:invite` |
 | POST | `/api/rooms/{id}/invites` | `{ userIds }` → `RoomView`. HOST만(403), 친구만(400), 한 번에 7명까지(한도 - 1), 방이 가득 차면 409(`room full`, 결정 106). 이미 멤버면 무시. 새로 초대된 사람은 **초대장**을 받음(`room:invite`, 멤버 아님 — 결정 85, 입장하면 멤버). 내 합류 요청에 대한 응답이면 바로 멤버 + `watch:answer`. 기존 멤버에게 `room:update` |
 | GET | `/api/rooms/invitations` | → `RoomView[]`. 나를 초대한 방들(최신순). 수락·거절 전까지, 초대 후 30초 동안만(결정 87, 다시 초대하면 새로 30초). 각각 `expiresInMs`(남은 시간). 30초가 지난 초대의 수락은 404 |
 | POST | `/api/rooms/{id}/invitation` | → `RoomView`. 초대 수락 → 멤버가 됨, 기존 멤버에게 `room:update`. 초대가 없으면(취소·방 닫힘·차단) 404, 방이 가득 차면 409(초대는 남음) |
@@ -71,6 +71,9 @@ Mirattic Auth가 로그인을 전부 맡는다 (결정 82, Auth 저장소 `docs/
 | DELETE | `/api/rooms/requests/incoming/{friendId}` | → 204. 받은 합류 요청 무시: 다시 나오지 않고 이후의 초대는 그 응답으로 치지 않음. 요청한 사람에게 `watch:decline`(열린 요청이 있을 때 한 번) |
 | POST | `/api/rooms/join` | `{ code }` → `RoomView`. 방 코드(대소문자·`-` 무시)를 아는 누구나 MEMBER로 입장, 이미 멤버면 그대로(결정 77). 없는 코드·기존 멤버와 차단 관계 404, 8명 가득 409, 사용자당 분당 10번 초과 429. 새로 들어오면 기존 멤버에게 `room:update` |
 | GET | `/api/rooms` | 내가 멤버인 방 `RoomView[]` (초대받은 방 포함) |
+| PUT | `/api/rooms/{id}/settings` | 호스트만 (아니면 404). `{ name, memberLimit, isPublic }` → 204, 멤버에게 `room:update`. 이름은 한 줄로 다듬어 20자 이하(빈 값 = 없음), 인원 2~8(아니면 400), 지금 인원보다 적으면 409 `limit below members` (결정 109~110) |
+| GET | `/api/rooms/public?q=&before=` | 공개 방 목록(결정 110) `{ rooms: PublicRoom[], next? }`. `PublicRoom { id, name?, provider?, title?, hostName, members, memberLimit }`(코드 · 멤버 목록 없음). 지금 누군가 들어와 있는 공개 방만, 최신순 50개씩(`next`는 `"createdAt:id"` 문자열, 다음 요청의 `before`; 걸러진 방을 건너뛰며 50개를 채우되 한 번에 최대 500개까지 봄), `q`는 방 제목 · 영상 제목(대소문자 무시, 100자 넘으면 400). 내가 내보내진 방, 나와 차단 관계인 멤버가 있는 방은 빠짐 |
+| POST | `/api/rooms/{id}/join` | 공개 방 참가(결정 110) → `RoomView`, 멤버에게 `room:update`. 공개가 아니거나 차단 · 내보냄이면 404, 가득 차면 409 |
 | GET | `/api/rooms/{id}` | `RoomView` `{ id, content(영상 없는 방은 null), members: [{ user, role, present }], createdAt, code, memberLimit }` (`code` = 방 코드 8자, 결정 77) |
 | GET | `/api/rooms/{id}/messages?before=` | 채팅 100개 `ChatMessage[]`(방 기록 `kind` 줄 포함, 결정 78), 오래된 순: 최근 것, 또는 메시지 ID `before`보다 앞 (`createdAt`, `id` 순). 멤버가 아니거나 `before`가 이 방 메시지가 아니면 404 |
 | DELETE | `/api/rooms/{id}/members/{userId}` | 204. 호스트만(403), 자기 자신 400, 멤버 아님 404. 내보내기(결정 79): 멤버십 삭제, 그 사람의 연결을 방에서 뺌, 방 코드 재입장 금지(호스트 초대로 풀림). `chat:log` `kick`, 기존 멤버 전원(내보낸 사람 포함)에게 `room:update` |

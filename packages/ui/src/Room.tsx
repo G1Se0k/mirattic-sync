@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { contentKey, MEDIA_PROVIDERS, memberLimitOf, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type RoomMemberView, type ServerEvent } from "@mirattic/types";
+import { contentKey, MEDIA_PROVIDERS, memberLimitOf, roomTitle, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type RoomMemberView, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, showsRoomVideo, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
@@ -9,6 +9,7 @@ import { ReportDialog } from "./Report";
 import { ExperimentControl, isExperiment, useExperiment, type Experiment } from "./Experimental";
 import { Avatar, IconButton, PanelWindowButton, ProviderIcon, Icon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
+import { RoomSettingsDialog } from "./RoomSettings";
 
 /** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
 const invitedAt = new Map<string, number>();
@@ -39,6 +40,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   const [reporting, setReporting] = useState<{ id: string; name: string } | null>(null);
   const [askingPause, setAskingPause] = useState(false);
   const [inviting, setInviting] = useState(false);
+  const [configuring, setConfiguring] = useState(false);
   const asker = useAsk();
   const room = s.room;
   // Which members are friends, or asked by me: the member box offers 친구 추가 to the others (none until loaded).
@@ -181,8 +183,9 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     <main className="room">
       <header className="topbar">
         <IconButton icon="back" label="목록으로" onClick={back} />
-        <h1 title={content?.title}>{content?.title ?? "새 방"}</h1>
+        <h1 title={roomTitle(room)}>{roomTitle(room) ?? "새 방"}</h1>
         <PanelWindowButton />
+        {isHost && <IconButton icon="settings" label="방 설정" onClick={() => setConfiguring(true)} />}
         {full
           ? <IconButton icon="userPlus" label={`방이 가득 찼습니다 (최대 ${limit}명)`} disabled onClick={() => {}} />
           : <IconButton icon="userPlus" label="방에 초대하기" onClick={() => setInviting(true)} />}
@@ -225,6 +228,12 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       )}
       {s.switched && s.switched.provider === content?.provider && s.switched.contentId === content.contentId
         && <Switched content={s.switched} handle={handle} />}
+      {isHost && configuring && (
+        <RoomSettingsDialog title="방 설정" ok="저장" placeholder={content?.title ?? "비우면 영상 제목이 보입니다"}
+          initial={{ name: room.name ?? "", memberLimit: limit, isPublic: !!room.isPublic }} min={room.members.length}
+          onSave={async (settings) => { await api.configureRoom(roomId, settings); setConfiguring(false); }}
+          onClose={() => setConfiguring(false)} />
+      )}
       {inviting && (
         <Invite roomId={roomId} code={room.code} isHost={isHost} memberIds={room.members.map((m) => m.user.id)}
           onClose={() => setInviting(false)} onInvited={onInvited} />

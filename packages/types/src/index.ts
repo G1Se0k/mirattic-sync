@@ -225,9 +225,36 @@ export type RoomView = {
   /** Rises with each type change; `typeSeen` is mine — while lower, a member (not the host) is asked about it. */
   typeVersion?: number;
   typeSeen?: number;
-  /** Members the room takes, the host included (decision 106); absent from an older server (8 then). */
+  /** Members the room takes, the host included (decisions 106, 109); absent from an older server (8 then). */
   memberLimit?: number;
+  /** The host's name for it (decision 109); none: the video's title shows. */
+  name?: string | null;
+  /** In the public list, where anyone may join (decision 110). */
+  isPublic?: boolean;
 };
+
+/** What the host sets for a room (decisions 109–110): a name (blank: none), 2–8 members, public or not. */
+export type RoomSettings = { name: string; memberLimit: number; isPublic: boolean };
+export const MIN_MEMBERS = 2;
+export const MAX_MEMBERS = 8;
+export const MAX_ROOM_NAME = 20;
+
+/** A room's title: the host's name for it, else its video's. */
+export const roomTitle = (room: { name?: string | null; content?: { title?: string } | null }) =>
+  room.name || room.content?.title;
+
+/** A public room as the list shows it (decision 110). */
+export type PublicRoom = {
+  id: string;
+  name?: string | null;
+  provider?: MediaProvider | null;
+  title?: string | null;
+  hostName: string;
+  members: number;
+  memberLimit: number;
+};
+/** A page of the public list; `next`: pass as `before` for the next page, absent at the end. */
+export type PublicRooms = { rooms: PublicRoom[]; next?: string | null };
 
 /** A friend's watch request to me (`watch:request`, incoming list), with its time left (decision 87). */
 export type IncomingRequest = UserSummary & { expiresInMs?: number };

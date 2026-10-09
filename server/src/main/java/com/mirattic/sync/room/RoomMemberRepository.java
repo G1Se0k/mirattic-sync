@@ -1,5 +1,6 @@
 package com.mirattic.sync.room;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,6 +11,8 @@ import org.springframework.data.repository.query.Param;
 interface RoomMemberRepository extends JpaRepository<RoomMember, RoomMember.Key> {
 
 	List<RoomMember> findByRoomId(String roomId);
+
+	List<RoomMember> findByRoomIdIn(Collection<String> roomIds);
 
 	List<RoomMember> findByUserId(String userId);
 

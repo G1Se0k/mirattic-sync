@@ -9,12 +9,13 @@ import type {
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
-import { contentKey, episodeLabel, INCOMING_MS, memberLimitOf, roomToInvite, type IncomingRequest, type WatchingInfo } from "@mirattic/types";
+import { contentKey, episodeLabel, INCOMING_MS, MAX_MEMBERS, memberLimitOf, roomTitle, roomToInvite, type IncomingRequest, type RoomSettings, type WatchingInfo } from "@mirattic/types";
 import { api, platform } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
 import { MyFriendCode, Settings } from "./Settings";
 import { usePrivacySave } from "./Privacy";
+import { PublicRoomsDialog, RoomSettingsDialog } from "./RoomSettings";
 import { latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
@@ -40,6 +41,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const [showCode, setShowCode] = useState(false);
   const asker = useAsk();
   const [joining, setJoining] = useState(false);
+  /** The 방 만들기 dialog, with the video it was opened for (decisions 109–110); null: closed. */
+  const [newRoom, setNewRoom] = useState<{ content: typeof watching } | null>(null);
+  const [browsing, setBrowsing] = useState(false);
   /** A site opened by "방 생성" with nothing watched: the room is made once a video of it plays. */
   const [status, setStatus] = useState<SocketStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -306,27 +310,27 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     }
   }
 
-  /** "방 생성": at once, with what I watch now or no video yet (decision 92: whatever I open next becomes it). */
+  /** "방 생성": the 방 만들기 dialog first (decision 109), for what I watch now or no video yet (decision 92). */
   // My rooms on what I watch: the one I'm in first (two rooms may show the same video).
   const onThisVideo = watching
     ? rooms.filter((r) => r.content && contentKey(r.content) === contentKey(watching) && r.members.some((m) => m.user.id === me.id))
     : [];
   const watchingRoom = onThisVideo.find((r) => r.id === activeRoom) ?? onThisVideo[0];
 
-  async function createRoom() {
-    if (creating.current) return;
+  function createRoom() {
     setError(null);
-    await makeRoom(watching);
+    setNewRoom({ content: watching });
   }
-  /** One creation at a time; its answer opens the room only if I haven't entered another meanwhile. */
+  /** One creation at a time; its answer opens the room only if I haven't entered another meanwhile. A failure stays in
+   * the dialog (rejected). */
   const creating = useRef(false);
-  async function makeRoom(content: typeof watching) {
+  async function makeRoom(content: typeof watching, settings: RoomSettings) {
+    if (creating.current) return;
     creating.current = true;
     try {
-      const room = await api.createRoom(content, []);
+      const room = await api.createRoom(content, [], settings);
+      setNewRoom(null);
       if (!current.current.openRoom) setOpenRoom(room.id);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "방을 만들지 못했습니다.");
     } finally {
       creating.current = false;
     }
@@ -506,7 +510,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   const incoming = invited ? (
     <Dialog alert title={`${invitingHost?.displayName ?? "친구"}님이 같이 보기에 초대했습니다`} onClose={() => void answerInvitation(invited, false)}>
-      <p>{invited.content?.title ?? "아직 고른 영상이 없습니다"}</p>
+      <p>{roomTitle(invited) ?? "아직 고른 영상이 없습니다"}</p>
       <Actions>
         <button className="link" onClick={() => void answerInvitation(invited, false)}>거절</button>
         <button onClick={() => void answerInvitation(invited, true)}>입장</button>
@@ -599,7 +603,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               {/* Only once the rooms are in: before that a room of mine on it would look missing. */}
               {!roomsLoaded ? null : watchingRoom
                 ? <IconButton icon="login" tone="primary" label="이 영상의 방으로 돌아가기" onClick={() => enter(watchingRoom.id)} />
-                : <IconButton icon="plus" tone="primary" label="이 영상으로 방 만들기" onClick={() => void createRoom()} />}
+                : <IconButton icon="plus" tone="primary" label="이 영상으로 방 만들기" onClick={createRoom} />}
             </div>
           ) : (
             <div className="muted">YouTube · Netflix · Laftel 영상을 열면 친구와 같이 볼 수 있습니다.</div>
@@ -609,14 +613,15 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <section className="group">
           <div className="group-head">
             <h2>방 {rooms.length > 0 && <span className="count">{rooms.length}</span>}</h2>
-            <IconButton icon="plus" label="방 생성" onClick={() => void createRoom()} />
+            <IconButton icon="globe" label="공개 방 둘러보기" onClick={() => setBrowsing(true)} />
+            <IconButton icon="plus" label="방 생성" onClick={createRoom} />
             <IconButton icon="hash" label="코드로 입장" onClick={() => setJoining(true)} />
           </div>
           {rooms.length === 0 ? roomsLoaded && (
             <div className="box empty">
               <p className="muted">아직 방이 없습니다. 영상을 열고 방을 만들거나, 받은 코드로 들어가세요.</p>
               <span className="row">
-                <button className="small" onClick={() => void createRoom()}>방 만들기</button>
+                <button className="small" onClick={createRoom}>방 만들기</button>
                 <button className="secondary small" onClick={() => setJoining(true)}>코드로 입장</button>
               </span>
             </div>
@@ -630,9 +635,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                   <li key={r.id} className={`item${here ? " active" : ""}`} aria-current={here ? "true" : undefined}>
                     {r.content ? <ProviderIcon provider={r.content.provider} /> : <span className="provider none" title="영상 없음">·</span>}
                     <div className="grow">
-                      <div className="name ellipsis">{r.content?.title ?? "영상 없음"}</div>
+                      <div className="name ellipsis">{roomTitle(r) ?? "영상 없음"}</div>
                       <div className="muted">
-                        {mine ? "내가 만든 방" : `${host?.user.displayName}님의 초대`} · {r.members.length}/{memberLimitOf(r)}명
+                        {mine ? "내가 만든 방" : `${host?.user.displayName}님의 방`} · {r.isPublic ? "공개" : "비공개"} · {r.members.length}/{memberLimitOf(r)}명
                       </div>
                     </div>
                     <IconButton icon="login" tone="primary" label="입장" onClick={() => enter(r.id)} />
@@ -643,6 +648,15 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             </ul>
           )}
         </section>
+        {newRoom && (
+          <RoomSettingsDialog title="방 만들기" ok="만들기" initial={{ name: "", memberLimit: MAX_MEMBERS, isPublic: false }}
+            placeholder={newRoom.content?.title ?? "비우면 영상 제목이 보입니다"} onSave={(s) => makeRoom(newRoom.content, s)}
+            onClose={() => setNewRoom(null)} />
+        )}
+        {browsing && (
+          <PublicRoomsDialog inRoom={(id) => rooms.some((r) => r.id === id)}
+            onJoined={(id) => { setBrowsing(false); void reload(); enter(id); }} onClose={() => setBrowsing(false)} />
+        )}
         {joining && <JoinByCode onJoined={(id) => { setJoining(false); void reload(); enter(id); }} onClose={() => setJoining(false)} />}
 
         <section className="group">

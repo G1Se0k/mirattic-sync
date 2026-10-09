@@ -245,6 +245,16 @@ dialog h2 { margin-top: 0; font-size: calc(14px * var(--text-scale)); color: var
 dialog .row { justify-content: flex-end; }
 dialog .actions { margin-top: 4px; }
 dialog .row.check { justify-content: flex-start; }
+/* Room settings (decisions 109–110): a field's label above it, a radio's text beside it with its note below. */
+.room-settings .field { gap: 6px; }
+.room-settings .row.field { justify-content: flex-start; align-items: center; }
+.room-settings .field .muted, .room-settings .option .muted { display: block; font-size: calc(12px * var(--text-scale)); }
+.room-settings .option { display: flex; align-items: flex-start; gap: 8px; }
+.room-settings .option input { margin: 3px 0 0; }
+/* The public rooms: the list scrolls on its own, the search and actions stay put. */
+.public-rooms { max-height: min(50vh, 360px); overflow-y: auto; }
+.public-rooms > .link { display: block; margin: 8px auto 0; }
+dialog h2 .row { justify-content: flex-start; }
 .toast { position: fixed; left: 12px; right: 12px; top: 56px; z-index: 11; }
 textarea { resize: vertical; }
 

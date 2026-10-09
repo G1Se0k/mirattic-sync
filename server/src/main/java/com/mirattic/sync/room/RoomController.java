@@ -39,7 +39,12 @@ import org.springframework.web.server.ResponseStatusException;
 class RoomController {
 
 	/** `content` null: no video yet (decision 92). */
-	record CreateRoom(@Valid RoomContent content, @NotNull @Size(max = 32) List<String> inviteIds) {
+	/** `name` / `memberLimit` / `isPublic` left out (clients before room settings): none, 8, not public (decisions 109–110). */
+	record CreateRoom(@Valid RoomContent content, @NotNull @Size(max = 32) List<String> inviteIds,
+			@Size(max = 200) String name, Integer memberLimit, Boolean isPublic) {
+	}
+
+	record Configure(@Size(max = 200) String name, @NotNull Integer memberLimit, @NotNull Boolean isPublic) {
 	}
 
 	record Invite(@NotNull @Size(min = 1, max = 32) List<String> userIds) {
@@ -106,7 +111,8 @@ class RoomController {
 			Map<String, Long> answering = answering(me, body.inviteIds());
 			RoomService.RoomView room;
 			try {
-				room = rooms.create(me, body.content(), body.inviteIds(), answering.keySet());
+				room = rooms.create(me, body.content(), body.inviteIds(), answering.keySet(),
+						RoomService.settings(body.name(), body.memberLimit(), body.isPublic()));
 			} catch (RuntimeException e) {
 				unclaim(me, answering);
 				throw e;
@@ -199,6 +205,35 @@ class RoomController {
 			rooms.announce(joined.room().id(), joined.before());
 		}
 		return joined.room();
+	}
+
+	/** The public list (decision 110): by name or video title, a page of up to 50 before `before` (the last `next`). */
+	@GetMapping("/public")
+	RoomService.PublicRooms publicRooms(@AuthenticationPrincipal Jwt jwt,
+			@RequestParam(required = false) String q, @RequestParam(required = false) String before) {
+		if (q != null && q.length() > 100) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "query too long");
+		}
+		return rooms.publicRooms(jwt.getSubject(), q, before);
+	}
+
+	/** Joins a public room from the list; its members get `room:update`. 404 once it isn't public, 409 full. */
+	@PostMapping("/{id}/join")
+	RoomService.RoomView joinPublic(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
+		String me = jwt.getSubject();
+		RoomService.Invited joined = rooms.joinPublic(me, id);
+		if (!joined.before().contains(me)) {
+			rooms.announce(id, joined.before());
+		}
+		return joined.room();
+	}
+
+	/** The host changes the room's name, member limit and public setting; the members get `room:update`. */
+	@PutMapping("/{id}/settings")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	void configure(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody Configure body) {
+		rooms.announce(id, rooms.configure(jwt.getSubject(), id,
+				RoomService.settings(body.name(), body.memberLimit(), body.isPublic())));
 	}
 
 	@PostMapping("/requests")

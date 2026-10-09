@@ -71,6 +71,12 @@ const PATHS = {
     </>
   ),
   flag: <path d="M4 22V4s1.5-1 4-1 5 2 8 2 4-1 4-1v11s-1.5 1-4 1-5-2-8-2-4 1-4 1" />,
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </>
+  ),
   userMinus: (
     <>
       <circle cx="9" cy="8" r="4" />

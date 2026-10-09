@@ -1023,7 +1023,7 @@ class RoomFlowTest extends IntegrationTest {
 			// A room creation that has checked the friendship and added the friend, but not committed yet.
 			Future<String> room = pool.submit(() -> new TransactionTemplate(transactions).execute(tx -> {
 				String id = roomService.create(host.id(), new RoomContent(MediaProvider.youtube, "dQw4w9WgXcQ", "Fake", null, null, null, null),
-						List.of(friend.id()), List.of(friend.id())).id(); // joining at once (a watch request answered)
+						List.of(friend.id()), List.of(friend.id()), RoomService.settings(null, null, null)).id(); // joining at once (a watch request answered)
 				created.countDown();
 				try {
 					commit.await();

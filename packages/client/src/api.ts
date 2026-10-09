@@ -8,6 +8,8 @@ import type {
   RoomContent,
   ReportReason,
   ReportTarget,
+  PublicRooms,
+  RoomSettings,
   RoomView,
   UserSummary,
   IncomingRequest,
@@ -208,8 +210,14 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** A member confirmed the room's type change up to `version`: not asked again. */
     seeRoomType: (id: string, version: number) => authed<void>("POST", `/api/rooms/${id}/type/seen`, { version }),
     /** Creates a room you host (`content` null: no video yet); invitees must be friends and get `room:invite`. */
-    createRoom: (content: RoomContent | null, inviteIds: string[]) =>
-      authed<RoomView>("POST", "/api/rooms", { content, inviteIds }),
+    createRoom: (content: RoomContent | null, inviteIds: string[], settings?: RoomSettings) =>
+      authed<RoomView>("POST", "/api/rooms", { content, inviteIds, ...settings }),
+    /** Host only (decisions 109–110); 409 for a limit below the members in. */
+    configureRoom: (id: string, settings: RoomSettings) => authed<void>("PUT", `/api/rooms/${id}/settings`, settings),
+    /** The public list (decision 110): by name or video title, a page before `before` (the last `next`). */
+    publicRooms: (q: string, before?: string) =>
+      authed<PublicRooms>("GET", `/api/rooms/public?q=${encodeURIComponent(q)}${before ? `&before=${encodeURIComponent(before)}` : ""}`),
+    joinPublicRoom: (id: string) => authed<RoomView>("POST", `/api/rooms/${id}/join`),
     /** Host only: adds friends to an existing room; they get `room:invite`. */
     inviteToRoom: (id: string, userIds: string[]) => authed<RoomView>("POST", `/api/rooms/${id}/invites`, { userIds }),
     /** The rooms inviting me (decision 85): accepting makes me a member. */

@@ -28,8 +28,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Private rooms among friends. Only the host changes playback (host-authoritative MVP).
- * Rooms you are not a member of answer 404, so room ids can't be probed.
+ * Watch rooms: among friends by invitation, anyone with the code, or anyone from the public list (decision 110). Only
+ * the host changes playback (host-authoritative MVP). Rooms you are not a member of answer 404, so room ids can't be
+ * probed (the public list shows only what it lists).
  */
 @Service
 public class RoomService {
@@ -42,12 +43,30 @@ public class RoomService {
 	 * `type`: the room's type (decision 93), null without one; `typeVersion` rises with each change, `typeSeen` is the
 	 * viewer's seen one — a member (not the host) is asked about the change while it is lower.
 	 */
-	/** `memberLimit`: how many members the room takes, the host included (decision 106). */
+	/**
+	 * `memberLimit`: how many members the room takes, the host included (decisions 106, 109). `name`: the host's name
+	 * for it, or null (decision 109). `isPublic`: in the public list (decision 110).
+	 */
 	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, String code,
-			Long expiresInMs, MediaProvider type, long typeVersion, long typeSeen, int memberLimit) {
+			Long expiresInMs, MediaProvider type, long typeVersion, long typeSeen, int memberLimit, String name,
+			boolean isPublic) {
 		RoomView expiring(long ms) {
-			return new RoomView(id, content, members, createdAt, code, ms, type, typeVersion, typeSeen, memberLimit);
+			return new RoomView(id, content, members, createdAt, code, ms, type, typeVersion, typeSeen, memberLimit, name,
+					isPublic);
 		}
+	}
+
+	/** A room's settings (decisions 109–110), checked by `settings`. */
+	public record Settings(String name, int memberLimit, boolean isPublic) {
+	}
+
+	/** A public room as the list shows it to anyone (decision 110): no code, no members beyond the host's name. */
+	public record PublicRoom(String id, String name, MediaProvider provider, String title, String hostName, int members,
+			int memberLimit) {
+	}
+
+	/** A page of the public list; `next`: the `before` of the next page, null at the end. */
+	public record PublicRooms(List<PublicRoom> rooms, String next) {
 	}
 
 	/** A member removed from a room because of a block, and who to tell (before the removal). */
@@ -69,6 +88,13 @@ public class RoomService {
 
 	/** Members a room takes, the host included (decision 106). */
 	static final int MAX_MEMBERS = 8;
+	/** The fewest a room may be set to take: the host and one more. */
+	static final int MIN_MEMBERS = 2;
+	static final int MAX_NAME_LENGTH = 20;
+	/** The 409 detail of a limit set below the members already in. */
+	static final String LIMIT_BELOW_MEMBERS = "limit below members";
+	static final int PUBLIC_PAGE = 50;
+	static final int PUBLIC_SCAN_PAGES = 10;
 	/** The 409 detail of a full room (joining, accepting, or asking a friend in one to let you in). */
 	static final String ROOM_FULL = "room full";
 	/** An invitation counts this long (decision 87); inviting again starts it over. */
@@ -112,11 +138,13 @@ public class RoomService {
 	 */
 	@Transactional
 	/** `content` null: a room without a video yet (decision 92). */
-	public RoomView create(String me, RoomContent content, Collection<String> inviteIds, Collection<String> joinIds) {
+	public RoomView create(String me, RoomContent content, Collection<String> inviteIds, Collection<String> joinIds,
+			Settings settings) {
 		if (content != null) {
 			requireKnownId(content);
 		}
 		Room fresh = new Room(content, me);
+		fresh.configure(settings.name(), settings.memberLimit(), settings.isPublic());
 		Set<String> invitees = new HashSet<>(inviteIds);
 		invitees.remove(me);
 		if (invitees.size() > memberLimit(fresh) - 1) {
@@ -279,7 +307,99 @@ public class RoomService {
 	 * host's larger limit goes here (reading the host's plan) when there is one.
 	 */
 	int memberLimit(Room room) {
-		return MAX_MEMBERS;
+		return room.getMemberLimit();
+	}
+
+	/**
+	 * The settings as asked, checked (400): a name trimmed to one line of at most 20 (blank: none), a limit of 2–8.
+	 * Left out (clients before room settings): no name, 8, not public.
+	 */
+	public static Settings settings(String name, Integer memberLimit, Boolean isPublic) {
+		String n = name == null ? "" : name.replaceAll("\\p{Cntrl}", " ").replaceAll("\\s+", " ").strip();
+		if (n.length() > MAX_NAME_LENGTH) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name too long");
+		}
+		int limit = memberLimit == null ? MAX_MEMBERS : memberLimit;
+		if (limit < MIN_MEMBERS || limit > MAX_MEMBERS) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "member limit out of range");
+		}
+		return new Settings(n.isEmpty() ? null : n, limit, isPublic != null && isPublic);
+	}
+
+	/**
+	 * The host changes the room's settings (decisions 109–110); a limit below the members already in is 409. Locked, so
+	 * a join meanwhile counts. @return the members to tell.
+	 */
+	@Transactional
+	public List<String> configure(String me, String roomId, Settings settings) {
+		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
+		if (!isHost(me, roomId)) {
+			throw notFound();
+		}
+		List<String> in = memberIds(roomId);
+		if (settings.memberLimit() < in.size()) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, LIMIT_BELOW_MEMBERS);
+		}
+		room.configure(settings.name(), settings.memberLimit(), settings.isPublic());
+		return in;
+	}
+
+	/**
+	 * A page of the public list (decision 110): rooms someone is in right now, newest first, by name or video title
+	 * (`query`, any case). Left out: rooms I'm banned from, and those with someone I block or who blocks me (as joining
+	 * them is refused). Read until 50 are shown or the list ends; ponytail: at most 10 database pages a call (500 rooms
+	 * left out in a row end it early, `next` going on from there). `before`: the last page's `next` ("createdAt:id").
+	 */
+	@Transactional(readOnly = true)
+	public PublicRooms publicRooms(String me, String query, String before) {
+		String q = query == null ? "" : query.strip().toLowerCase();
+		String like = "%" + q.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+		long at = Long.MAX_VALUE;
+		String id = "";
+		if (before != null) {
+			int colon = before.indexOf(':');
+			try {
+				at = Long.parseLong(before.substring(0, Math.max(colon, 0)));
+				id = before.substring(colon + 1);
+			} catch (NumberFormatException e) {
+				id = "";
+			}
+			if (id.isEmpty()) {
+				throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bad cursor");
+			}
+		}
+		Set<String> blocked = Set.copyOf(blocks.othersOf(me));
+		Set<String> banned = Set.copyOf(rooms.findBannedIds(me)); // once, not each room's ban list
+		List<PublicRoom> shown = new ArrayList<>();
+		for (int pages = 0; pages < PUBLIC_SCAN_PAGES; pages++) {
+			List<Room> page = rooms.findPublic(at, id, like, Limit.of(PUBLIC_PAGE));
+			Map<String, List<RoomMember>> byRoom = members.findByRoomIdIn(page.stream().map(Room::getId).toList()).stream()
+					.collect(Collectors.groupingBy(RoomMember::getRoomId));
+			List<String> hostIds = byRoom.values().stream().flatMap(List::stream)
+					.filter(m -> m.getRole() == RoomMember.Role.HOST).map(RoomMember::getUserId).toList();
+			Map<String, String> names = users.findAllById(hostIds).stream()
+					.collect(Collectors.toMap(User::getId, User::getDisplayName));
+			for (Room r : page) {
+				at = r.getCreatedAt();
+				id = r.getId();
+				List<RoomMember> in = byRoom.getOrDefault(r.getId(), List.of());
+				RoomMember host = in.stream().filter(m -> m.getRole() == RoomMember.Role.HOST).findFirst().orElse(null);
+				if (host == null || !names.containsKey(host.getUserId()) || banned.contains(r.getId())
+						|| hub.presentIn(r.getId()).isEmpty() || in.stream().anyMatch(m -> blocked.contains(m.getUserId()))) {
+					continue;
+				}
+				RoomContent c = r.content();
+				shown.add(new PublicRoom(r.getId(), r.getName(), c == null ? null : c.provider(),
+						c == null ? null : c.title(), names.get(host.getUserId()), in.size(), memberLimit(r)));
+				if (shown.size() == PUBLIC_PAGE) {
+					return new PublicRooms(shown, at + ":" + id);
+				}
+			}
+			if (page.size() < PUBLIC_PAGE) {
+				return new PublicRooms(shown, null);
+			}
+		}
+		return new PublicRooms(shown, at + ":" + id);
 	}
 
 	/**
@@ -396,13 +516,16 @@ public class RoomService {
 		return new Left(withInvited(everyone, room), true, new Ended(everyone, titleOf(room)));
 	}
 
-	/** A room closed by its host's leaving: who was in it, and what it was called (for their notice; "" without a video). */
+	/**
+	 * A room closed by its host's leaving: who was in it, and what it was called (for their notice): its name (decision
+	 * 109), else its video's title, else "".
+	 */
 	public record Ended(List<String> members, String title) {
 	}
 
 	private static String titleOf(Room room) {
 		RoomContent content = room.content();
-		return content == null ? "" : content.title();
+		return room.getName() != null ? room.getName() : content == null ? "" : content.title();
 	}
 
 	/**
@@ -629,6 +752,17 @@ public class RoomService {
 		if (found == null) {
 			throw notFound();
 		}
+		return join(me, found);
+	}
+
+	/** Joining a public room from the list (decision 110): as by its code; 404 once it isn't public. */
+	@Transactional
+	public Invited joinPublic(String me, String roomId) {
+		Room found = rooms.findForUpdate(roomId).filter(Room::isPublic).orElseThrow(RoomService::notFound);
+		return join(me, found);
+	}
+
+	private Invited join(String me, Room found) {
 		List<String> before = memberIds(found.getId());
 		if (!before.contains(me)) {
 			// A share-locking read: a block committed first is seen, and a block made meanwhile waits for this join
@@ -810,7 +944,8 @@ public class RoomService {
 				.toList();
 		RoomMember self = list.stream().filter(m -> m.getUserId().equals(viewer)).findFirst().orElse(null);
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), room.getCode(), null, room.type(),
-				room.typeVersion(), self == null ? room.typeVersion() : self.getTypeSeenVersion(), memberLimit(room));
+				room.typeVersion(), self == null ? room.typeVersion() : self.getTypeSeenVersion(), memberLimit(room),
+				room.getName(), room.isPublic());
 	}
 
 	private static ResponseStatusException notFound() {
