@@ -17,7 +17,7 @@ import { MyFriendCode, Settings } from "./Settings";
 import { usePrivacySave } from "./Privacy";
 import { PublicRoomsDialog, RoomSettingsDialog } from "./RoomSettings";
 import { latest, PROVIDER_NAMES } from "./format";
-import { Avatar, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
+import { Avatar, Icon, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 import logo from "./assets/mirattic.png";
 
@@ -613,17 +613,16 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         <section className="group">
           <div className="group-head">
             <h2>방 {rooms.length > 0 && <span className="count">{rooms.length}</span>}</h2>
-            <IconButton icon="globe" label="공개 방 둘러보기" onClick={() => setBrowsing(true)} />
             <IconButton icon="plus" label="방 생성" onClick={createRoom} />
+            <IconButton icon="globe" label="공개 방 둘러보기" onClick={() => setBrowsing(true)} />
             <IconButton icon="hash" label="코드로 입장" onClick={() => setJoining(true)} />
           </div>
           {rooms.length === 0 ? roomsLoaded && (
-            <div className="box empty">
-              <p className="muted">아직 방이 없습니다. 영상을 열고 방을 만들거나, 받은 코드로 들어가세요.</p>
-              <span className="row">
-                <button className="small" onClick={createRoom}>방 만들기</button>
-                <button className="secondary small" onClick={() => setJoining(true)}>코드로 입장</button>
-              </span>
+            // No room yet: the three ways in, as large buttons.
+            <div className="tiles">
+              <button className="tile primary" onClick={createRoom}><Icon name="plus" size={22} />방 생성</button>
+              <button className="tile" onClick={() => setBrowsing(true)}><Icon name="globe" size={22} />공개방 탐색</button>
+              <button className="tile" onClick={() => setJoining(true)}><Icon name="hash" size={22} />코드로 입장</button>
             </div>
           ) : (
             <ul className="list box">

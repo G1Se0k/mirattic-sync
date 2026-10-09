@@ -309,6 +309,14 @@ button.small { padding: 4px 10px; font-size: calc(12px * var(--text-scale)); }
 .item.active { box-shadow: inset 3px 0 0 var(--accent); }
 .box > .item.active:first-child { border-top-left-radius: 11px; }
 .box > .item.active:last-child { border-bottom-left-radius: 11px; }
+/* No room yet: 방 생성 · 공개방 탐색 · 코드로 입장 as three large buttons in a row. */
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 84px;
+  padding: 12px 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--fg);
+  font-weight: 600; font-size: calc(13px * var(--text-scale)); text-align: center; }
+.tile:hover { background: var(--hover); }
+.tile.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.tile.primary:hover { opacity: 0.9; }
 .box.empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; }
 .box.empty p { margin: 0; }
 
