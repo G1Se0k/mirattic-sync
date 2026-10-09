@@ -106,6 +106,8 @@ export type Me = UserSummary & {
   friendCode: string;
   presenceVisibility: Visibility;
   positionVisibility: Visibility;
+  /** Friend requests by the code only, none from room members by name (decision 108). */
+  friendCodeOnly: boolean;
 };
 
 export type AuthTokens = { accessToken: string; refreshToken: string; user: UserSummary };

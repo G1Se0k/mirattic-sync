@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /** Friend graph changes push `friend:update` to both users after the transaction commits, so clients refetch. */
 @RestController
@@ -52,6 +53,21 @@ class FriendController {
 	@PostMapping("/friends/requests")
 	UserSummary sendRequest(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody FriendRequestBody body) {
 		UserSummary target = friends.sendRequest(jwt.getSubject(), body.friendCode());
+		notify(jwt.getSubject(), target.id());
+		return target;
+	}
+
+	/**
+	 * To someone in a room with me (no code needed); anyone else is 404, as an unknown code. ponytail: the room is
+	 * checked just before (not locked), so a member leaving that instant can still be asked — a request grants
+	 * nothing and can be declined; lock their membership rows if it ever must hold through the insert.
+	 */
+	@PostMapping("/friends/requests/users/{userId}")
+	UserSummary sendRequestTo(@AuthenticationPrincipal Jwt jwt, @PathVariable String userId) {
+		if (!rooms.shareARoom(jwt.getSubject(), userId)) {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+		}
+		UserSummary target = friends.sendRequestTo(jwt.getSubject(), userId);
 		notify(jwt.getSubject(), target.id());
 		return target;
 	}

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Socket, SocketStatus } from "@mirattic/client";
 import type { ChatDeleted, ChatMessage, RoomMemberView, ServerEvent } from "@mirattic/types";
 import { api } from "./session";
@@ -25,6 +25,8 @@ type Props = {
   canStamp: boolean;
   /** Its length, where known: a stamp past it isn't sent. */
   videoMs?: number;
+  /** A member's box, opened from their name on a message; `done` closes it. */
+  memberBox: (member: RoomMemberView, done: () => void) => ReactNode;
 };
 
 const PAGE = 100; // the server's page size: a full page means there may be more
@@ -32,7 +34,7 @@ const NEAR_BOTTOM_PX = 40;
 const FLASH_MS = 1600;
 const STAMP_WAIT_MS = 5000;
 
-export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, canStamp, videoMs }: Props) {
+export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, canStamp, videoMs, memberBox }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const shownLines = useMemo(() => messages.filter(visible), [messages]);
   const [text, setText] = useState("");
@@ -209,6 +211,52 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     onSeek?.(ms); // the host's click moves everyone there
   }
 
+  // A name's box (the message it was opened on): floats under the name, or over it without room below in view. It
+  // sits in the list, so it scrolls with its line; it closes as the members' does, and when that member leaves.
+  const [picked, setPicked] = useState<{ line: string; userId: string } | null>(null);
+  const box = useRef<HTMLLIElement>(null);
+  const pickedMember = picked && members.find((m) => m.user.id === picked.userId);
+  const nameOf = () => list.current?.querySelector<HTMLElement>(`[data-line="${picked?.line}"] .author`);
+  useLayoutEffect(() => {
+    const nick = nameOf();
+    const el = box.current;
+    const ul = list.current;
+    if (!nick || !el || !ul) return;
+    const n = nick.getBoundingClientRect();
+    const u = ul.getBoundingClientRect();
+    const below = n.bottom + 4 + el.offsetHeight <= u.bottom;
+    el.style.top = `${(below ? n.bottom + 4 : n.top - 4 - el.offsetHeight) - u.top + ul.scrollTop}px`;
+    el.style.left = `${Math.max(0, Math.min(n.left - u.left - 6, ul.clientWidth - el.offsetWidth))}px`;
+  });
+  useEffect(() => {
+    if (picked && !pickedMember) setPicked(null); // they left
+  });
+  useEffect(() => {
+    if (!picked) return;
+    box.current?.focus({ preventScroll: true });
+  }, [picked]);
+  const closeBox = () => {
+    nameOf()?.focus();
+    setPicked(null);
+  };
+  useEffect(() => {
+    if (!picked) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (e.key === "Escape") closeBox();
+      } else if (!box.current?.contains(e.target as Node) && !nameOf()?.contains(e.target as Node)) setPicked(null);
+    };
+    const shut = () => setPicked(null);
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    window.addEventListener("resize", shut);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+      window.removeEventListener("resize", shut);
+    };
+  }, [picked]);
+
   const name = (id: string) => {
     const member = members.find((m) => m.user.id === id)?.user.displayName;
     if (id === meId) return `${member ?? "나"}(나)`;
@@ -243,9 +291,15 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
               )}
             </li>
           ) : (
-            <li key={item.id} className={`row${fresh.has(item.id) ? " fresh" : ""}`}>
+            <li key={item.id} className={`row${fresh.has(item.id) ? " fresh" : ""}`} data-line={item.id}>
               <span className="grow">
-                <span className="author">{name(item.userId)}</span>
+                {members.some((m) => m.user.id === item.userId) ? (
+                  <button type="button" className={`author${picked?.line === item.id ? " on" : ""}`} aria-haspopup="dialog"
+                    aria-expanded={picked?.line === item.id}
+                    onClick={() => setPicked((p) => (p?.line === item.id ? null : { line: item.id, userId: item.userId }))}>
+                    {name(item.userId)}
+                  </button>
+                ) : <span className="author">{name(item.userId)}</span>}
                 {item.deleted ? (
                   <span className="deleted">삭제된 메시지입니다</span>
                 ) : (
@@ -262,6 +316,11 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
               )}
             </li>
           ),
+        )}
+        {pickedMember && (
+          <li className="member-box" ref={box} tabIndex={-1} role="dialog" aria-label={`${pickedMember.user.displayName} 메뉴`}>
+            {memberBox(pickedMember, closeBox)}
+          </li>
         )}
       </ul>
       {unseen && (

@@ -2,7 +2,7 @@ package com.mirattic.sync.user;
 
 import com.mirattic.sync.auth.MiratticAuth;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
+import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -24,10 +24,11 @@ public class UserController {
 	 * `friendCode` is only ever shown to its owner, who shares it to be added as a friend.
 	 */
 	public record Me(String id, String email, String displayName, String friendCode, Visibility presenceVisibility,
-			Visibility positionVisibility) {
+			Visibility positionVisibility, boolean friendCodeOnly) {
 	}
 
-	public record PrivacyRequest(@NotNull Visibility presenceVisibility, @NotNull Visibility positionVisibility) {
+	/** Each setting left out is unchanged: a client sends only the one it changes (before 1.2.2: both visibilities). */
+	public record PrivacyRequest(Visibility presenceVisibility, Visibility positionVisibility, Boolean friendCodeOnly) {
 	}
 
 	private final UserRepository users;
@@ -48,7 +49,11 @@ public class UserController {
 	@Transactional
 	Me updatePrivacy(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody PrivacyRequest req) {
 		User me = load(jwt.getSubject());
-		me.setPrivacy(req.presenceVisibility(), req.positionVisibility());
+		me.setPrivacy(Objects.requireNonNullElse(req.presenceVisibility(), me.getPresenceVisibility()),
+				Objects.requireNonNullElse(req.positionVisibility(), me.getPositionVisibility()));
+		if (req.friendCodeOnly() != null) {
+			me.setFriendCodeOnly(req.friendCodeOnly());
+		}
 		return me(me, jwt);
 	}
 
@@ -67,7 +72,7 @@ public class UserController {
 			u.syncName(info.name()); // stored only if it changed (none or blank: kept)
 		}
 		return new Me(u.getId(), info == null ? null : info.email(), u.getDisplayName(), u.getFriendCode(),
-				u.getPresenceVisibility(), u.getPositionVisibility());
+				u.getPresenceVisibility(), u.getPositionVisibility(), u.isFriendCodeOnly());
 	}
 
 	private User load(String id) {

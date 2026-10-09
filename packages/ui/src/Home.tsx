@@ -14,6 +14,7 @@ import { api, platform } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
 import { MyFriendCode, Settings } from "./Settings";
+import { usePrivacySave } from "./Privacy";
 import { latest, PROVIDER_NAMES } from "./format";
 import { Avatar, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
@@ -22,6 +23,7 @@ import logo from "./assets/mirattic.png";
 type Props = { me: Me; onMeChange: (me: Me) => void; onSignedOut: () => void };
 
 export function Home({ me, onMeChange, onSignedOut }: Props) {
+  const savePrivacy = usePrivacySave();
   const [friends, setFriends] = useState<FriendView[]>([]);
   const [requests, setRequests] = useState<FriendRequests>({ incoming: [], outgoing: [] });
   const [blocked, setBlocked] = useState<UserSummary[]>([]);
@@ -556,7 +558,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   if (screen === "settings") {
     return (
       <>
-        <Settings me={me} blocked={blocked} onMeChange={onMeChange} onUnblock={(id) => void act(() => api.unblock(id))()}
+        <Settings me={me} blocked={blocked} onMeChange={onMeChange} savePrivacy={savePrivacy} onUnblock={(id) => void act(() => api.unblock(id))()}
           onSignedOut={onSignedOut} onClose={() => setScreen("home")} />
         {endedNotice /* a closure is told wherever the panel is */}
         {typeChanged}
@@ -603,35 +605,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             <div className="muted">YouTube · Netflix · Laftel 영상을 열면 친구와 같이 볼 수 있습니다.</div>
           )}
         </div>
-
-        {(requests.incoming.length > 0 || requests.outgoing.length > 0) && (
-          <section className="group">
-            <div className="group-head"><h2>친구 요청 <span className="count">{requests.incoming.length + requests.outgoing.length}</span></h2></div>
-            <ul className="list box">
-              {requests.incoming.map((r) => (
-                <li key={r.id} className="item">
-                  <Avatar name={r.user.displayName} />
-                  <div className="grow">
-                    <div className="name ellipsis">{r.user.displayName}</div>
-                    <div className="muted">친구 요청을 보냈습니다</div>
-                  </div>
-                  <button className="small" onClick={act(() => api.acceptFriendRequest(r.id))}>수락</button>
-                  <IconButton icon="close" label="거절" onClick={act(() => api.deleteFriendRequest(r.id))} />
-                </li>
-              ))}
-              {requests.outgoing.map((r) => (
-                <li key={r.id} className="item">
-                  <Avatar name={r.user.displayName} />
-                  <div className="grow">
-                    <div className="name ellipsis">{r.user.displayName}</div>
-                    <div className="muted">요청 보냄 · 대기 중</div>
-                  </div>
-                  <IconButton icon="close" label="요청 취소" onClick={act(() => api.deleteFriendRequest(r.id))} />
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
 
         <section className="group">
           <div className="group-head">
@@ -721,6 +694,35 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               onClose={() => { setReporting(null); void reload(); }} />
           )}
         </section>
+
+        {(requests.incoming.length > 0 || requests.outgoing.length > 0) && (
+          <section className="group">
+            <div className="group-head"><h2>친구 요청 <span className="count">{requests.incoming.length + requests.outgoing.length}</span></h2></div>
+            <ul className="list box">
+              {requests.incoming.map((r) => (
+                <li key={r.id} className="item">
+                  <Avatar name={r.user.displayName} />
+                  <div className="grow">
+                    <div className="name ellipsis">{r.user.displayName}</div>
+                    <div className="muted">친구 요청을 보냈습니다</div>
+                  </div>
+                  <button className="small" onClick={act(() => api.acceptFriendRequest(r.id))}>수락</button>
+                  <IconButton icon="close" label="거절" onClick={act(() => api.deleteFriendRequest(r.id))} />
+                </li>
+              ))}
+              {requests.outgoing.map((r) => (
+                <li key={r.id} className="item">
+                  <Avatar name={r.user.displayName} />
+                  <div className="grow">
+                    <div className="name ellipsis">{r.user.displayName}</div>
+                    <div className="muted">요청 보냄 · 대기 중</div>
+                  </div>
+                  <IconButton icon="close" label="요청 취소" onClick={act(() => api.deleteFriendRequest(r.id))} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </main>
       <footer className="me-bar">
         {showCode && <MyFriendCode me={me} />}

@@ -6,9 +6,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.mirattic.sync.IntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 
 class FriendFlowTest extends IntegrationTest {
+
+	@Autowired
+	private BlockRepository blocks;
 
 	@Test
 	void requestAcceptAndRemove() throws Exception {
@@ -67,6 +71,59 @@ class FriendFlowTest extends IntegrationTest {
 
 		call(HttpMethod.DELETE, "/api/blocks/" + b.id(), a.accessToken(), null).andExpect(status().isNoContent());
 		sendRequest(b, a).andExpect(status().isOk());
+	}
+
+	@Test
+	void roomMembersAskEachOtherWithoutACode() throws Exception {
+		TestUser host = signup();
+		TestUser member = signup();
+		TestUser stranger = signup();
+		String byId = "/api/friends/requests/users/";
+		call(HttpMethod.POST, byId + host.id(), member.accessToken(), null).andExpect(status().isNotFound()); // no room yet
+
+		var room = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(),
+				"{\"content\":{\"provider\":\"youtube\",\"contentId\":\"dQw4w9WgXcQ\",\"title\":\"Fake\",\"durationMs\":600000},\"inviteIds\":[]}"));
+		call(HttpMethod.POST, "/api/rooms/join", member.accessToken(), "{\"code\":\"%s\"}".formatted(room.path("code").asString()))
+				.andExpect(status().isOk());
+
+		call(HttpMethod.POST, byId + member.id(), stranger.accessToken(), null).andExpect(status().isNotFound());
+		call(HttpMethod.POST, byId + host.id(), member.accessToken(), null)
+				.andExpect(status().isOk()).andExpect(jsonPath("$.id").value(host.id()));
+		call(HttpMethod.POST, byId + host.id(), member.accessToken(), null).andExpect(status().isConflict());
+		call(HttpMethod.POST, byId + member.id(), host.accessToken(), null).andExpect(status().isOk()); // accepts theirs
+		call(HttpMethod.GET, "/api/friends", host.accessToken(), null).andExpect(jsonPath("$[0].user.id").value(member.id()));
+	}
+
+	@Test
+	void codeOnlyRefusesRoomMembersUnlessTheyAsked() throws Exception {
+		TestUser host = signup();
+		TestUser member = signup();
+		var room = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(),
+				"{\"content\":{\"provider\":\"youtube\",\"contentId\":\"dQw4w9WgXcQ\",\"title\":\"Fake\",\"durationMs\":600000},\"inviteIds\":[]}"));
+		call(HttpMethod.POST, "/api/rooms/join", member.accessToken(), "{\"code\":\"%s\"}".formatted(room.path("code").asString()));
+		String privacy = "{\"presenceVisibility\":\"FRIENDS\",\"positionVisibility\":\"ROOM_ONLY\"%s}";
+		call(HttpMethod.PUT, "/api/me/privacy", member.accessToken(), privacy.formatted(",\"friendCodeOnly\":true"))
+				.andExpect(jsonPath("$.friendCodeOnly").value(true));
+		// Left out (clients before it): unchanged.
+		call(HttpMethod.PUT, "/api/me/privacy", member.accessToken(), privacy.formatted(""))
+				.andExpect(jsonPath("$.friendCodeOnly").value(true));
+		// One setting alone leaves the others.
+		call(HttpMethod.PUT, "/api/me/privacy", member.accessToken(), "{\"presenceVisibility\":\"OFF\"}")
+				.andExpect(jsonPath("$.presenceVisibility").value("OFF")).andExpect(jsonPath("$.friendCodeOnly").value(true));
+		call(HttpMethod.PUT, "/api/me/privacy", member.accessToken(), "{\"friendCodeOnly\":true}")
+				.andExpect(jsonPath("$.presenceVisibility").value("OFF")).andExpect(jsonPath("$.positionVisibility").value("ROOM_ONLY"));
+
+		String byId = "/api/friends/requests/users/";
+		call(HttpMethod.POST, byId + member.id(), host.accessToken(), null).andExpect(status().isForbidden());
+		// Blocked while still in the room (the block saved, the separation not yet): 404 as any block, not 403.
+		blocks.save(new Block(member.id(), host.id()));
+		call(HttpMethod.POST, byId + member.id(), host.accessToken(), null).andExpect(status().isNotFound());
+		blocks.deleteAll();
+		call(HttpMethod.POST, byId + member.id(), member.accessToken(), null).andExpect(status().isBadRequest()); // myself
+		call(HttpMethod.POST, byId + host.id(), member.accessToken(), null).andExpect(status().isOk()); // they ask me
+		call(HttpMethod.POST, byId + host.id(), member.accessToken(), null).andExpect(status().isConflict()); // again
+		call(HttpMethod.POST, byId + member.id(), host.accessToken(), null).andExpect(status().isOk()); // accepts theirs
+		call(HttpMethod.POST, byId + member.id(), host.accessToken(), null).andExpect(status().isConflict()); // friends
 	}
 
 	@Test

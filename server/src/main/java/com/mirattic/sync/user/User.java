@@ -19,6 +19,8 @@ public class User {
 	private Visibility presenceVisibility;
 	@Enumerated(EnumType.STRING)
 	private Visibility positionVisibility;
+	/** Friend requests by the code only, none from room members by name (decision 108). */
+	private boolean friendCodeOnly;
 	private long createdAt;
 
 	protected User() {
@@ -63,6 +65,7 @@ public class User {
 	public String getFriendCode() { return friendCode; }
 	public Visibility getPresenceVisibility() { return presenceVisibility; }
 	public Visibility getPositionVisibility() { return positionVisibility; }
+	public boolean isFriendCodeOnly() { return friendCodeOnly; }
 
 	/** Invalidates the old code, e.g. after it was shared too widely. */
 	public void regenerateFriendCode() {
@@ -72,5 +75,9 @@ public class User {
 	public void setPrivacy(Visibility presence, Visibility position) {
 		this.presenceVisibility = presence;
 		this.positionVisibility = position;
+	}
+
+	public void setFriendCodeOnly(boolean codeOnly) {
+		this.friendCodeOnly = codeOnly;
 	}
 }

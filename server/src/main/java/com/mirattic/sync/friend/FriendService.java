@@ -65,6 +65,27 @@ public class FriendService {
 		if (target == null) {
 			throw notFound();
 		}
+		return request(me, target);
+	}
+
+	/**
+	 * The same, to a user by id: the caller checks they may be asked so (they share a room). One taking requests by
+	 * code only (decision 108) refuses it with 403 — only a new request: myself (400), an existing pair (their request
+	 * accepted, mine or a friendship 409) answer as by code. A block is 404 first, so it can't be told apart.
+	 */
+	@Transactional
+	public UserSummary sendRequestTo(String me, String userId) {
+		User target = users.findById(userId).orElseThrow(FriendService::notFound);
+		if (blocks.existsBetween(me, userId)) {
+			throw notFound();
+		}
+		if (target.isFriendCodeOnly() && !me.equals(userId) && friendships.findPair(me, userId).isEmpty()) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "friend code only");
+		}
+		return request(me, target);
+	}
+
+	private UserSummary request(String me, User target) {
 		String targetId = target.getId();
 		if (me.equals(targetId)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot target yourself");

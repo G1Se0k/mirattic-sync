@@ -191,11 +191,15 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .player { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .player .time { font-variant-numeric: tabular-nums; white-space: nowrap; min-width: max-content; font-size: calc(12px * var(--text-scale)); }
 .chat-panel { flex: 1; min-height: 156px; display: flex; flex-direction: column; border-top: 1px solid var(--line); margin-top: 8px; }
-.chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 8px 12px; }
+.chat { position: relative; flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 8px 12px; }
 /* margin-top: auto (not justify-content: flex-end) keeps the list scrollable while stacking from the bottom. */
 .chat > :first-child { margin-top: auto; }
 .chat li { padding: 3px 6px; border-radius: 6px; }
 .chat li .author { font-weight: 600; margin-right: 4px; }
+/* A member's name opens their box (as the members' chips do): floats in the list, under or over the name. */
+.chat button.author { padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+.chat button.author:hover, .chat button.author.on { text-decoration: underline; }
+.chat li.member-box { padding: 4px 4px 4px 10px; border-radius: 10px; }
 /* No height of its own: a row with the delete button is as tall as one without (the button overflows, centered). */
 .chat li .tools { visibility: hidden; display: flex; align-items: center; height: 0; }
 .chat li:hover .tools { visibility: visible; }

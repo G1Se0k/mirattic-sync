@@ -7,6 +7,12 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### 확장 버전 1.2.2 (작업 중, 2026-10-09, 사용자 요청)
+- 같은 방 멤버에게 친구 요청(결정 107): 멤버 상자의 "친구 추가"(이미 친구면 없음, 보냈으면 회색), 서버 `POST /api/friends/requests/users/{userId}`
+- 친구 요청 받기 설정(결정 108): 설정 → 개인정보, 누구나(기본) / 친구 코드로만, V26 `users.friend_code_only`
+- 채팅 닉네임을 누르면 같은 멤버 상자가 떠서 뜸(멤버 목록과 같은 `MemberActions`)
+- 메인 화면의 "친구 요청" 목록을 방 · 친구 목록 아래로 옮김
+- 확장 버전은 아직 1.2.1(올리라는 요청 전)
 ### 확장 버전 1.2.1 (2026-10-05, 사용자 요청)
 - 패널 스크롤바: 기본 막대를 숨기고(`scrollbar-width: none`) `packages/ui/src/scrollbar.ts`가 내용 위에 6px 둥근 막대를 띄움 — 사용자가 휠 · 터치 · 스크롤 키로 그 영역을 스크롤할 때만, 관성 동안 유지, 멈추고 0.8초 뒤 사라짐, 끌어서 스크롤 가능. 패널이 스스로 하는 스크롤(채팅 따라 내려가기)엔 안 보임. 설정 화면은 막대 없음
 - 한계: 가로 스크롤 막대 없음, 숨은 막대를 마우스 올림으로 꺼낼 수 없음. 랜딩 페이지는 그대로. 패치 노트에 1.2.1 항목 추가. 빌드: `apps/extension/.output/chrome-mv3`, 스토어 업로드용 `.output/mirattic-sync-1.2.1-store.zip`(manifest key 뺌)

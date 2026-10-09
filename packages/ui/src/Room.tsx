@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
 import { contentKey, MEDIA_PROVIDERS, memberLimitOf, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type RoomMemberView, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, showsRoomVideo, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
@@ -13,6 +13,9 @@ import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
 /** "room|user" → when the last invite went out: the same friend can be invited again after 30 s. */
 const invitedAt = new Map<string, number>();
 const INVITE_COOLDOWN_MS = 30_000;
+
+/** Members who are my friends, and those I asked (pending). */
+type Ties = { friends: string[]; sent: string[] };
 
 type Props = {
   roomId: string;
@@ -38,6 +41,20 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   const [inviting, setInviting] = useState(false);
   const asker = useAsk();
   const room = s.room;
+  // Which members are friends, or asked by me: the member box offers 친구 추가 to the others (none until loaded).
+  // Only the latest read counts: an older one answering last doesn't bring back a button.
+  const [ties, setTies] = useState<Ties | null>(null);
+  const tiesRead = useRef(0);
+  const loadTies = useCallback(() => {
+    const mine = ++tiesRead.current;
+    return Promise.all([api.friends(), api.friendRequests()]).then(([f, r]) => {
+      if (mine === tiesRead.current) setTies({ friends: f.map((x) => x.user.id), sent: r.outgoing.map((x) => x.user.id) });
+    }, () => {});
+  }, []);
+  useEffect(() => {
+    void loadTies();
+    return subscribe((e) => { if (e.type === "friend:update") void loadTies(); });
+  }, [subscribe, loadTies]);
   const content = room?.content;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
   // Decision 106: the room's member limit, the host included; full, nobody more can be invited.
@@ -110,6 +127,18 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     }
   }
 
+  /** A request (or, if they asked me, friends at once); the box shows it as sent. 409: already asked; 403: they take requests by code only. */
+  async function befriend(userId: string) {
+    try {
+      await api.sendFriendRequestTo(userId);
+    } catch (e) {
+      const status = e instanceof ApiError ? e.status : -1;
+      if (status === 403) void asker.tell("친구 요청을 보낼 수 없습니다", "이 사용자는 친구 코드로만 친구 요청을 받습니다.");
+      else if (status !== 409) void asker.tell("친구 요청을 보내지 못했습니다", "다시 시도해 주세요.");
+    }
+    void loadTies();
+  }
+
   async function leave() {
     const yes = isHost
       ? await asker.ask("방을 닫을까요?", { body: "모든 멤버가 나가게 됩니다.", ok: "방 닫기", danger: true })
@@ -164,7 +193,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
         <PlayerStatus content={content ?? null} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
           roomType={roomType} onPickSite={pickSite} onRequestPause={() => setAskingPause(true)} />
         {isHost && <TabPicker type={roomType} />}
-        <Members members={room.members} meId={me.id} isHost={isHost} limit={limit}
+        <Members members={room.members} meId={me.id} isHost={isHost} limit={limit} ties={ties} onBefriend={(id) => void befriend(id)}
           onReport={(id, name) => setReporting({ id, name })}
           onManage={(name, action, id) => void manage(name, action, id)} />
       </div>
@@ -172,6 +201,9 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
         subscribe={subscribe} position={position} onSeek={isHost && showsRoomVideo(s, content) ? (ms) => handle.seek(ms) : undefined}
         canStamp={showsRoomVideo(s, content) && (isHost || s.hostVideo !== false)}
+        memberBox={(member, done) => <MemberActions member={member} meId={me.id} isHost={isHost} ties={ties}
+          onBefriend={(id) => void befriend(id)} onReport={(id, name) => setReporting({ id, name })}
+          onManage={(name, action, id) => void manage(name, action, id)} onDone={done} />}
         video={content ? contentKey(content) : undefined} videoMs={content?.durationMs} />
 
       {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
@@ -386,14 +418,15 @@ const MEMBERS_OPEN_KEY = "mirattic.membersOpen";
 /**
  * The room's members (decision 106): a "멤버" line with a segment per seat (red once full) that folds the list
  * (remembered on this device), and chips with the avatar and name. A chip opens a small box over it — on top of what
- * comes before, nothing moves: the name ("(나)" for me), "호스트", and its actions — report (not me), hand the room over
- * and remove (the host, on someone else).
+ * comes before, nothing moves: its `MemberActions`.
  */
-function Members({ members, meId, isHost, limit, onReport, onManage }: {
+function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onManage }: {
   members: RoomMemberView[];
   meId: string;
   isHost: boolean;
   limit: number;
+  ties: Ties | null;
+  onBefriend: (id: string) => void;
   onReport: (id: string, name: string) => void;
   onManage: (name: string, action: "host" | "kick", id: string) => void;
 }) {
@@ -429,7 +462,7 @@ function Members({ members, meId, isHost, limit, onReport, onManage }: {
     if (!chip || !el || !list.current) return;
     el.style.left = `${Math.max(0, Math.min(chip.offsetLeft, list.current.clientWidth - el.offsetWidth))}px`;
     el.style.top = `${chip.offsetTop - el.offsetHeight - 4}px`;
-  }, [picked, members]);
+  }, [picked, members, ties]); // ties: 친구 추가 may appear and widen it
 
   // Opened: focus in it and in view (the panel may be short); closed by the keyboard or an action: back to its chip.
   useEffect(() => {
@@ -489,25 +522,52 @@ function Members({ members, meId, isHost, limit, onReport, onManage }: {
         </div>
         {shown && (
           <div className="member-box" ref={box} tabIndex={-1} role="dialog" aria-label={`${shown.user.displayName} 메뉴`}>
-            <span className="who">
-              {shown.user.displayName}{shown.user.id === meId && " (나)"}
-              {shown.role === "HOST" && <span className="muted"> · 호스트</span>}
-            </span>
-            {shown.user.id !== meId && (
-              <span className="row">
-                <IconButton icon="flag" label="신고" onClick={() => { closeBox(); onReport(shown.user.id, shown.user.displayName); }} />
-                {isHost && (
-                  <>
-                    <IconButton icon="crown" label="호스트 넘기기" onClick={() => { closeBox(); onManage(shown.user.displayName, "host", shown.user.id); }} />
-                    <IconButton icon="userMinus" tone="danger" label="내보내기" onClick={() => { closeBox(); onManage(shown.user.displayName, "kick", shown.user.id); }} />
-                  </>
-                )}
-              </span>
-            )}
+            <MemberActions member={shown} meId={meId} isHost={isHost} ties={ties} onBefriend={onBefriend}
+              onReport={onReport} onManage={onManage} onDone={closeBox} />
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * A member's box (the members' list and the chat's names): the name ("(나)" for me), "호스트", and on someone else
+ * 친구 추가 (not on a friend; greyed once asked), report, and for the host hand over and remove. `onDone` closes the box
+ * before an action that opens a dialog; 친구 추가 opens none and keeps it open, so the button is seen turning grey.
+ */
+function MemberActions({ member, meId, isHost, ties, onBefriend, onReport, onManage, onDone }: {
+  member: RoomMemberView;
+  meId: string;
+  isHost: boolean;
+  ties: Ties | null;
+  onBefriend: (id: string) => void;
+  onReport: (id: string, name: string) => void;
+  onManage: (name: string, action: "host" | "kick", id: string) => void;
+  onDone: () => void;
+}) {
+  const { id, displayName: name } = member.user;
+  return (
+    <>
+      <span className="who">
+        {name}{id === meId && " (나)"}
+        {member.role === "HOST" && <span className="muted"> · 호스트</span>}
+      </span>
+      {id !== meId && (
+        <span className="row">
+          {ties && !ties.friends.includes(id) && (ties.sent.includes(id)
+            ? <IconButton icon="userPlus" label="친구 요청을 보냈습니다" disabled />
+            : <IconButton icon="userPlus" label="친구 추가" onClick={() => onBefriend(id)} />)}
+          <IconButton icon="flag" label="신고" onClick={() => { onDone(); onReport(id, name); }} />
+          {isHost && (
+            <>
+              <IconButton icon="crown" label="호스트 넘기기" onClick={() => { onDone(); onManage(name, "host", id); }} />
+              <IconButton icon="userMinus" tone="danger" label="내보내기" onClick={() => { onDone(); onManage(name, "kick", id); }} />
+            </>
+          )}
+        </span>
+      )}
+    </>
   );
 }
 

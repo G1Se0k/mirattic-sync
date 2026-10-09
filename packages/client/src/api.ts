@@ -11,7 +11,6 @@ import type {
   RoomView,
   UserSummary,
   IncomingRequest,
-  Visibility,
 } from "@mirattic/types";
 
 /** Where the refresh token lives (the extension's storage). */
@@ -176,8 +175,9 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     },
 
     me: () => authed<Me>("GET", "/api/me", undefined, false),
-    updatePrivacy: (presenceVisibility: Visibility, positionVisibility: Visibility) =>
-      authed<Me>("PUT", "/api/me/privacy", { presenceVisibility, positionVisibility }),
+    /** Only the settings given change (one at a time: two quick changes don't undo each other). */
+    updatePrivacy: (changes: Partial<Pick<Me, "presenceVisibility" | "positionVisibility" | "friendCodeOnly">>) =>
+      authed<Me>("PUT", "/api/me/privacy", changes),
     /**
      * Deletes my Sync profile and all its data after the Mirattic password is typed again (a re-auth window).
      * 403 if that sign-in isn't this account's or isn't fresh. Sign out locally afterwards.
@@ -193,6 +193,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** Accepts codes as typed ("k7qm-4xpr"). Resolves to the user the request went to; 404 if no such code. */
     sendFriendRequest: (friendCode: string) =>
       authed<UserSummary>("POST", "/api/friends/requests", { friendCode }),
+    /** To a member of a room I'm in, no code needed; 404 for anyone else. */
+    sendFriendRequestTo: (userId: string) => authed<UserSummary>("POST", `/api/friends/requests/users/${userId}`),
     acceptFriendRequest: (id: string) => authed<void>("POST", `/api/friends/requests/${id}/accept`),
     deleteFriendRequest: (id: string) => authed<void>("DELETE", `/api/friends/requests/${id}`),
     removeFriend: (userId: string) => authed<void>("DELETE", `/api/friends/${userId}`),

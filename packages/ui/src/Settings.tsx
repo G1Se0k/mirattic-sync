@@ -1,6 +1,6 @@
 import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Me, UserSummary } from "@mirattic/types";
-import { DeleteAccount, Privacy } from "./Privacy";
+import { DeleteAccount, FriendRequestsFrom, Privacy, type SavePrivacy } from "./Privacy";
 import { ExperimentalSettings } from "./Experimental";
 import { FeedbackSection } from "./Feedback";
 import { Avatar, Icon, IconButton } from "./Icons";
@@ -11,13 +11,15 @@ type Props = {
   me: Me;
   blocked: UserSummary[];
   onMeChange: (me: Me) => void;
+  /** Home's privacy saves (one account's): Settings may close before an answer comes. */
+  savePrivacy: SavePrivacy;
   onUnblock: (userId: string) => void;
   onSignedOut: () => void;
   onClose: () => void;
 };
 
 /** Everything that isn't watching together, in groups: a row each, its text left and its control right. */
-export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onClose }: Props) {
+export function Settings({ me, blocked, onMeChange, savePrivacy: save, onUnblock, onSignedOut, onClose }: Props) {
   const [showBlocked, setShowBlocked] = useState(false);
   return (
     <>
@@ -36,12 +38,13 @@ export function Settings({ me, blocked, onMeChange, onUnblock, onSignedOut, onCl
           <button className="secondary small" onClick={() => window.open(ACCOUNT_URL, "_blank", "noopener")}>계정 정보 수정</button>
         </section>
         <Group title="같이 보기">
-          <Privacy me={me} onChange={onMeChange} />
+          <Privacy me={me} save={save} onChange={onMeChange} />
           <AskOnSwitch />
         </Group>
         {platform.textSize && <Group title="화면"><TextSize /></Group>}
         {platform.experimental && <Group title="실험 기능"><ExperimentalSettings /></Group>}
         <Group title="개인정보">
+          <FriendRequestsFrom me={me} save={save} onChange={onMeChange} />
           <div>
             <button className="item" aria-expanded={showBlocked} onClick={() => setShowBlocked((v) => !v)}>
               <span className="text">차단한 사용자</span>
