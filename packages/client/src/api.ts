@@ -229,9 +229,12 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     kickMember: (id: string, userId: string) => authed<void>("DELETE", `/api/rooms/${id}/members/${encodeURIComponent(userId)}`),
     /** Host only (decision 79): makes another member the host. */
     makeHost: (id: string, userId: string) => authed<void>("POST", `/api/rooms/${id}/host`, { userId }),
-    /** Asks an online friend to watch together; they get `watch:request`. 409 offline, 429 asked recently. */
+    /**
+     * Asks an online friend to watch together; they get `watch:request`. 409 offline, 429 asked recently. A friend in a
+     * public room is joined at once instead (decision 111): `roomId`, no request.
+     */
     requestWatch: (friendId: string) =>
-      authed<{ askedAt?: number } | undefined>("POST", "/api/rooms/requests", { friendId }), // older servers: no body
+      authed<{ askedAt?: number; roomId?: string } | undefined>("POST", "/api/rooms/requests", { friendId, joinPublic: true }), // older servers: no body
     /** The friends I asked to watch together and still wait for (closed by their invite or my cancel). */
     openWatchRequests: () => authed<string[]>("GET", "/api/rooms/requests"),
     /** The same, each with its time left (decision 87). */

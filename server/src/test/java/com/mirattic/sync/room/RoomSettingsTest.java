@@ -58,6 +58,93 @@ class RoomSettingsTest extends IntegrationTest {
 		return body(call(HttpMethod.GET, "/api/rooms/public?q=" + query, user.accessToken(), null));
 	}
 
+	private org.springframework.test.web.servlet.ResultActions askToJoin(TestUser me, TestUser friend, boolean joinPublic)
+			throws Exception {
+		return call(HttpMethod.POST, "/api/rooms/requests", me.accessToken(),
+				"{\"friendId\":\"%s\",\"joinPublic\":%s}".formatted(friend.id(), joinPublic));
+	}
+
+	/** Watching something, as friends see (WATCHING): what the app offers 합류 요청 on. */
+	private static void watch(Client ws) throws Exception {
+		ws.send("{\"type\":\"presence:update\",\"payload\":{\"provider\":\"youtube\",\"contentId\":\"dQw4w9WgXcQ\","
+				+ "\"title\":\"Public\",\"playing\":true,\"capturedAt\":1}}");
+		Thread.sleep(300); // the presence lands
+	}
+
+	@Test
+	void askingAFriendInAPublicRoomJoinsIt() throws Exception {
+		TestUser host = signup();
+		JsonNode room = create(host, "Public", ",\"memberLimit\":3,\"isPublic\":true");
+		String id = room.path("id").asString();
+		Client hostWs = present(host, id);
+
+		TestUser me = signup();
+		befriend(me, host);
+		askToJoin(me, host, true).andExpect(status().isAccepted()); // in it but watching nothing: not told, asked
+		hostWs.nextOfType("watch:request");
+		watch(hostWs);
+		askToJoin(me, host, true).andExpect(status().isOk()).andExpect(jsonPath("$.roomId").value(id));
+		assertThat(hostWs.nextOfType("room:update")).isNotNull();
+		// The request that was open is closed with it: the host no longer answers it.
+		assertThat(hostWs.nextOfType("watch:cancel").path("userId").asString()).isEqualTo(me.id());
+		call(HttpMethod.GET, "/api/rooms/" + id, me.accessToken(), null).andExpect(status().isOk());
+
+		TestUser older = signup(); // a client before 1.3.0 doesn't ask for it: a request as before
+		befriend(older, host);
+		call(HttpMethod.POST, "/api/rooms/requests", older.accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
+				.andExpect(status().isAccepted()).andExpect(jsonPath("$.askedAt").isNumber()); // no joinPublic at all
+
+		TestUser third = signup(); // 3 of 3 now (host, me, third)
+		befriend(third, host);
+		askToJoin(third, host, true).andExpect(status().isOk());
+		TestUser late = signup();
+		befriend(late, host);
+		askToJoin(late, host, true).andExpect(status().isConflict()); // full: no request either
+
+		// Kicked from it: asked as before, for the host to answer (one who hasn't asked within the throttle).
+		call(HttpMethod.DELETE, "/api/rooms/" + id + "/members/" + third.id(), host.accessToken(), null)
+				.andExpect(status().isNoContent());
+		askToJoin(third, host, true).andExpect(status().isAccepted());
+	}
+
+	@Test
+	void inSeveralPublicRoomsTheOneOnWhatTheyWatchIsJoined() throws Exception {
+		TestUser host = signup();
+		String full = create(host, "First", ",\"memberLimit\":2,\"isPublic\":true").path("id").asString();
+		String other = body(call(HttpMethod.POST, "/api/rooms", host.accessToken(), """
+				{"content":{"provider":"youtube","contentId":"9bZkp7q19f0","title":"Second","durationMs":600000},
+				"inviteIds":[],"isPublic":true}""")).path("id").asString();
+		Client hostWs = present(host, full);
+		hostWs.send("{\"type\":\"room:join\",\"roomId\":\"%s\",\"payload\":{}}".formatted(other));
+		hostWs.nextOfType("playback:update");
+		TestUser filler = signup();
+		call(HttpMethod.POST, "/api/rooms/" + full + "/join", filler.accessToken(), null).andExpect(status().isOk()); // 2 of 2
+		hostWs.send("{\"type\":\"presence:update\",\"payload\":{\"provider\":\"youtube\",\"contentId\":\"9bZkp7q19f0\","
+				+ "\"title\":\"Second\",\"playing\":true,\"capturedAt\":1}}");
+		Thread.sleep(300);
+
+		TestUser me = signup();
+		befriend(me, host);
+		askToJoin(me, host, true).andExpect(status().isOk()).andExpect(jsonPath("$.roomId").value(other));
+	}
+
+	@Test
+	void aPrivateRoomOrHiddenPresenceIsAskedAsBefore() throws Exception {
+		TestUser host = signup();
+		present(host, create(host, "Private", "").path("id").asString());
+		TestUser me = signup();
+		befriend(me, host);
+		askToJoin(me, host, true).andExpect(status().isAccepted());
+
+		TestUser hidden = signup(); // what they watch hidden from friends: their public room isn't told either
+		call(HttpMethod.PUT, "/api/me/privacy", hidden.accessToken(), "{\"presenceVisibility\":\"OFF\"}")
+				.andExpect(status().isOk());
+		watch(present(hidden, create(hidden, "Public", ",\"isPublic\":true").path("id").asString()));
+		TestUser other = signup();
+		befriend(other, hidden);
+		askToJoin(other, hidden, true).andExpect(status().isAccepted());
+	}
+
 	@Test
 	void settingsAtCreationAndTheirDefaults() throws Exception {
 		TestUser host = signup();

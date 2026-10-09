@@ -15,8 +15,12 @@ public class ChatMessage {
 	 * "join" / "leave" (text = the name then), "content" (text = the title), "kick" / "host" (text = that member's name),
 	 * "stamp" (a member's timestamp, text = their name then). `contentKey`: the video a position belongs to.
 	 */
+	/** `userName`: a message's author's name now (decision 112), so one who left still shows by name; else null. */
 	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, String kind,
-			long createdAt, boolean deleted, String contentKey) {
+			long createdAt, boolean deleted, String contentKey, String userName) {
+		View named(String name) {
+			return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, name);
+		}
 	}
 
 	@Id
@@ -54,7 +58,7 @@ public class ChatMessage {
 	}
 
 	View view() {
-		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey);
+		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, null);
 	}
 
 	/** A "content" line: about `room`'s video now (which video it names, for its title read late). */

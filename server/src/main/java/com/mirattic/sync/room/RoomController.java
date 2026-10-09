@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -50,7 +51,11 @@ class RoomController {
 	record Invite(@NotNull @Size(min = 1, max = 32) List<String> userIds) {
 	}
 
-	record WatchRequest(@NotBlank String friendId) {
+	/**
+	 * `joinPublic` (clients from 1.3.0): a friend in a public room is joined at once instead (decision 111). Left out
+	 * by older clients (a Boolean, so leaving it out isn't a 400): a request as before.
+	 */
+	record WatchRequest(@NotBlank String friendId, Boolean joinPublic) {
 	}
 
 	record Mute(@NotNull Boolean muted) {
@@ -237,10 +242,41 @@ class RoomController {
 	}
 
 	@PostMapping("/requests")
-	@ResponseStatus(HttpStatus.ACCEPTED)
-	Asked requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body) {
+	ResponseEntity<Asked> requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body) {
 		UserSummary me = rooms.requestWatch(jwt.getSubject(), body.friendId());
 		rooms.requireApart(me.id(), body.friendId());
+		// In a public room (decision 111): in at once, as from the public list (full: 409, said so). Kicked from it or a
+		// block with a member there (404): asked as before, for the friend to answer.
+		// Only while their friends see them watching (WATCHING: something playing, shown to friends), as the app offers
+		// 합류 요청 only then: a hidden or idle friend's room isn't told by this.
+		MediaPresence theirs = presence.watching(body.friendId());
+		String open = Boolean.TRUE.equals(body.joinPublic()) && theirs != null
+				? rooms.publicRoomWith(body.friendId(), theirs.provider(), theirs.contentId()) : null;
+		// ponytail: the friend may leave between this check and the join, which then still goes in — a public room
+		// anyone may join, so it opens nothing; lock their membership through it if that must hold.
+		if (open != null) {
+			try {
+				RoomService.Invited joined;
+				Long removed;
+				// The join and closing my earlier request to them as one step under the lock an answer (create/invite)
+				// claims requests under: their answer came first (I'm in their room by it) or finds nothing to answer.
+				synchronized (answerLock) {
+					joined = rooms.joinPublic(me.id(), open);
+					removed = openWatchRequests.remove(me.id() + ">" + body.friendId());
+				}
+				if (!joined.before().contains(me.id())) {
+					rooms.announce(open, joined.before());
+				}
+				if (removed != null) {
+					hub.sendEvent(body.friendId(), new ServerEvent("watch:cancel", null, me.id(), null, System.currentTimeMillis(), me));
+				}
+				return ResponseEntity.ok(new Asked(null, open));
+			} catch (ResponseStatusException e) {
+				if (e.getStatusCode() != HttpStatus.NOT_FOUND) {
+					throw e;
+				}
+			}
+		}
 		if (!hub.isOnline(body.friendId())) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "friend is offline");
 		}
@@ -260,18 +296,24 @@ class RoomController {
 		MediaPresence watching = presence.watching(body.friendId());
 		boolean known = watching != null && watching.contentId() != null;
 		rooms.requireRoomFor(me.id(), body.friendId(), known ? watching.provider() : null, known ? watching.contentId() : null);
-		openWatchRequests.values().removeIf(at -> now - at >= OPEN_WATCH_REQUEST_MS);
-		openWatchRequests.put(me.id() + ">" + body.friendId(), now);
-		hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now,
-				new IncomingRequest(me.id(), me.displayName(), OPEN_WATCH_REQUEST_MS)));
-		return new Asked(now);
+		// Opened under the lock a direct join closes requests under, checked apart again inside it: a join of mine to
+		// their room that went through meanwhile (decision 111) either came first (refused here, 409) or comes after
+		// (it closes this one), so no request outlives it.
+		synchronized (answerLock) {
+			rooms.requireApart(me.id(), body.friendId());
+			openWatchRequests.values().removeIf(at -> now - at >= OPEN_WATCH_REQUEST_MS);
+			openWatchRequests.put(me.id() + ">" + body.friendId(), now);
+			hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now,
+					new IncomingRequest(me.id(), me.displayName(), OPEN_WATCH_REQUEST_MS)));
+		}
+		return ResponseEntity.status(HttpStatus.ACCEPTED).body(new Asked(now, null));
 	}
 
 	/**
 	 * Which request this is (when it was made): a `watch:decline` names the request it declines, so a late one for
-	 * an earlier request can't clear a newer one.
+	 * an earlier request can't clear a newer one. `roomId` instead: no request, joined the friend's public room (200).
 	 */
-	record Asked(long askedAt) {
+	record Asked(Long askedAt, String roomId) {
 	}
 
 	/**
@@ -397,7 +439,7 @@ class RoomController {
 		// still counted (an expired one just goes).
 		if (removed != null && System.currentTimeMillis() - removed < OPEN_WATCH_REQUEST_MS) {
 			hub.sendEvent(friendId, new ServerEvent("watch:decline", null, jwt.getSubject(), null, System.currentTimeMillis(),
-					new Asked(removed)));
+					new Asked(removed, null)));
 		}
 	}
 

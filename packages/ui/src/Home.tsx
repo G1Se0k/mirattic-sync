@@ -348,7 +348,16 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     pendingDeclines.current.delete(friend.id);
     askedAt.current.delete(friend.id);
     try {
-      const at = (await api.requestWatch(friend.id))?.askedAt;
+      const answer = await api.requestWatch(friend.id);
+      if (answer?.roomId) {
+        // In their public room at once (decision 111): no request to wait for.
+        settledAsks.current.add(friend.id);
+        setAsked((list) => list.filter((id) => id !== friend.id));
+        void reload();
+        enter(answer.roomId);
+        return;
+      }
+      const at = answer?.askedAt;
       if (at !== undefined) askedAt.current.set(friend.id, at);
       // A decline that came while the call was out: this request's (same askedAt, or unnamed), or an earlier one's.
       if (pendingDeclines.current.has(friend.id)) decline(friend.id, pendingDeclines.current.get(friend.id));

@@ -13,10 +13,12 @@ import com.mirattic.sync.ws.SocketHub;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -684,7 +686,8 @@ public class RoomService {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
 		}
 		boolean same = contentKey != null && contentKey.equals(room.contentKey());
-		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null, same ? room : null)).view();
+		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null, same ? room : null)).view()
+				.named(nameOf(me));
 	}
 
 	/**
@@ -755,6 +758,28 @@ public class RoomService {
 		return join(me, found);
 	}
 
+	/**
+	 * The public room this friend is in right now (decision 111), or null — only for one whose presence shows friends
+	 * what they watch (the caller checks they watch something: together WATCHING, when the app shows 합류 요청), so this
+	 * tells nothing they hide.
+	 */
+	@Transactional(readOnly = true)
+	public String publicRoomWith(String friendId, MediaProvider provider, String contentId) {
+		if (users.findById(friendId).map(u -> u.getPresenceVisibility() != Visibility.FRIENDS).orElse(true)) {
+			return null;
+		}
+		// In several: the one on what they watch now, then one with room, then the newest (then by id).
+		Comparator<Room> pick = Comparator.<Room, Boolean>comparing(r -> r.content() != null && r.content().provider() == provider
+						&& r.content().contentId().equals(contentId))
+				.thenComparing(r -> memberIds(r.getId()).size() < memberLimit(r))
+				.thenComparing(Room::getCreatedAt)
+				.thenComparing(Room::getId); // made in the same millisecond: still one answer
+		return members.findByUserId(friendId).stream().map(RoomMember::getRoomId)
+				.filter(id -> hub.presentIn(id).contains(friendId))
+				.map(rooms::findById).flatMap(Optional::stream)
+				.filter(Room::isPublic).max(pick).map(Room::getId).orElse(null);
+	}
+
 	/** Joining a public room from the list (decision 110): as by its code; 404 once it isn't public. */
 	@Transactional
 	public Invited joinPublic(String me, String roomId) {
@@ -819,7 +844,12 @@ public class RoomService {
 					.filter(m -> m.roomId().equals(roomId)).orElseThrow(RoomService::notFound);
 			page = messages.findBefore(roomId, cursor.createdAt(), cursor.id(), Limit.of(CHAT_HISTORY));
 		}
-		List<ChatMessage.View> views = new ArrayList<>(page.stream().map(ChatMessage::view).toList());
+		// Messages carry their author's name (decision 112): one who left the room still shows by it.
+		Map<String, String> names = users.findAllById(page.stream().filter(m -> m.view().kind() == null)
+				.map(m -> m.view().userId()).distinct().toList()).stream()
+				.collect(Collectors.toMap(User::getId, User::getDisplayName));
+		List<ChatMessage.View> views = new ArrayList<>(page.stream()
+				.map(m -> m.view().kind() == null ? m.view().named(names.get(m.view().userId())) : m.view()).toList());
 		Collections.reverse(views);
 		return views;
 	}

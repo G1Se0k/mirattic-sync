@@ -410,6 +410,32 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void aMessageKeepsItsAuthorsNameAfterTheyLeave() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		friendWs.nextOfType("playback:update");
+		friendWs.send(event("chat:message", roomId, "{\"text\":\"bye\"}"));
+		// Decision 112: the author's name comes with the message, live and in the history.
+		assertThat(friendWs.nextOfType("chat:message").path("payload").path("userName").asString()).isEqualTo("Tester");
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/me", friend.accessToken(), null)
+				.andExpect(status().isNoContent());
+		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
+		JsonNode bye = null;
+		for (JsonNode m : history) {
+			if ("bye".equals(m.path("text").asString())) {
+				bye = m;
+			}
+		}
+		assertThat(bye).isNotNull();
+		assertThat(bye.path("userId").asString()).isEqualTo(friend.id());
+		assertThat(bye.path("userName").asString()).isEqualTo("Tester");
+	}
+
+	@Test
 	void membersChatWithMediaPositionsAndOutsidersCannot() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();

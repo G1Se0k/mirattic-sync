@@ -257,10 +257,11 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     };
   }, [picked]);
 
-  const name = (id: string) => {
+  // A member's name now; one who left: the name the message came with (decision 112), "나간 사용자" without one.
+  const name = (id: string, sent?: string | null) => {
     const member = members.find((m) => m.user.id === id)?.user.displayName;
-    if (id === meId) return `${member ?? "나"}(나)`;
-    return member ?? "나간 사용자";
+    if (id === meId) return `${member ?? sent ?? "나"}(나)`;
+    return member ?? sent ?? "나간 사용자";
   };
   // Moves playback only on the video it was taken on (a line from before the room's video changed: just a time).
   const timestamp = (ms: number | undefined, key: string | undefined) =>
@@ -297,9 +298,9 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
                   <button type="button" className={`author${picked?.line === item.id ? " on" : ""}`} aria-haspopup="dialog"
                     aria-expanded={picked?.line === item.id}
                     onClick={() => setPicked((p) => (p?.line === item.id ? null : { line: item.id, userId: item.userId }))}>
-                    {name(item.userId)}
+                    {name(item.userId, item.userName)}
                   </button>
-                ) : <span className="author">{name(item.userId)}</span>}
+                ) : <span className="author">{name(item.userId, item.userName)}</span>}
                 {item.deleted ? (
                   <span className="deleted">삭제된 메시지입니다</span>
                 ) : (
