@@ -117,6 +117,8 @@ export class RoomSync {
   private announced: RoomContent | null = null;
   /** The content this member was last shown, to tell a series step from a switch. */
   private shown: RoomContent | null = null;
+  /** The room's video as the last load followed it (`followed`); undefined before the first. */
+  private followedAt: RoomContent | null | undefined = undefined;
   private switchCheck = 0;
   /** "이 방에서 항상 허용" was ticked: this room's switches open without asking (until it is left). */
   private followAlways = false;
@@ -144,7 +146,7 @@ export class RoomSync {
     const r = this.state.room;
     if (this.isHost || !r?.type) return;
     this.switchCheck++; // anything else under way gives up
-    const url = r.content?.provider === r.type ? watchUrl(r.content) : this.deps.siteUrl?.(r.type);
+    const url = r.content?.provider === r.type && !this.away(r) ? watchUrl(r.content) : this.deps.siteUrl?.(r.type);
     if (url) this.deps.open(url);
   }
 
@@ -190,7 +192,10 @@ export class RoomSync {
     try {
       const room = await this.deps.loadRoom(this.deps.roomId);
       if (mine !== this.loads || this.disposed) return;
-      const before = this.state.room?.content;
+      const prev = this.state.room;
+      // What the last load followed (not worked out again: the host's video may have come back since).
+      const before = this.followedAt;
+      if (!this.away(prev) && this.away(room)) this.pauseForAway(); // before the follower stops (set below)
       this.set({ room, loadFailed: false });
       // An unconfirmed type change (decision 93): a follow still under way (a tab lookup) gives up, a prompt goes.
       if (this.typePending()) {
@@ -201,13 +206,36 @@ export class RoomSync {
       // also a follow of its video.
       const confirmed = this.confirming !== null && !this.typePending() && (room.typeSeen ?? 0) >= this.confirming;
       if (confirmed) this.confirming = null;
-      this.contentChanged(before, room.content, confirmed);
+      // The host's browser shows no video now (decision 115): a follow or open of the old one still under way gives up.
+      // A prompt to switch stays (the room screen hides it meanwhile): asked again once the host's video is back.
+      if (this.away(room)) this.switchCheck++;
+      this.followedAt = this.followed(room);
+      this.contentChanged(before, this.followedAt, confirmed);
       if (confirmed) this.followConfirmed();
     } catch (e) {
       if (mine !== this.loads || this.disposed) return;
       if (this.deps.isGone(e)) this.set({ closed: true });
       else this.set({ loadFailed: true });
     }
+  }
+
+  /**
+   * The room's video as this member follows it (decision 115): while the host's browser shows none, what was followed
+   * before stays (none on entering: no old video opens) — a video the room moved to meanwhile is followed as new once the
+   * host's is back.
+   */
+  private followed(room: RoomView): RoomContent | null {
+    return this.away(room) ? this.shown : room.content;
+  }
+
+  /**
+   * For a member, the room has no video to open or sync now (decision 115): the server says the host's browser shows
+   * none (`videoAway`), or the host isn't in / told none (`room:host-video` false — also for a room just made, whose
+   * host is on the way in: shown with its video, not followed until they're in).
+   */
+  private away(room: RoomView | null | undefined) {
+    const host = room?.members.some((m) => m.user.id === this.deps.meId && m.role === "HOST") ?? false;
+    return !host && (!!room?.videoAway || this.state.hostVideo === false);
   }
 
   private contentChanged(before: RoomContent | null | undefined, content: RoomContent | null, confirmed = false) {
@@ -267,7 +295,7 @@ export class RoomSync {
     const mine = ++this.switchCheck; // the room may move on again before the tab answers
     if (!before) return this.openOnEnter(content, url, player, mine, 0);
     void player.getSnapshot().then((s) => {
-      if (mine !== this.switchCheck || this.disposed || this.typePending() || s?.contentId === content.contentId) return;
+      if (mine !== this.switchCheck || this.disposed || this.typePending() || this.away(this.state.room) || s?.contentId === content.contentId) return;
       // The same series, the setting, or "이 방에서 항상 허용" (decision 81): opened without asking.
       if (sameSeries(before, content) || this.followAlways || this.deps.askOnSwitch?.() === false) this.deps.open(url, false, true);
       else this.set({ switched: content });
@@ -287,7 +315,7 @@ export class RoomSync {
     // Still this room video, and still a member (a wait may see the room move on or me become the host).
     const stillFollowing = () => {
       const now = this.state.room?.content;
-      return mine === this.switchCheck && !this.disposed && !this.isHost && !this.typePending()
+      return mine === this.switchCheck && !this.disposed && !this.isHost && !this.typePending() && !this.away(this.state.room)
         && now?.provider === content.provider && now.contentId === content.contentId;
     };
     if (watchingIt()) return;
@@ -370,7 +398,15 @@ export class RoomSync {
     }
     if (event.type === "room:host-video") {
       const watching = (event.payload as { watching?: unknown } | null)?.watching;
+      const wasAway = this.away(this.state.room);
       this.set({ hostVideo: typeof watching === "boolean" ? watching : null });
+      const away = this.away(this.state.room);
+      if (away && !wasAway) {
+        // No video to follow now (decision 115): what's under way gives up, the follower stops.
+        this.pauseForAway();
+        this.switchCheck++; // (a prompt to switch stays, hidden meanwhile)
+        this.restart();
+      } else if (wasAway && !away) void this.reload(); // back: followed as new (a reload follows it), the follower again
     }
     if (event.type === "playback:update") {
       const state = event.payload as PlaybackState;
@@ -391,7 +427,9 @@ export class RoomSync {
     const host = this.isHost;
     // A member who hasn't confirmed the room's type change (decision 93) isn't synced meanwhile (their player isn't
     // played, paused or moved by the room until they confirm; the room reloads then and this starts it).
-    const key = !ready ? "" : host ? (this.connected ? "host" : "") : this.typePending() ? "" : "member";
+    // Nor while the host's browser shows no room video (decision 115): the room has none to sync then — an old one still
+    // open here isn't played, paused or moved; the follower starts again (with the latest state) once it's back.
+    const key = !ready ? "" : host ? (this.connected ? "host" : "") : this.typePending() || this.away(this.state.room) ? "" : "member";
     const engineOf = this.player;
     if (key === this.engineKey && engineOf === this.enginePlayer) return;
     this.stopEngines();
@@ -429,6 +467,19 @@ export class RoomSync {
     });
     this.follower = follower;
     if (this.latest) follower.apply(this.latest);
+  }
+
+  /**
+   * A member's room just lost its video (decision 115): their player, if on the room's video and playing, is paused
+   * once — as the host's video going away always paused the members — then left alone (the follower stops).
+   */
+  private pauseForAway() {
+    const player = this.follower ? this.enginePlayer : null;
+    const contentId = this.state.room?.content?.contentId;
+    if (!player || !contentId) return;
+    // Only while still away when the snapshot answers: back meanwhile, the follower decides again.
+    void player.getSnapshot().then((s) => s?.playing && s.contentId === contentId && !this.disposed && this.away(this.state.room)
+      ? player.pause() : undefined).catch(() => {});
   }
 
   private stopEngines() {
@@ -487,7 +538,7 @@ export class RoomSync {
   openSwitched(always = false) {
     if (always) this.followAlways = true;
     const url = this.state.switched && watchUrl(this.state.switched);
-    if (url) this.deps.open(url);
+    if (url && !this.away(this.state.room)) this.deps.open(url); // (hidden while away: no old video opened)
     this.set({ switched: null });
   }
 

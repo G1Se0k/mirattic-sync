@@ -223,7 +223,9 @@ class SocketHandler extends TextWebSocketHandler {
 					error(session, reqId, "not_host");
 					return;
 				}
-				hub.hostVideoTold(roomId, me, watching.asBoolean(), () -> rooms.hostOf(roomId));
+				if (hub.hostVideoTold(roomId, me, watching.asBoolean(), () -> rooms.hostOf(roomId))) {
+					rooms.announce(roomId, rooms.memberIds(roomId)); // its video shows or not now (decision 115)
+				}
 			}
 			case "room:leave" -> {
 				if (joined(session).remove(roomId)) {
@@ -380,7 +382,9 @@ class SocketHandler extends TextWebSocketHandler {
 			hub.sendToRoom(roomId, playbackEvent(roomId, state));
 		}
 		if (rooms.isHost(userId, roomId)) {
-			hub.refreshHostVideo(roomId, () -> rooms.hostOf(roomId)); // none of the host's connections in the room: false
+			if (hub.refreshHostVideo(roomId, () -> rooms.hostOf(roomId))) { // none of the host's connections in the room: false
+				rooms.announce(roomId, rooms.memberIds(roomId));
+			}
 			closeIfHostStaysAway(userId, roomId);
 		}
 	}

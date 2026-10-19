@@ -50,14 +50,15 @@ public class RoomService {
 	 */
 	/**
 	 * `memberLimit`: how many members the room takes, the host included (decisions 106, 109). `name`: the host's name
-	 * for it, or null (decision 109). `isPublic`: in the public list (decision 110).
+	 * for it, or null (decision 109). `isPublic`: in the public list (decision 110). `videoAway`: the host's browser
+	 * shows no room video now (decision 115) — the app shows the room without one (`content` kept for when it's back).
 	 */
 	public record RoomView(String id, RoomContent content, List<MemberView> members, long createdAt, String code,
 			Long expiresInMs, MediaProvider type, long typeVersion, long typeSeen, int memberLimit, String name,
-			boolean isPublic) {
+			boolean isPublic, boolean videoAway) {
 		RoomView expiring(long ms) {
 			return new RoomView(id, content, members, createdAt, code, ms, type, typeVersion, typeSeen, memberLimit, name,
-					isPublic);
+					isPublic, videoAway);
 		}
 	}
 
@@ -117,6 +118,21 @@ public class RoomService {
 	static final String ALREADY_TOGETHER = "already in the same room";
 	/** The 409 detail of an unconfirmed back by the host (the client asks them, then sends it confirmed). */
 	static final String HOST_MUST_CONFIRM = "the host closes the room: confirm first";
+	/** Joining another room while hosting one (decision 115): the app asks before it closes. */
+	static final String HOST_MUST_SWITCH = "the host closes their room to join another: confirm first";
+
+	/**
+	 * One room per person (decision 115): what a join does with the caller's other rooms. KEEP: nothing (apps before
+	 * 1.3.1 don't say, and can't ask); ASK: leaves those they're a member of, and is refused (409 HOST_MUST_SWITCH)
+	 * while they host one; CLOSE: leaves them all, closing the one they host (they confirmed).
+	 */
+	public enum Others {
+		KEEP, ASK, CLOSE;
+
+		public static Others of(String param) {
+			return "close".equals(param) ? CLOSE : "ask".equals(param) ? ASK : KEEP;
+		}
+	}
 	static final int CHAT_HISTORY = 100;
 	private static final Pattern YOUTUBE_VIDEO_ID = Pattern.compile("[A-Za-z0-9_-]{11}");
 	private static final Pattern NETFLIX_ID = Pattern.compile("\\d{1,12}");
@@ -174,6 +190,8 @@ public class RoomService {
 			fresh.newCode();
 		}
 		Room room = rooms.save(fresh);
+		hub.roomMade(room.getId()); // its video is what the host's browser shows now: shown until they're in (decision 115)
+		graceOver(room.getId());
 		members.save(new RoomMember(room.getId(), me, RoomMember.Role.HOST));
 		for (String id : invitees) {
 			if (joinIds.contains(id)) {
@@ -278,7 +296,7 @@ public class RoomService {
 	 * `INVITATION_MS`), or when I and a member block each other; 409 when the room is full (the invitation stays).
 	 */
 	@Transactional
-	public Invited accept(String me, String roomId) {
+	public Invited accept(String me, String roomId, Others how) {
 		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		// Kicked since (after coming in by the code): only a new invite from the host lets them back (it unbans).
 		Long invitedAt = room.invitedAt(me);
@@ -294,6 +312,9 @@ public class RoomService {
 			if (before.size() >= memberLimit(room)) {
 				throw new ResponseStatusException(HttpStatus.CONFLICT, ROOM_FULL); // rolled back: still invited
 			}
+		}
+		requireSwitch(me, roomId, how); // only once it could be joined: tells nothing a 404 hides; rolled back: still invited
+		if (!before.contains(me)) {
 			members.save(new RoomMember(roomId, me, RoomMember.Role.MEMBER, room.typeVersion()));
 		}
 		return new Invited(view(room, members.findByRoomId(roomId), me), before);
@@ -404,7 +425,7 @@ public class RoomService {
 						|| hub.presentIn(r.getId()).isEmpty() || in.stream().anyMatch(m -> blocked.contains(m.getUserId()))) {
 					continue;
 				}
-				RoomContent c = r.content();
+				RoomContent c = shownContent(r, host.getUserId());
 				shown.add(new PublicRoom(r.getId(), r.getName(), c == null ? null : c.provider(),
 						c == null ? null : c.title(), names.get(host.getUserId()), in.size(), memberLimit(r)));
 				if (shown.size() == PUBLIC_PAGE) {
@@ -421,7 +442,7 @@ public class RoomService {
 	/**
 	 * A new watch request: refused (409, ROOM_FULL) when the room the friend's answer would invite me into is full. Their
 	 * app picks it like `roomToInvite` (packages/types): a room they host showing what they watch now (or without a video
-	 * yet), any room they host when they watch nothing; none → a new room, which has space. Refused only if every such
+	 * yet), any room they host when they watch nothing or none is on it (decision 115); none hosted → a new room, which has space. Refused only if every such
 	 * room is full (which one comes first is the app's). `provider` / `contentId`: what they watch (their presence), or null.
 	 * A prediction: the presence can be a moment behind the friend's app (a video changed just now), so the limit itself
 	 * is held when they answer (invite / accept refuse a full room); this only spares asking where that would fail.
@@ -433,12 +454,15 @@ public class RoomService {
 		if (users.findById(friendId).map(u -> u.getPresenceVisibility() != Visibility.FRIENDS).orElse(true)) {
 			return;
 		}
-		List<Room> answering = members.findByUserId(friendId).stream()
+		List<Room> hosted = members.findByUserId(friendId).stream()
 				.filter(m -> m.getRole() == RoomMember.Role.HOST)
 				.map(m -> rooms.findById(m.getRoomId()).orElse(null))
-				.filter(r -> r != null && (provider == null || r.content() == null
-						|| r.content().provider() == provider && r.content().contentId().equals(contentId)))
+				.filter(java.util.Objects::nonNull)
 				.toList();
+		List<Room> onIt = hosted.stream().filter(r -> provider == null || r.content() == null
+				|| r.content().provider() == provider && r.content().contentId().equals(contentId)).toList();
+		// None on it: still one they host (decision 115, as the app's roomToInvite — not a new room while they host one).
+		List<Room> answering = onIt.isEmpty() ? hosted : onIt;
 		// A room I'm already in takes me without anyone more (the answer only tells me).
 		if (!answering.isEmpty() && answering.stream().allMatch(r -> {
 			List<String> in = memberIds(r.getId());
@@ -561,6 +585,45 @@ public class RoomService {
 		}
 		return leave(me, roomId);
 	}
+
+	/**
+	 * Before a join into `targetId` (null: a new room, or not known yet): refused while the caller hosts another room
+	 * and hasn't confirmed closing it (decision 115). Checked first, so nothing changes if they don't.
+	 */
+	@Transactional(readOnly = true)
+	public void requireSwitch(String me, String targetId, Others how) {
+		if (how == Others.ASK && members.findByUserId(me).stream()
+				.anyMatch(m -> m.getRole() == RoomMember.Role.HOST && !m.getRoomId().equals(targetId))) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, HOST_MUST_SWITCH);
+		}
+	}
+
+	/**
+	 * After joining `keptId` (decision 115): out of every other room — those hosted kept unless CLOSE (one hosted only
+	 * since the check stays: it's never closed without asking). @return what to tell, as {@link #leaveAll}.
+	 */
+	@Transactional
+	public List<Departure> leaveOthers(String me, String keptId, Others how) {
+		if (how == Others.KEEP) {
+			return List.of();
+		}
+		List<Departure> gone = new java.util.ArrayList<>();
+		for (RoomMember m : members.findByUserId(me)) {
+			if (m.getRoomId().equals(keptId) || how != Others.CLOSE && m.getRole() == RoomMember.Role.HOST) {
+				continue;
+			}
+			try {
+				gone.add(new Departure(m.getRoomId(), leave(me, m.getRoomId())));
+			} catch (ResponseStatusException e) {
+				// Closed (or left) meanwhile: out of it already — the join stands, never reported as failed for this.
+				if (e.getStatusCode() != HttpStatus.NOT_FOUND) {
+					throw e;
+				}
+			}
+		}
+		return gone;
+	}
+
 
 	/** Account deletion: leaves every room (closing those hosted), in the caller's transaction. */
 	@Transactional
@@ -763,13 +826,13 @@ public class RoomService {
 	 * Already a member: just the room.
 	 */
 	@Transactional
-	public Invited joinByCode(String me, String input) {
+	public Invited joinByCode(String me, String input, Others how) {
 		String code = input == null ? null : FriendCode.normalize(input);
 		Room found = code == null ? null : rooms.findByCodeForUpdate(code).orElse(null);
 		if (found == null) {
 			throw notFound();
 		}
-		return join(me, found);
+		return join(me, found, how);
 	}
 
 	/** An invitation link's room (decision 113), by its code; 404 for one that can't be or isn't a room's. */
@@ -783,7 +846,8 @@ public class RoomService {
 		List<RoomMember> in = members.findByRoomId(found.getId());
 		String hostName = in.stream().filter(m -> m.getRole() == RoomMember.Role.HOST).findFirst()
 				.flatMap(m -> users.findById(m.getUserId())).map(User::getDisplayName).orElseThrow(RoomService::notFound);
-		RoomContent c = found.content();
+		RoomContent c = shownContent(found, in.stream().filter(m -> m.getRole() == RoomMember.Role.HOST)
+				.map(RoomMember::getUserId).findFirst().orElse(null));
 		return new InvitePreview(found.getName(), c == null ? null : c.provider(), c == null ? null : c.title(), hostName,
 				in.size(), memberLimit(found), found.isPublic());
 	}
@@ -809,7 +873,10 @@ public class RoomService {
 	@Transactional(readOnly = true)
 	public PresenceView.PublicRoom publicRoomOf(String friendId, MediaProvider provider, String contentId, String viewer) {
 		return publicRoom(friendId, provider, contentId, shownTo(viewer))
-				.map(r -> new PresenceView.PublicRoom(r.getName() != null ? r.getName() : r.content() != null ? r.content().title() : null))
+				.map(r -> {
+					RoomContent c = r.getName() != null ? null : shownContent(r);
+					return new PresenceView.PublicRoom(r.getName() != null ? r.getName() : c != null ? c.title() : null);
+				})
 				.orElse(null);
 	}
 
@@ -833,12 +900,12 @@ public class RoomService {
 
 	/** Joining a public room from the list (decision 110): as by its code; 404 once it isn't public. */
 	@Transactional
-	public Invited joinPublic(String me, String roomId) {
+	public Invited joinPublic(String me, String roomId, Others how) {
 		Room found = rooms.findForUpdate(roomId).filter(Room::isPublic).orElseThrow(RoomService::notFound);
-		return join(me, found);
+		return join(me, found, how);
 	}
 
-	private Invited join(String me, Room found) {
+	private Invited join(String me, Room found, Others how) {
 		List<String> before = memberIds(found.getId());
 		if (!before.contains(me)) {
 			// A share-locking read: a block committed first is seen, and a block made meanwhile waits for this join
@@ -849,6 +916,10 @@ public class RoomService {
 			if (before.size() >= memberLimit(found)) {
 				throw new ResponseStatusException(HttpStatus.CONFLICT, ROOM_FULL);
 			}
+		}
+		// Asked only once it could be joined (decision 115): a code or room hidden by a 404 isn't told by a 409.
+		requireSwitch(me, found.getId(), how);
+		if (!before.contains(me)) {
 			members.save(new RoomMember(found.getId(), me, RoomMember.Role.MEMBER, found.typeVersion()));
 			found.uninvite(me); // in by the code: an invitation to it is answered
 		}
@@ -1014,6 +1085,26 @@ public class RoomService {
 		return members.findByRoomIdAndUserId(roomId, me).orElseThrow(RoomService::notFound);
 	}
 
+	/**
+	 * A just-made room's grace (decision 115) over: if its host never came in, it shows no video from now — told to
+	 * the members in it (and the lists) as any host-video change. Nothing if they came in (that ended it) or it closed.
+	 */
+	private void graceOver(String roomId) {
+		java.util.concurrent.CompletableFuture.delayedExecutor(SocketHub.MADE_GRACE_MS + 100, java.util.concurrent.TimeUnit.MILLISECONDS)
+				.execute(() -> {
+					try {
+						// Still not in: the room shows none now (members already heard `room:host-video` false — only
+						// the grace kept its video shown — so a refetch is what changes).
+						String host = hostOf(roomId);
+						if (host != null && !hub.presentIn(roomId).contains(host)) {
+							announce(roomId, memberIds(roomId));
+						}
+					} catch (RuntimeException e) {
+						// closed meanwhile: nothing to tell
+					}
+				});
+	}
+
 	/** `viewer` gets their own `typeSeen`; null = a view for someone else. */
 	private RoomView view(Room room, List<RoomMember> list, String viewer) {
 		Map<String, User> byId = users.findAllById(list.stream().map(RoomMember::getUserId).toList()).stream()
@@ -1027,7 +1118,18 @@ public class RoomService {
 		RoomMember self = list.stream().filter(m -> m.getUserId().equals(viewer)).findFirst().orElse(null);
 		return new RoomView(room.getId(), room.content(), views, room.getCreatedAt(), room.getCode(), null, room.type(),
 				room.typeVersion(), self == null ? room.typeVersion() : self.getTypeSeenVersion(), memberLimit(room),
-				room.getName(), room.isPublic());
+				room.getName(), room.isPublic(), hub.showsNoVideo(room.getId(), list.stream()
+						.filter(m -> m.getRole() == RoomMember.Role.HOST).map(RoomMember::getUserId).findFirst().orElse(null)));
+	}
+
+	/** What the room shows as its video to anyone outside it (decision 115): none while the host's browser shows none. */
+	private RoomContent shownContent(Room room) {
+		return shownContent(room, hostOf(room.getId()));
+	}
+
+	/** The same, with its host already known (a list: no query per room). */
+	private RoomContent shownContent(Room room, String hostId) {
+		return hub.showsNoVideo(room.getId(), hostId) ? null : room.content();
 	}
 
 	private static ResponseStatusException notFound() {

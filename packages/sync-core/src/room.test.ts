@@ -318,6 +318,95 @@ it("a room entered without a video opens its first one; a restored one (not ente
   }
 });
 
+it("entering while the host's browser shows no video opens none; it opens once the host's is back (decision 115)", async () => {
+  let view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "Old" }, videoAway: true };
+  const opened: string[] = [];
+  const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+  const youtube = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false,
+    send: () => true, adapter: (p) => (p === "youtube" ? youtube : undefined), nowWatching: () => null,
+    open: (url) => void opened.push(url), onChange: () => {}, openOnEnter: true,
+  });
+  sync.setConnected(true);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(opened).toEqual([]);
+  view = { ...view, content: { provider: "youtube", contentId: "bbbbbbbbbbb", title: "Back" }, videoAway: false };
+  await sync.reload();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(opened).toEqual(["https://www.youtube.com/watch?v=bbbbbbbbbbb"]);
+  sync.dispose();
+});
+
+it("a prompt to switch videos is still there once the host's video is back (decision 115)", async () => {
+  let view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "A" } };
+  const mock = new MockMediaProvider({ contentId: "aaaaaaaaaaa", title: "A", durationMs: 600_000 });
+  const youtube = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => youtube, nowWatching: () => null, open: () => {}, onChange: () => {}, askOnSwitch: () => true,
+  });
+  sync.setConnected(true);
+  await settle();
+  view = { ...view, content: { provider: "youtube", contentId: "bbbbbbbbbbb", title: "B" } };
+  await sync.reload();
+  await settle();
+  expect(sync.state.switched?.contentId).toBe("bbbbbbbbbbb");
+  sync.handle({ type: "room:host-video", roomId: "r1", payload: { watching: false }, serverTime: Date.now() } as ServerEvent);
+  view = { ...view, videoAway: true };
+  await sync.reload();
+  await settle();
+  sync.handle({ type: "room:host-video", roomId: "r1", payload: { watching: true }, serverTime: Date.now() } as ServerEvent);
+  view = { ...view, videoAway: false };
+  await sync.reload();
+  await settle();
+  expect(sync.state.switched?.contentId).toBe("bbbbbbbbbbb");
+  sync.dispose();
+});
+
+it("entering a just-made room before its host is in opens nothing until they are (decision 115)", async () => {
+  const view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "New" } }; // shown (grace)
+  const opened: string[] = [];
+  const mock = new MockMediaProvider({ contentId: "zzzzzzzzzzz", title: "Else", durationMs: 600_000 });
+  const youtube = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false,
+    send: () => true, adapter: (p) => (p === "youtube" ? youtube : undefined), nowWatching: () => null,
+    open: (url) => void opened.push(url), onChange: () => {}, openOnEnter: true,
+  });
+  sync.setConnected(true);
+  sync.handle({ type: "room:host-video", roomId: "r1", payload: { watching: false }, serverTime: Date.now() } as ServerEvent); // not in yet
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(opened).toEqual([]);
+  sync.handle({ type: "room:host-video", roomId: "r1", payload: {}, serverTime: Date.now() } as ServerEvent); // in now
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(opened).toEqual(["https://www.youtube.com/watch?v=aaaaaaaaaaa"]);
+  sync.dispose();
+});
+
+it("a video the room moved to while the host showed none is followed once the host's is back (decision 115)", async () => {
+  let view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "A" } };
+  const opened: string[] = [];
+  const mock = new MockMediaProvider({ contentId: "aaaaaaaaaaa", title: "A", durationMs: 600_000 });
+  const youtube = new Proxy(mock, { get: (t, k) => (k === "provider" ? "youtube" : Reflect.get(t, k, t)) });
+  const sync = new RoomSync({
+    roomId: "r1", meId: "me", loadRoom: async () => view, isGone: () => false, send: () => true,
+    adapter: () => youtube, nowWatching: () => null, open: (url) => void opened.push(url), onChange: () => {},
+    askOnSwitch: () => false,
+  });
+  sync.setConnected(true);
+  await settle();
+  view = { ...view, content: { provider: "youtube", contentId: "bbbbbbbbbbb", title: "B" }, videoAway: true };
+  await sync.reload();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(opened).toEqual([]);
+  view = { ...view, videoAway: false };
+  await sync.reload();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(opened).toEqual(["https://www.youtube.com/watch?v=bbbbbbbbbbb"]);
+  sync.dispose();
+});
+
 it("a member who hasn't confirmed the room's type change isn't moved to another site's video (their confirmation does it)", async () => {
   let view: RoomView = { ...room("host"), content: { provider: "youtube", contentId: "aaaaaaaaaaa", title: "First" }, type: "youtube", typeVersion: 0, typeSeen: 0 };
   const opened: string[] = [];
@@ -398,6 +487,22 @@ it("a member isn't synced (no playback applied) until they confirm the room's ty
   await vi.advanceTimersByTimeAsync(3_000);
   expect((await m.player.getSnapshot())!.playing).toBe(false); // not driven while unconfirmed
   view = { ...view, typeSeen: 1 }; // confirmed
+  await m.sync.reload();
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect((await m.player.getSnapshot())!.playing).toBe(true);
+  m.sync.dispose();
+});
+
+it("a member isn't synced while the host's browser shows no video, and is again once it's back (decision 115)", async () => {
+  let view: RoomView = { ...room("host"), type: "laftel", videoAway: true };
+  const m = start("me", "host");
+  m.sync["deps"].loadRoom = async () => view;
+  await m.sync.reload();
+  await measured(m);
+  m.event({ type: "playback:update", roomId: "r1", payload: { provider: "laftel", contentId: "c1", positionMs: 300_000, playing: true, capturedAt: Date.now(), version: 5 } });
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect((await m.player.getSnapshot())!.playing).toBe(false); // the old video open here isn't driven
+  view = { ...view, videoAway: false };
   await m.sync.reload();
   await vi.advanceTimersByTimeAsync(3_000);
   expect((await m.player.getSnapshot())!.playing).toBe(true);

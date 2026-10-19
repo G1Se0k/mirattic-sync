@@ -1,8 +1,8 @@
 import { browser, type Browser } from 'wxt/browser';
-import { ApiError, connectSocket, createApi, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
+import { ApiError, connectSocket, createApi, HOST_MUST_SWITCH, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { PAUSE_REQUEST_SHOWN_MS, RoomSync } from '@mirattic/sync-core';
 import {
-  INCOMING_MS, PROVIDER_NAMES, roomToInvite, type IncomingRequest, type MediaProvider, type RoomContent, type RoomView, type ServerEvent,
+  INCOMING_MS, PROVIDER_NAMES, roomTitle, roomToInvite, shownContent, type IncomingRequest, type MediaProvider, type RoomContent, type RoomView, type ServerEvent,
 } from '@mirattic/types';
 import { API_URL, SOCKET_URL, authorize, store } from '../session';
 import { hasConsent } from '../consent';
@@ -279,6 +279,8 @@ export default defineBackground(() => {
   const alertUntil = new Map<string, number>();
   /** Invitations waiting for their channel lookup, by room: only the latest lookup shows, if not settled meanwhile. */
   const pendingInvites = new Map<string, object>();
+  /** Invitations' room codes (room → code), while alerted. */
+  const inviteCodes = new Map<string, string>();
 
   /** `ms`: how long it counts (decision 87: 30 s): the toast shows that long, the badge counts it that long. */
   function alert(kind: AlertKind, target: string, ms: number, title: string, body = '', meta?: string) {
@@ -335,9 +337,10 @@ export default defineBackground(() => {
     const until = Date.now() + INCOMING_MS; // from now, however long the details take (each lookup bounded)
     const view = await within(api.room(roomId).catch(() => null), null);
     const host = view?.members.find((m) => m.role === 'HOST')?.user;
-    const meta = view ? await whereToWatch(view.content, host?.id ?? friendId ?? '') : undefined;
+    const shown = view ? shownContent(view) : null; // none while the host's browser shows none (decision 115)
+    const meta = view ? await whereToWatch(shown, host?.id ?? friendId ?? '') : undefined;
     const ms = until - Date.now();
-    if (ms > 0) alert('answered', roomId, ms, `${host?.displayName ?? '친구'}님이 합류 요청을 수락했습니다`, view?.content?.title ?? '', meta);
+    if (ms > 0) alert('answered', roomId, ms, `${host?.displayName ?? '친구'}님이 합류 요청을 수락했습니다`, shown?.title ?? '', meta);
   }
 
   /** Settled (answered, cancelled, expired): no longer counted, and off every page, so it can't be answered. */
@@ -401,9 +404,12 @@ export default defineBackground(() => {
    * runs here); the panel opens too if Chrome still counts the click, and follows the room. Failures (the invite
    * gone, nothing watched) leave it to the panel.
    */
-  async function answerAlert({ kind, target, accept, always }: ToastAnswer) {
+  /** `windowId`: the tab's window the toast was answered in; `opened`: whether its panel opened there on the click. */
+  async function answerAlert({ kind, target, accept, always }: ToastAnswer, windowId?: number, opened = Promise.resolve(false)) {
     const answered = alerts.find((a) => a.kind === kind && a.target === target);
     if (!answered || !meId) return;
+    // Read now: a panel connecting meanwhile (the click opens it) clears the alerts and these codes.
+    const code = kind === 'invite' ? inviteCodes.get(target) : undefined;
     // Off the list now (a second click does nothing); back if the call fails, unless it is gone for good.
     dropAlerts((a) => a === answered);
     try {
@@ -426,6 +432,15 @@ export default defineBackground(() => {
         else room.dismissPauseRequest();
       }
     } catch (e) {
+      // I host another room (decision 115): asked in the panel the click opened (nothing changed meanwhile). The
+      // invitation is handed to it as an invitation link's code is (decision 113): it asks at once, then joins or not.
+      // (A request never gets here: it is answered into the room I host, not a new one — roomToInvite.)
+      if (e instanceof ApiError && e.status === 409 && e.message === HOST_MUST_SWITCH && code && windowId !== undefined
+        && await opened) {
+        void acceptInvite(async () => {}, () => browser.storage.session.set({ [INVITE_KEY]: { code, id: crypto.randomUUID(), at: Date.now(), windowId } }));
+        return;
+      }
+      // (No panel opened: the toast comes back below, answerable again — nothing changed.)
       // Still open (nothing watched, offline): answerable again for its time left. Gone (404): nothing to redo.
       const left = answered.until - Date.now();
       if (!(e instanceof ApiError && e.status === 404) && left > 0) alert(kind, target, left, answered.title, answered.toast.body, answered.toast.meta);
@@ -569,6 +584,7 @@ export default defineBackground(() => {
   function clearAlerts() {
     alerts = [];
     pendingInvites.clear();
+    inviteCodes.clear();
     publishAlerts();
     toTabs({ type: TOAST_CLEAR });
   }
@@ -675,11 +691,13 @@ export default defineBackground(() => {
       const title = `${host?.user.displayName ?? '친구'}님의 같이 보기 초대`;
       const lookup = {};
       pendingInvites.set(view.id, lookup);
-      void whereToWatch(view.content, host?.user.id ?? '').then((meta) => {
+      if (view.code) inviteCodes.set(view.id, view.code); // to hand to the panel if accepting needs asking (decision 115)
+      const shown = shownContent(view); // none while the host's browser shows none (decision 115)
+      void whereToWatch(shown, host?.user.id ?? '').then((meta) => {
         if (pendingInvites.get(view.id) !== lookup) return; // settled, or invited again since
         pendingInvites.delete(view.id);
         const ms = until - Date.now();
-        if (ms > 0) alert('invite', view.id, ms, title, view.content?.title ?? '아직 고른 영상이 없습니다', meta);
+        if (ms > 0) alert('invite', view.id, ms, title, roomTitle(view) ?? (view.content ? '영상 없음' : '아직 고른 영상이 없습니다'), meta);
       });
     }
     // Answered by me elsewhere (`room:update` to me), or the room closed: the invitation is settled.
@@ -1058,14 +1076,15 @@ export default defineBackground(() => {
     }
     if (m?.type !== TOAST_ANSWER || !active(m.kind, m.target, m.alertId)) return; // settled or replaced meanwhile
     // First, while the click may still count as the user's gesture; entering a room shows in it.
-    if (m.accept && m.kind !== 'pause' && m.kind !== 'type') void browser.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
-    void answerAlert(m);
+    const opened = m.accept && m.kind !== 'pause' && m.kind !== 'type'
+      ? browser.sidePanel.open({ windowId: sender.tab.windowId }).then(() => true, () => false) : Promise.resolve(false);
+    void answerAlert(m, sender.tab.windowId, opened);
   });
 
   // An invitation link (decision 113): only from the server's own page. The panel opens first, while the click on
   // 수락하고 입장 still counts as the user's gesture; it takes the code from storage.session and joins.
   const inviteOrigin = new URL(API_URL).origin;
-  const accept = acceptances();
+  const acceptInvite = acceptances();
   browser.runtime.onMessageExternal.addListener((m, sender, reply) => {
     const windowId = sender.tab?.windowId;
     if (sender.origin !== inviteOrigin || windowId === undefined) return;
@@ -1074,7 +1093,7 @@ export default defineBackground(() => {
     if (!code) return;
     // Called at once (the gesture); the code is left only once the panel is open, so a failed open leaves nothing to
     // join later and the page asks again. One accepted after it wins, however their opens and writes end.
-    void accept(
+    void acceptInvite(
       () => browser.sidePanel.open({ windowId }),
       () => browser.storage.session.set({ [INVITE_KEY]: { code, id: crypto.randomUUID(), at: Date.now(), windowId } }),
     ).then((ok) => reply({ ok }), () => reply({ ok: false }));

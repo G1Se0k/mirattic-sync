@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
+import { ApiError, HOST_MUST_SWITCH, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
   FriendRequests,
   FriendView,
@@ -9,13 +9,13 @@ import type {
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
-import { contentKey, episodeLabel, INCOMING_MS, MAX_MEMBERS, memberLimitOf, roomTitle, roomToInvite, type IncomingRequest, type RoomSettings, type WatchingInfo } from "@mirattic/types";
+import { contentKey, episodeLabel, INCOMING_MS, MAX_MEMBERS, memberLimitOf, roomTitle, roomToInvite, shownContent, type IncomingRequest, type RoomSettings, type WatchingInfo } from "@mirattic/types";
 import { api, platform } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
 import { MyFriendCode, Settings } from "./Settings";
 import { usePrivacySave } from "./Privacy";
-import { PublicRoomsDialog, RoomSettingsDialog } from "./RoomSettings";
+import { Declined, PublicRoomsDialog, RoomSettingsDialog, type OneRoom } from "./RoomSettings";
 import { latest, PROVIDER_NAMES } from "./format";
 import { Avatar, Icon, IconButton, PanelWindowButton, ProviderIcon } from "./Icons";
 import { Actions, Dialog, TimeBar, useAsk } from "./Dialog";
@@ -289,6 +289,26 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     setOpenRoom(id);
   }
 
+  /**
+   * One room per person (decision 115): a join leaves my other rooms; while I host one, I'm asked first — yes closes it
+   * and joins, no throws `Declined` (nothing changed).
+   */
+  async function oneRoom<T>(join: (close: boolean) => Promise<T>): Promise<T> {
+    try {
+      return await join(false);
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 409 && e.message === HOST_MUST_SWITCH)) throw e;
+      const hosted = rooms.find((r) => r.members.some((m) => m.role === "HOST" && m.user.id === me.id));
+      const title = hosted ? roomTitle(hosted) ?? "새 방" : null;
+      const yes = await asker.ask("내 방을 닫고 이동할까요?", {
+        body: `한 번에 한 방에만 있을 수 있습니다. 내가 방장인 ${title ? `'${title}'` : "방"}이 닫히고 모든 멤버가 나가게 됩니다.`,
+        ok: "방 닫고 이동", danger: true,
+      });
+      if (!yes) throw new Declined();
+      return join(true);
+    }
+  }
+
   // An invitation link's code (decision 113), handed over by the platform: joined as by 코드로 입장, here or in a room.
   // Two accepted close together: only the last one's answer moves the screen.
   const invite = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.invite ?? nothing);
@@ -299,9 +319,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     setScreen("home");
     setError(null);
     const join = ++inviteJoins.current;
-    api.joinRoomByCode(invite.code).then(
+    oneRoom((close) => api.joinRoomByCode(invite.code, close)).then(
       (r) => { void reload(); if (join === inviteJoins.current) enter(r.id); },
-      (err) => { if (join === inviteJoins.current) setError(joinError(err)); });
+      (err) => { if (join === inviteJoins.current && !(err instanceof Declined)) setError(joinError(err)); });
   }, [invite]); // once per invitation (its object changes only with another)
 
   const sorted = [...friends].sort((a, b) => rank(a.presence) - rank(b.presence));
@@ -315,9 +335,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     const hosted = roomToInvite(rooms, me.id, openRoom, watching);
     try {
       if (hosted) await api.inviteToRoom(hosted.id, [friend.id]);
-      setOpenRoom(hosted?.id ?? (await api.createRoom(watching, [friend.id])).id); // no video yet: a room without one
+      // No video yet: a room without one.
+      setOpenRoom(hosted?.id ?? (await oneRoom((close) => api.createRoom(watching, [friend.id], undefined, close))).id);
       changeRequest(friend, false); // answered; kept on failure to retry
     } catch (e) {
+      if (e instanceof Declined) return;
       // The room filled up since the request (its check is a prediction, decision 106): said plainly.
       const full = e instanceof ApiError && (e.message === "room full" || e.message === "too many invites");
       setError(full ? `방이 가득 차서 ${friend.displayName}님을 초대할 수 없습니다 (최대 ${hosted ? memberLimitOf(hosted) : 8}명).`
@@ -343,9 +365,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     if (creating.current) return;
     creating.current = true;
     try {
-      const room = await api.createRoom(content, [], settings);
+      const room = await oneRoom((close) => api.createRoom(content, [], settings, close));
       setNewRoom(null);
       if (!current.current.openRoom) setOpenRoom(room.id);
+    } catch (e) {
+      if (!(e instanceof Declined)) throw e; // kept open: nothing made
     } finally {
       creating.current = false;
     }
@@ -363,7 +387,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     pendingDeclines.current.delete(friend.id);
     askedAt.current.delete(friend.id);
     try {
-      const answer = await api.requestWatch(friend.id);
+      const answer = await oneRoom((close) => api.requestWatch(friend.id, close));
       if (answer?.roomId) {
         // In their public room at once (decision 111): no request to wait for.
         settledAsks.current.add(friend.id);
@@ -377,6 +401,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       // A decline that came while the call was out: this request's (same askedAt, or unnamed), or an earlier one's.
       if (pendingDeclines.current.has(friend.id)) decline(friend.id, pendingDeclines.current.get(friend.id));
     } catch (e) {
+      if (e instanceof Declined) return void setAsked((list) => list.filter((id) => id !== friend.id)); // nothing sent
       const status = e instanceof ApiError ? e.status : 0;
       if (status > 0) setAsked((list) => list.filter((id) => id !== friend.id)); // refused (429: asked, then took it back)
       else {
@@ -424,11 +449,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     setInvitations((list) => list.filter((r) => r.id !== room.id));
     try {
       if (accept) {
-        await api.acceptInvitation(room.id);
+        await oneRoom((close) => api.acceptInvitation(room.id, close));
         setOpenRoom(room.id);
       } else await api.declineInvitation(room.id);
       void reload();
     } catch (e) {
+      if (e instanceof Declined) return void setInvitations((list) => [room, ...list.filter((r) => r.id !== room.id)]); // still invited
       const status = e instanceof ApiError ? e.status : 0;
       // Still invited unless the server says it's gone: the banner stays for another try.
       if (status !== 404) setInvitations((list) => [room, ...list.filter((r) => r.id !== room.id)]);
@@ -534,7 +560,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   const incoming = invited ? (
     <Dialog alert title={`${invitingHost?.displayName ?? "친구"}님이 같이 보기에 초대했습니다`} onClose={() => void answerInvitation(invited, false)}>
-      <p>{roomTitle(invited) ?? "아직 고른 영상이 없습니다"}</p>
+      <p>{roomTitle(invited) ?? (invited.content ? "영상 없음" : "아직 고른 영상이 없습니다")}</p>
       <Actions>
         <button className="link" onClick={() => void answerInvitation(invited, false)}>거절</button>
         <button onClick={() => void answerInvitation(invited, true)}>입장</button>
@@ -579,6 +605,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         {incoming}
         {endedNotice}
         {typeChanged}
+        {asker.dialog /* joining another room from here (an invitation, a link): asked over the room */}
       </div>
     );
   }
@@ -596,7 +623,6 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 
   return (
     <div className="home">
-      {asker.dialog}
       <header className="topbar">
         <img className="topbar-logo" src={logo} alt="" />
         <span className="wordmark grow">Mirattic <span>Sync</span></span>
@@ -656,7 +682,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 const here = r.id === activeRoom;
                 return (
                   <li key={r.id} className={`item${here ? " active" : ""}`} aria-current={here ? "true" : undefined}>
-                    {r.content ? <ProviderIcon provider={r.content.provider} /> : <span className="provider none" title="영상 없음">·</span>}
+                    {shownContent(r) ? <ProviderIcon provider={shownContent(r)!.provider} /> : <span className="provider none" title="영상 없음">·</span>}
                     <div className="grow">
                       <div className="name ellipsis">{roomTitle(r) ?? "영상 없음"}</div>
                       <div className="muted">
@@ -677,10 +703,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             onClose={() => setNewRoom(null)} />
         )}
         {browsing && (
-          <PublicRoomsDialog inRoom={(id) => rooms.some((r) => r.id === id)}
+          <PublicRoomsDialog inRoom={(id) => rooms.some((r) => r.id === id)} oneRoom={oneRoom}
             onJoined={(id) => { setBrowsing(false); void reload(); enter(id); }} onClose={() => setBrowsing(false)} />
         )}
-        {joining && <JoinByCode onJoined={(id) => { setJoining(false); void reload(); enter(id); }} onClose={() => setJoining(false)} />}
+        {joining && <JoinByCode oneRoom={oneRoom} onJoined={(id) => { setJoining(false); void reload(); enter(id); }} onClose={() => setJoining(false)} />}
 
         <section className="group">
           <div className="group-head">
@@ -775,6 +801,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           <IconButton icon="hash" label={showCode ? "친구 코드 닫기" : "내 친구 코드"} onClick={() => setShowCode((v) => !v)} />
         </div>
       </footer>
+      {asker.dialog /* last: over the dialog it asks from (코드로 입장, 공개 방) */}
     </div>
   );
 }
@@ -812,7 +839,7 @@ function joinError(err: unknown): string {
   return status === 404 ? "그 코드의 방이 없습니다." : status === 409 ? "방이 가득 찼습니다." : status === 429 ? "잠시 후 다시 시도하세요." : "입장하지 못했습니다.";
 }
 
-function JoinByCode({ onJoined, onClose }: { onJoined: (roomId: string) => void; onClose: () => void }) {
+function JoinByCode({ oneRoom, onJoined, onClose }: { oneRoom: OneRoom; onJoined: (roomId: string) => void; onClose: () => void }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -820,9 +847,9 @@ function JoinByCode({ onJoined, onClose }: { onJoined: (roomId: string) => void;
     e.preventDefault();
     setError(null);
     try {
-      onJoined((await api.joinRoomByCode(code)).id);
+      onJoined((await oneRoom((close) => api.joinRoomByCode(code, close))).id);
     } catch (err) {
-      setError(joinError(err));
+      if (!(err instanceof Declined)) setError(joinError(err));
     }
   }
 

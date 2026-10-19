@@ -232,6 +232,8 @@ export type RoomView = {
   typeSeen?: number;
   /** Members the room takes, the host included (decisions 106, 109); absent from an older server (8 then). */
   memberLimit?: number;
+  /** The host's browser shows no room video now (decision 115): shown without one (see `shownContent`). */
+  videoAway?: boolean;
   /** The host's name for it (decision 109); none: the video's title shows. */
   name?: string | null;
   /** In the public list, where anyone may join (decision 110). */
@@ -244,9 +246,12 @@ export const MIN_MEMBERS = 2;
 export const MAX_MEMBERS = 8;
 export const MAX_ROOM_NAME = 20;
 
-/** A room's title: the host's name for it, else its video's. */
-export const roomTitle = (room: { name?: string | null; content?: { title?: string } | null }) =>
-  room.name || room.content?.title;
+/** A room's title: the host's name for it, else its video's (none while the host's browser shows none, decision 115). */
+export const roomTitle = (room: { name?: string | null; content?: { title?: string } | null; videoAway?: boolean }) =>
+  room.name || shownContent(room)?.title;
+
+/** The room's video as shown (decision 115): none while the host's browser shows none (`content` is kept for its return). */
+export const shownContent = <C>(room: { content?: C | null; videoAway?: boolean }) => (room.videoAway ? null : room.content ?? null);
 
 /** A public room as the list shows it (decision 110). */
 export type PublicRoom = {
@@ -306,16 +311,15 @@ export function episodeLabel(p: Pick<MediaPresence, "season" | "episode">) {
 /**
  * The room I host to invite a friend into: the one showing what I watch now (the open one first), one with space
  * before a full one (decision 106 — the server refuses a watch request only when every such room is full). When I
- * watch nothing, any room I host. undefined = start a new room.
+ * watch nothing, any room I host. Else still one I host (decision 115: one room per person — answering a request
+ * doesn't close mine for a new one). undefined = start a new room (I host none).
  */
 export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string | null, watching: RoomContent | null) {
-  const fits = [...rooms]
+  const mine = [...rooms]
     .sort((a, b) => Number(b.id === openRoom) - Number(a.id === openRoom))
-    .filter(
-      (r) =>
-        r.members.some((m) => m.user.id === meId && m.role === "HOST") &&
-        // (a room without a video yet takes what I watch)
-        (!watching || !r.content || (r.content.provider === watching.provider && r.content.contentId === watching.contentId)),
-    );
-  return fits.find((r) => r.members.length < memberLimitOf(r)) ?? fits[0];
+    .filter((r) => r.members.some((m) => m.user.id === meId && m.role === "HOST"));
+  // (a room without a video yet takes what I watch)
+  const fits = mine.filter((r) => !watching || !r.content || (r.content.provider === watching.provider && r.content.contentId === watching.contentId));
+  const pick = (list: RoomView[]) => list.find((r) => r.members.length < memberLimitOf(r)) ?? list[0];
+  return pick(fits) ?? pick(mine);
 }

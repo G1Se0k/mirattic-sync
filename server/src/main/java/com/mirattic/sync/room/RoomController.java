@@ -110,9 +110,12 @@ class RoomController {
 	 * whose watch request this answers: members at once, with `watch:answer`.
 	 */
 	@PostMapping
-	RoomService.RoomView create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateRoom body) {
+	RoomService.RoomView create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateRoom body,
+			@RequestParam(required = false) String others) {
 		String me = jwt.getSubject();
-		synchronized (answerLock) {
+		RoomService.Others how = RoomService.Others.of(others);
+		synchronized (answerLock) { // also one switch at a time (decision 115)
+			rooms.requireSwitch(me, null, how);
 			Map<String, Long> answering = answering(me, body.inviteIds());
 			RoomService.RoomView room;
 			try {
@@ -123,6 +126,7 @@ class RoomController {
 				throw e;
 			}
 			sendInvites(me, room, List.of(me), body.inviteIds(), answering.keySet());
+			depart(me, rooms.leaveOthers(me, room.id(), how));
 			return room;
 		}
 	}
@@ -155,13 +159,18 @@ class RoomController {
 
 	/** Accepts the room's invitation: now a member; the members get `room:update`. 404 without one, 409 full. */
 	@PostMapping("/{id}/invitation")
-	RoomService.RoomView accept(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
-		RoomService.Invited joined = rooms.accept(jwt.getSubject(), id);
-		if (!joined.before().contains(jwt.getSubject())) {
-			rooms.announce(id, joined.before());
+	RoomService.RoomView accept(@AuthenticationPrincipal Jwt jwt, @PathVariable String id,
+			@RequestParam(required = false) String others) {
+		RoomService.Others how = RoomService.Others.of(others);
+		synchronized (answerLock) { // one switch at a time (decision 115): two joins can't each leave the other's room
+			RoomService.Invited joined = rooms.accept(jwt.getSubject(), id, how); // asked there, once it could join
+			if (!joined.before().contains(jwt.getSubject())) {
+				rooms.announce(id, joined.before());
+			}
+			answered(jwt.getSubject(), id);
+			depart(jwt.getSubject(), rooms.leaveOthers(jwt.getSubject(), id, how));
+			return joined.room();
 		}
-		answered(jwt.getSubject(), id);
-		return joined.room();
 	}
 
 	/** Declines the room's invitation. */
@@ -183,8 +192,10 @@ class RoomController {
 	 */
 	/** Joins the room with this code (anyone who knows it); its members get `room:update`. */
 	@PostMapping("/join")
-	RoomService.RoomView joinByCode(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody JoinByCode body) {
+	RoomService.RoomView joinByCode(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody JoinByCode body,
+			@RequestParam(required = false) String others) {
 		String me = jwt.getSubject();
+		RoomService.Others how = RoomService.Others.of(others);
 		long now = System.currentTimeMillis();
 		if (codeAttempts.size() > 10_000) {
 			codeAttempts.values().removeIf(times -> now - times.peekLast() >= 60_000);
@@ -205,11 +216,14 @@ class RoomController {
 		if (!allowed[0]) {
 			throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
 		}
-		RoomService.Invited joined = rooms.joinByCode(me, body.code());
-		if (!joined.before().contains(me)) {
-			rooms.announce(joined.room().id(), joined.before());
+		synchronized (answerLock) { // one switch at a time (decision 115)
+			RoomService.Invited joined = rooms.joinByCode(me, body.code(), how); // asked there, once it could join
+			if (!joined.before().contains(me)) {
+				rooms.announce(joined.room().id(), joined.before());
+			}
+			depart(me, rooms.leaveOthers(me, joined.room().id(), how));
+			return joined.room();
 		}
-		return joined.room();
 	}
 
 	/** The public list (decision 110): by name or video title, a page of up to 50 before `before` (the last `next`). */
@@ -224,13 +238,18 @@ class RoomController {
 
 	/** Joins a public room from the list; its members get `room:update`. 404 once it isn't public, 409 full. */
 	@PostMapping("/{id}/join")
-	RoomService.RoomView joinPublic(@AuthenticationPrincipal Jwt jwt, @PathVariable String id) {
+	RoomService.RoomView joinPublic(@AuthenticationPrincipal Jwt jwt, @PathVariable String id,
+			@RequestParam(required = false) String others) {
 		String me = jwt.getSubject();
-		RoomService.Invited joined = rooms.joinPublic(me, id);
-		if (!joined.before().contains(me)) {
-			rooms.announce(id, joined.before());
+		RoomService.Others how = RoomService.Others.of(others);
+		synchronized (answerLock) { // one switch at a time (decision 115)
+			RoomService.Invited joined = rooms.joinPublic(me, id, how);
+			if (!joined.before().contains(me)) {
+				rooms.announce(id, joined.before());
+			}
+			depart(me, rooms.leaveOthers(me, id, how));
+			return joined.room();
 		}
-		return joined.room();
 	}
 
 	/** The host changes the room's name, member limit and public setting; the members get `room:update`. */
@@ -242,8 +261,10 @@ class RoomController {
 	}
 
 	@PostMapping("/requests")
-	ResponseEntity<Asked> requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body) {
+	ResponseEntity<Asked> requestWatch(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody WatchRequest body,
+			@RequestParam(required = false) String others) {
 		UserSummary me = rooms.requestWatch(jwt.getSubject(), body.friendId());
+		RoomService.Others how = RoomService.Others.of(others);
 		rooms.requireApart(me.id(), body.friendId());
 		// In a public room (decision 111): in at once, as from the public list (full: 409, said so). Kicked from it or a
 		// block with a member there (404): asked as before, for the friend to answer.
@@ -259,11 +280,14 @@ class RoomController {
 			try {
 				RoomService.Invited joined;
 				Long removed;
+				List<RoomService.Departure> gone;
 				// The join and closing my earlier request to them as one step under the lock an answer (create/invite)
 				// claims requests under: their answer came first (I'm in their room by it) or finds nothing to answer.
+				// One switch at a time too (decision 115): asked, joined and out of my other rooms in one step.
 				synchronized (answerLock) {
-					joined = rooms.joinPublic(me.id(), open);
+					joined = rooms.joinPublic(me.id(), open, how);
 					removed = openWatchRequests.remove(me.id() + ">" + body.friendId());
+					gone = rooms.leaveOthers(me.id(), open, how);
 				}
 				if (!joined.before().contains(me.id())) {
 					rooms.announce(open, joined.before());
@@ -271,6 +295,7 @@ class RoomController {
 				if (removed != null) {
 					hub.sendEvent(body.friendId(), new ServerEvent("watch:cancel", null, me.id(), null, System.currentTimeMillis(), me));
 				}
+				depart(me.id(), gone);
 				return ResponseEntity.ok(new Asked(null, open));
 			} catch (ResponseStatusException e) {
 				if (e.getStatusCode() != HttpStatus.NOT_FOUND) {
@@ -365,6 +390,9 @@ class RoomController {
 	 */
 	private void sendInvites(String hostId, RoomService.RoomView room, List<String> alreadyIn, List<String> invitedIds,
 			Set<String> answered) {
+		// Those whose request this answers are in it now (decision 115): out of the rooms they're a member of (one they
+		// host stays — they weren't asked here).
+		answered.forEach(id -> depart(id, rooms.leaveOthers(id, room.id(), RoomService.Others.ASK)));
 		long now = System.currentTimeMillis();
 		for (String id : new LinkedHashSet<>(invitedIds)) {
 			if (id.equals(hostId)) {
@@ -523,8 +551,11 @@ class RoomController {
 	@PostMapping("/{id}/host")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void handOver(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody HandOver body) {
-		RoomService.Logged handed = rooms.handOver(jwt.getSubject(), id, body.userId());
-		hub.refreshHostVideo(id, () -> rooms.hostOf(id)); // the former host's report no longer counts: unknown
+		RoomService.Logged handed;
+		synchronized (answerLock) { // not in the middle of the new host's join elsewhere (decision 115: asked, or left)
+			handed = rooms.handOver(jwt.getSubject(), id, body.userId());
+		}
+		hub.refreshHostVideo(id, () -> rooms.hostOf(id)); // the former host's report no longer counts: unknown (announced below)
 		roomLog.post(id, handed.log());
 		rooms.announce(id, handed.memberIds());
 	}
@@ -562,5 +593,18 @@ class RoomController {
 		}
 		hub.removeFromRoom(id, jwt.getSubject());
 		rooms.announce(id, left.memberIds());
+	}
+
+	/** Tells each room someone left by joining another (decision 115), as leaving it does. */
+	private void depart(String userId, List<RoomService.Departure> gone) {
+		for (RoomService.Departure d : gone) {
+			if (d.left().closed()) {
+				hub.closeRoom(d.roomId());
+				rooms.announceClosed(d.roomId(), userId, d.left());
+			} else {
+				hub.removeFromRoom(d.roomId(), userId);
+				rooms.announce(d.roomId(), d.left().memberIds());
+			}
+		}
 	}
 }

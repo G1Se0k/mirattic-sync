@@ -21,6 +21,13 @@ export type RefreshTokenStore = {
   save(token: string | null): Promise<void>;
 };
 
+/**
+ * One room per person (decision 115): a join leaves my other rooms. While I host one it's refused (409
+ * `HOST_MUST_SWITCH`) until `close` — I confirmed it closes.
+ */
+export const HOST_MUST_SWITCH = "the host closes their room to join another: confirm first";
+const others = (close: boolean) => `?others=${close ? "close" : "ask"}`;
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -210,20 +217,20 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     /** A member confirmed the room's type change up to `version`: not asked again. */
     seeRoomType: (id: string, version: number) => authed<void>("POST", `/api/rooms/${id}/type/seen`, { version }),
     /** Creates a room you host (`content` null: no video yet); invitees must be friends and get `room:invite`. */
-    createRoom: (content: RoomContent | null, inviteIds: string[], settings?: RoomSettings) =>
-      authed<RoomView>("POST", "/api/rooms", { content, inviteIds, ...settings }),
+    createRoom: (content: RoomContent | null, inviteIds: string[], settings?: RoomSettings, close = false) =>
+      authed<RoomView>("POST", `/api/rooms${others(close)}`, { content, inviteIds, ...settings }),
     /** Host only (decisions 109–110); 409 for a limit below the members in. */
     configureRoom: (id: string, settings: RoomSettings) => authed<void>("PUT", `/api/rooms/${id}/settings`, settings),
     /** The public list (decision 110): by name or video title, a page before `before` (the last `next`). */
     publicRooms: (q: string, before?: string) =>
       authed<PublicRooms>("GET", `/api/rooms/public?q=${encodeURIComponent(q)}${before ? `&before=${encodeURIComponent(before)}` : ""}`),
-    joinPublicRoom: (id: string) => authed<RoomView>("POST", `/api/rooms/${id}/join`),
+    joinPublicRoom: (id: string, close = false) => authed<RoomView>("POST", `/api/rooms/${id}/join${others(close)}`),
     /** Host only: adds friends to an existing room; they get `room:invite`. */
     inviteToRoom: (id: string, userIds: string[]) => authed<RoomView>("POST", `/api/rooms/${id}/invites`, { userIds }),
     /** The rooms inviting me (decision 85): accepting makes me a member. */
     invitations: () => authed<RoomView[]>("GET", "/api/rooms/invitations"),
     /** 404 no invitation (withdrawn, room closed), 409 room full (still invited). */
-    acceptInvitation: (id: string) => authed<RoomView>("POST", `/api/rooms/${id}/invitation`),
+    acceptInvitation: (id: string, close = false) => authed<RoomView>("POST", `/api/rooms/${id}/invitation${others(close)}`),
     declineInvitation: (id: string) => authed<void>("DELETE", `/api/rooms/${id}/invitation`),
     /** Host only (decision 79): removes a member, who can't come back by the room's code until invited. */
     kickMember: (id: string, userId: string) => authed<void>("DELETE", `/api/rooms/${id}/members/${encodeURIComponent(userId)}`),
@@ -233,8 +240,8 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
      * Asks an online friend to watch together; they get `watch:request`. 409 offline, 429 asked recently. A friend in a
      * public room is joined at once instead (decision 111): `roomId`, no request.
      */
-    requestWatch: (friendId: string) =>
-      authed<{ askedAt?: number; roomId?: string } | undefined>("POST", "/api/rooms/requests", { friendId, joinPublic: true }), // older servers: no body
+    requestWatch: (friendId: string, close = false) =>
+      authed<{ askedAt?: number; roomId?: string } | undefined>("POST", `/api/rooms/requests${others(close)}`, { friendId, joinPublic: true }), // older servers: no body
     /** The friends I asked to watch together and still wait for (closed by their invite or my cancel). */
     openWatchRequests: () => authed<string[]>("GET", "/api/rooms/requests"),
     /** The same, each with its time left (decision 87). */
@@ -248,7 +255,7 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
     dismissWatchRequest: (friendId: string) => authed<void>("DELETE", `/api/rooms/requests/incoming/${friendId}`),
     rooms: () => authed<RoomView[]>("GET", "/api/rooms"),
     /** Joins by a room code, typed as-is ("abcd-2345"). 404 unknown, 409 full, 429 too many tries. */
-    joinRoomByCode: (code: string) => authed<RoomView>("POST", "/api/rooms/join", { code }),
+    joinRoomByCode: (code: string, close = false) => authed<RoomView>("POST", `/api/rooms/join${others(close)}`, { code }),
     /** 404 once the room is closed or you left it. */
     room: (id: string) => authed<RoomView>("GET", `/api/rooms/${id}`),
     /** Leave or decline. The host leaving closes the room. */

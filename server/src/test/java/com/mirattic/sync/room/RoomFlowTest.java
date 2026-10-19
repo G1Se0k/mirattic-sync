@@ -88,6 +88,11 @@ class RoomFlowTest extends IntegrationTest {
 		Client hostWs = connect(host);
 		hostWs.send(event("room:join", roomId, "{}"));
 		assertThat(hostWs.nextOfType("room:update")).isNotNull(); // sent after the host's join is recorded
+		// An earlier update (the friend's join) may come first: read until both show.
+		for (int i = 0; i < 40 && !body(call(HttpMethod.GET, "/api/rooms/" + roomId, friend.accessToken(), null))
+				.path("members").findValues("present").stream().allMatch(JsonNode::asBoolean); i++) {
+			Thread.sleep(25);
+		}
 		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + roomId, friend.accessToken(), null))
 				.path("members").findValues("present")).allMatch(JsonNode::asBoolean);
 
@@ -217,13 +222,11 @@ class RoomFlowTest extends IntegrationTest {
 		call(HttpMethod.POST, "/api/rooms/requests", asking.get().accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
 				.andExpect(status().isConflict());
 		Thread.sleep(300); // the presence rate limit (250 ms)
-		// The host watching another video would answer with a new room: the request goes through.
+		// The host watching another video still answers into this room they host (decision 115: not a new one): refused.
 		hostWs.send(event("presence:update", null, "{\"provider\":\"youtube\",\"contentId\":\"9bZkp7q19f0\",\"title\":\"Other\",\"playing\":true,\"capturedAt\":1}"));
 		Thread.sleep(300); // the presence lands
-		TestUser other = asking.get();
-		call(HttpMethod.POST, "/api/rooms/requests", other.accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
-				.andExpect(status().isAccepted());
-		call(HttpMethod.DELETE, "/api/rooms/requests/" + host.id(), other.accessToken(), null);
+		call(HttpMethod.POST, "/api/rooms/requests", asking.get().accessToken(), "{\"friendId\":\"%s\"}".formatted(host.id()))
+				.andExpect(status().isConflict());
 		Thread.sleep(300);
 		hostWs.send(event("presence:update", null, "null")); // watching nothing again: this full room counts
 		Thread.sleep(300);

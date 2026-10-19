@@ -21,7 +21,11 @@ const rooms = [
 it("invites into my room showing what I watch, never one showing something else", () => {
   expect(roomToInvite(rooms, "me", null, video)?.id).toBe("mine");
   expect(roomToInvite(rooms, "me", "laftel", video)?.id).toBe("mine"); // the open Laftel room doesn't win
-  expect(roomToInvite(rooms, "me", null, content("youtube", "OPf0YbXqDm0"))).toBeUndefined(); // → new room
+  // None on it: still into one I host (decision 115: one room per person — not closed for a new one).
+  const other = roomToInvite(rooms, "me", null, content("youtube", "OPf0YbXqDm0"));
+  expect(other?.members.some((m) => m.user.id === "me" && m.role === "HOST")).toBe(true);
+  expect(roomToInvite(rooms.filter((r) => !r.members.some((m) => m.user.id === "me" && m.role === "HOST")), "me", null, video))
+    .toBeUndefined(); // hosting none → new room
 });
 
 it("without anything being watched, prefers the open room I host", () => {

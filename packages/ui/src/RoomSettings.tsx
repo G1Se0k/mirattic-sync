@@ -86,8 +86,15 @@ export function RoomSettingsDialog({ title, ok, initial, placeholder, min = 1, o
  * The public rooms (decision 110), searched by name or video title, a page at a time ("더 보기"); the list scrolls.
  * `inRoom`: rooms I'm already in (entered, not joined). Only the latest search's answer shows.
  */
-export function PublicRoomsDialog({ inRoom, onJoined, onClose }: {
+/** I said no to closing my room for another (decision 115): nothing changed, nothing to say. */
+export class Declined extends Error {}
+
+/** A join through the one-room rule (decision 115): asked first while I host a room; `close` once I agreed. */
+export type OneRoom = <T>(join: (close: boolean) => Promise<T>) => Promise<T>;
+
+export function PublicRoomsDialog({ inRoom, oneRoom, onJoined, onClose }: {
   inRoom: (id: string) => boolean;
+  oneRoom: OneRoom;
   onJoined: (roomId: string) => void;
   onClose: () => void;
 }) {
@@ -131,9 +138,10 @@ export function PublicRoomsDialog({ inRoom, onJoined, onClose }: {
     setError(null);
     setJoiningId(room.id);
     try {
-      onJoined((await api.joinPublicRoom(room.id)).id);
+      onJoined((await oneRoom((close) => api.joinPublicRoom(room.id, close))).id);
     } catch (e) {
       setJoiningId(null);
+      if (e instanceof Declined) return;
       const status = e instanceof ApiError ? e.status : 0;
       // What it said, shown in the list at once (no reload, which would clear the message): full, or gone from it.
       if (status === 409) setRooms((shown) => shown?.map((r) => (r.id === room.id ? { ...r, members: r.memberLimit } : r)) ?? null);
@@ -163,7 +171,7 @@ export function PublicRoomsDialog({ inRoom, onJoined, onClose }: {
                   {r.provider ? <ProviderIcon provider={r.provider} /> : <span className="provider none" title="영상 없음">·</span>}
                   <div className="grow">
                     <div className="name ellipsis">{r.name || r.title || "영상 없음"}</div>
-                    {r.name && r.title && <div className="muted ellipsis">{r.title}</div>}
+                    {r.name && <div className="muted ellipsis">{r.title ?? "영상 없음"}</div>}
                     <div className="muted ellipsis">{r.hostName}님의 방 · {r.members}/{r.memberLimit}명</div>
                   </div>
                   <button className="small" disabled={full || joiningId !== null} onClick={() => void join(r)}>

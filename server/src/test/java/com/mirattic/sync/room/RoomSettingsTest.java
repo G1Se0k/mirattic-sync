@@ -19,6 +19,9 @@ import tools.jackson.databind.JsonNode;
 class RoomSettingsTest extends IntegrationTest {
 
 	@Autowired
+	private com.mirattic.sync.ws.SocketHub hub;
+
+	@Autowired
 	private RoomRepository rooms;
 
 	@Test
@@ -227,11 +230,110 @@ class RoomSettingsTest extends IntegrationTest {
 		hostWs.session().close();
 	}
 
+	private org.springframework.test.web.servlet.ResultActions joinCode(TestUser me, String code, String others) throws Exception {
+		return call(HttpMethod.POST, "/api/rooms/join" + (others == null ? "" : "?others=" + others), me.accessToken(),
+				"{\"code\":\"%s\"}".formatted(code));
+	}
+
+	@Test
+	void joiningAnotherRoomLeavesTheOneIWasIn() throws Exception {
+		TestUser a = signup();
+		TestUser b = signup();
+		JsonNode roomA = create(a, "A", ",\"isPublic\":true");
+		JsonNode roomB = create(b, "B", ",\"isPublic\":true");
+		Client aWs = present(a, roomA.path("id").asString());
+		present(b, roomB.path("id").asString());
+
+		// A member: out of the old room at once, and its members told.
+		TestUser me = signup();
+		joinCode(me, roomA.path("code").asString(), "ask").andExpect(status().isOk());
+		joinCode(me, roomB.path("code").asString(), "ask").andExpect(status().isOk());
+		assertThat(aWs.nextOfType("room:update")).isNotNull();
+		call(HttpMethod.GET, "/api/rooms/" + roomA.path("id").asString(), me.accessToken(), null).andExpect(status().isNotFound());
+		assertThat(body(call(HttpMethod.GET, "/api/rooms", me.accessToken(), null))).hasSize(1);
+
+		// A host joining a room hidden from them (a block): the same 404 as an unknown code, not asked first.
+		TestUser blocker = signup();
+		JsonNode hidden = create(blocker, "H", "");
+		call(HttpMethod.PUT, "/api/blocks/" + a.id(), blocker.accessToken(), null).andExpect(status().isNoContent());
+		joinCode(a, hidden.path("code").asString(), "ask").andExpect(status().isNotFound());
+
+		// A host: asked first (nothing changes), then their room closes once they confirm.
+		joinCode(a, roomB.path("code").asString(), "ask").andExpect(status().isConflict());
+		call(HttpMethod.GET, "/api/rooms/" + roomB.path("id").asString(), a.accessToken(), null).andExpect(status().isNotFound());
+		joinCode(a, roomB.path("code").asString(), "close").andExpect(status().isOk());
+		call(HttpMethod.GET, "/api/rooms/" + roomA.path("id").asString(), b.accessToken(), null).andExpect(status().isNotFound());
+		joinCode(me, "ZZZZ2222", "ask").andExpect(status().isNotFound()); // an unknown code: said so, not asked
+
+		// Apps before 1.3.1 say nothing: rooms kept, as before.
+		TestUser old = signup();
+		JsonNode roomC = create(old, "C", "");
+		joinCode(old, roomB.path("code").asString(), null).andExpect(status().isOk());
+		call(HttpMethod.GET, "/api/rooms/" + roomC.path("id").asString(), old.accessToken(), null).andExpect(status().isOk());
+	}
+
+	@Test
+	void withNoVideoInTheHostsBrowserTheRoomShowsNone() throws Exception {
+		TestUser host = signup();
+		JsonNode room = create(host, "Movie", ",\"isPublic\":true");
+		String id = room.path("id").asString();
+		assertThat(room.path("videoAway").asBoolean()).isFalse(); // just made from the host's browser: on the way in
+		((java.util.Map<?, ?>) ReflectionTestUtils.getField(hub, "madeUntil")).clear(); // past that (or a restart): none
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + id, host.accessToken(), null)).path("videoAway").asBoolean()).isTrue();
+		Client hostWs = present(host, id);
+		TestUser member = signup();
+		joinCode(member, room.path("code").asString(), "ask").andExpect(status().isOk());
+		Client memberWs = present(member, id);
+
+		hostWs.send("{\"type\":\"room:host-video\",\"roomId\":\"%s\",\"payload\":{\"watching\":false}}".formatted(id));
+		assertThat(memberWs.nextOfType("room:update")).isNotNull(); // refetched: shown without a video
+		for (int i = 0; i < 20 && !body(call(HttpMethod.GET, "/api/rooms/" + id, member.accessToken(), null)).path("videoAway").asBoolean(); i++) {
+			Thread.sleep(50);
+		}
+		JsonNode view = body(call(HttpMethod.GET, "/api/rooms/" + id, member.accessToken(), null));
+		assertThat(view.path("videoAway").asBoolean()).isTrue();
+		assertThat(view.path("content").path("title").asString()).isEqualTo("Movie"); // kept for when it's back
+		JsonNode listed = list(member, "");
+		JsonNode mine = null;
+		for (JsonNode r : listed.path("rooms")) {
+			if (id.equals(r.path("id").asString())) {
+				mine = r;
+			}
+		}
+		assertThat(mine).isNotNull();
+		assertThat(mine.has("title")).isFalse(); // listed as 영상 없음
+		assertThat(mine.has("provider")).isFalse();
+		assertThat(body(call(HttpMethod.GET, "/api/invite/" + room.path("code").asString(), null, null)).has("title")).isFalse();
+
+		hostWs.send("{\"type\":\"room:host-video\",\"roomId\":\"%s\",\"payload\":{\"watching\":true}}".formatted(id));
+		for (int i = 0; i < 20 && body(call(HttpMethod.GET, "/api/rooms/" + id, member.accessToken(), null)).path("videoAway").asBoolean(); i++) {
+			Thread.sleep(50); // the report lands
+		}
+		assertThat(body(call(HttpMethod.GET, "/api/rooms/" + id, member.accessToken(), null)).path("videoAway").asBoolean()).isFalse();
+		assertThat(body(call(HttpMethod.GET, "/api/invite/" + room.path("code").asString(), null, null)).path("title").asString())
+				.isEqualTo("Movie");
+	}
+
+	@Test
+	void aHostWhoCameInAndLeftShowsNoVideoAtOnceEvenJustAfterMakingIt() throws Exception {
+		TestUser host = signup();
+		JsonNode room = create(host, "Quick", "");
+		String id = room.path("id").asString();
+		present(host, id).session().close(); // in (the grace ends), then out
+		boolean away = false;
+		for (int i = 0; i < 40 && !away; i++) {
+			away = body(call(HttpMethod.GET, "/api/invite/" + room.path("code").asString(), null, null)).path("title").isMissingNode();
+			Thread.sleep(25);
+		}
+		assertThat(away).isTrue();
+	}
+
 	@Test
 	void anInvitationLinkShowsItsRoomToAnyoneButNotItsCodeOrMembers() throws Exception {
 		TestUser host = signup();
 		JsonNode room = create(host, "Video", ",\"name\":\"금요 \\\"<영화>\\\"\",\"memberLimit\":4");
 		String code = room.path("code").asString();
+		present(host, room.path("id").asString()); // its video shows while the host is in it (decision 115)
 		JsonNode shown = body(call(HttpMethod.GET, "/api/invite/" + code, null, null).andExpect(status().isOk()));
 		assertThat(shown.path("name").asString()).isEqualTo("금요 \"<영화>\"");
 		assertThat(shown.path("provider").asString()).isEqualTo("youtube");

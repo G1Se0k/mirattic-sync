@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, type Socket, type SocketStatus } from "@mirattic/client";
-import { contentKey, MEDIA_PROVIDERS, memberLimitOf, roomTitle, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type RoomMemberView, type ServerEvent } from "@mirattic/types";
+import { contentKey, MEDIA_PROVIDERS, memberLimitOf, roomTitle, shownContent, watchUrl, type FriendView, type MediaProvider, type Me, type RoomContent, type RoomMemberView, type ServerEvent } from "@mirattic/types";
 import { PAUSE_REQUEST_SHOWN_MS, showsRoomVideo, type FollowerStatus, type RoomSyncState } from "@mirattic/sync-core";
 import { api, platform, type RoomHandle, type VideoTab } from "./session";
 import { clock, PROVIDER_NAMES } from "./format";
@@ -57,13 +57,14 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     void loadTies();
     return subscribe((e) => { if (e.type === "friend:update") void loadTies(); });
   }, [subscribe, loadTies]);
-  const content = room?.content;
+  // The room's video as shown: none while the host's browser shows none (decision 115; `room.content` kept for its return).
+  const content = room ? shownContent(room) ?? undefined : undefined;
   const isHost = room?.members.some((m) => m.user.id === me.id && m.role === "HOST") ?? false;
   // Decision 106: the room's member limit, the host included; full, nobody more can be invited.
   const limit = room ? memberLimitOf(room) : 8;
   const full = !!room && room.members.length >= limit;
   // The room's type (decision 93): the host's pick, else its video's site; the warning below is about it.
-  const roomType: MediaProvider | null = room?.type ?? content?.provider ?? null;
+  const roomType: MediaProvider | null = room?.type ?? room?.content?.provider ?? null;
   const experiment = isExperiment(roomType ?? undefined) ? (roomType as Experiment) : undefined;
   const experimentOn = useExperiment(experiment);
 
@@ -193,7 +194,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       </header>
 
       <div className="room-body">
-        <PlayerStatus content={content ?? null} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
+        <PlayerStatus content={content ?? null} away={!!room?.videoAway} s={s} isHost={isHost} experimentOff={!!experiment && experimentOn === false}
           roomType={roomType} onPickSite={pickSite} onRequestPause={() => setAskingPause(true)} />
         {isHost && <TabPicker type={roomType} />}
         <Members members={room.members} meId={me.id} isHost={isHost} limit={limit} ties={ties} onBefriend={(id) => void befriend(id)}
@@ -628,9 +629,11 @@ function RoomType({ type, onPick }: { type: MediaProvider | null; onPick?: (site
 }
 
 /** A provider plays in the user's own page (e.g. a YouTube tab); this only shows where it stands. */
-function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite, onRequestPause }: {
+function PlayerStatus({ content, away, s, isHost, experimentOff, roomType, onPickSite, onRequestPause }: {
   /** null: no video yet (decision 92). */
   content: RoomContent | null;
+  /** The room has a video but the host's browser shows none now (decision 115). */
+  away: boolean;
   s: RoomSyncState;
   isHost: boolean;
   experimentOff: boolean;
@@ -647,7 +650,8 @@ function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite,
         <div className="player">
           {type}
           <span className="muted grow">
-            {isHost ? "아직 방 영상이 없습니다. 인식할 탭에서 영상을 열면 방 영상이 됩니다." : "아직 방 영상이 없습니다. 방장이 영상을 열면 시작됩니다."}
+            {away ? (isHost ? "인식 중인 영상이 없습니다. 영상을 열면 방 영상이 됩니다." : "영상 없음 · 방장이 영상을 열면 이어집니다.")
+              : isHost ? "아직 방 영상이 없습니다. 인식할 탭에서 영상을 열면 방 영상이 됩니다." : "아직 방 영상이 없습니다. 방장이 영상을 열면 시작됩니다."}
           </span>
         </div>
       </section>
@@ -661,7 +665,8 @@ function PlayerStatus({ content, s, isHost, experimentOff, roomType, onPickSite,
   // Offered only once the player has been away from the room's video for a moment: never while entering
   // the room or while the tab is still moving to the next episode. Not once the room's type moved on to another
   // site (decision 93): the room has no video of its site yet, and the old one isn't what it watches.
-  const offerOpen = !!url && (!s.canPlay || s.away) && (!roomType || roomType === content.provider);
+  // Nor while the host's browser shows no room video (decision 115): the room has none then, not its last one.
+  const offerOpen = !!url && (!s.canPlay || s.away) && (!roomType || roomType === content.provider) && s.hostVideo !== false;
   return (
     <section className="card stack">
       <div className="player">

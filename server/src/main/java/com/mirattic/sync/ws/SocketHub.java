@@ -276,34 +276,65 @@ public class SocketHub {
 	 */
 	private final Map<String, Told> told = new ConcurrentHashMap<>();
 	private final Map<String, Boolean> heard = new ConcurrentHashMap<>();
+	/**
+	 * Rooms just made → until when their host counts as on the way in (decision 115): made from the host's browser with
+	 * what it shows, so that video shows (to those invited with it, too) before their panel joins over WebSocket.
+	 * ponytail: a fixed grace; a host who never comes shows none after it (the room closes soon anyway, decision 75).
+	 */
+	private final Map<String, Long> madeUntil = new ConcurrentHashMap<>();
+	public static final long MADE_GRACE_MS = 30_000;
+
+	public void roomMade(String roomId) {
+		long now = System.currentTimeMillis();
+		madeUntil.values().removeIf(until -> until <= now);
+		madeUntil.put(roomId, now + MADE_GRACE_MS);
+	}
 
 	/**
 	 * A host's report. Who hosts is looked up again here, under the lock: a report of someone no longer hosting (checked
 	 * just before a hand-over, recorded after it) is dropped and never replaces the new host's.
 	 */
-	public synchronized void hostVideoTold(String roomId, String userId, boolean watching, Supplier<String> host) {
+	public synchronized boolean hostVideoTold(String roomId, String userId, boolean watching, Supplier<String> host) {
 		if (!userId.equals(host.get())) {
-			return;
+			return false;
 		}
 		told.put(roomId, new Told(userId, watching));
-		refreshHostVideo(roomId, host);
+		return refreshed(roomId, host);
 	}
 
 	/**
 	 * The host's connection (back) in the room: their own earlier report goes — unknown until their app tells (a 1.1.1
 	 * app never does). Only theirs: a new host's report (handed over meanwhile) stays.
 	 */
-	public synchronized void hostVideoForgotten(String roomId, String userId, Supplier<String> host) {
+	public synchronized boolean hostVideoForgotten(String roomId, String userId, Supplier<String> host) {
+		madeUntil.remove(roomId); // in now: a later absence is one (no video) at once
 		told.computeIfPresent(roomId, (k, t) -> t.userId().equals(userId) ? null : t);
-		refreshed(roomId, host);
+		return refreshed(roomId, host);
 	}
 
 	/** Worked out again (the host left, or another member hosts now) and told to the room if it changed. */
-	public synchronized void refreshHostVideo(String roomId, Supplier<String> host) {
-		refreshed(roomId, host);
+	public synchronized boolean refreshHostVideo(String roomId, Supplier<String> host) {
+		return refreshed(roomId, host);
 	}
 
-	/** @return whether the room was told (it changed). */
+	/**
+	 * The host's browser shows no room video now (or the host isn't in the room): the room counts as having none
+	 * (decision 115) — no link to its last video, "영상 없음" in its lists. Unknown (a 1.1.1 host) shows the video.
+	 */
+	public boolean showsNoVideo(String roomId, String hostId) {
+		// Worked out as `refreshed` does, from now — not what the room was last told, which a room not joined yet (just
+		// made, or after a restart) hasn't been.
+		if (hostId == null) {
+			return false;
+		}
+		if (!presentIn(roomId).contains(hostId)) {
+			return !onTheWay(roomId);
+		}
+		Told t = told.get(roomId);
+		return t != null && t.userId().equals(hostId) && !t.watching();
+	}
+
+	/** @return whether the room was told (it changed): the caller then has the room refetched (its video shows or not). */
 	private boolean refreshed(String roomId, Supplier<String> host) {
 		String hostId = host.get();
 		Told t = told.get(roomId);
@@ -332,7 +363,13 @@ public class SocketHub {
 		}
 	}
 
+	/** Just made and its host not in yet (decision 115): counted as on the way in, not away. */
+	private boolean onTheWay(String roomId) {
+		return madeUntil.getOrDefault(roomId, 0L) > System.currentTimeMillis();
+	}
+
 	private void forgetHostVideo(String roomId) {
+		madeUntil.remove(roomId);
 		told.remove(roomId);
 		heard.remove(roomId);
 	}
