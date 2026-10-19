@@ -1,12 +1,14 @@
 package com.mirattic.sync.presence;
 
 import com.mirattic.sync.friend.FriendshipRepository;
+import com.mirattic.sync.room.RoomService;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.Visibility;
 import com.mirattic.sync.ws.SocketHub;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.stereotype.Service;
 
 /**
@@ -20,11 +22,19 @@ public class PresenceService {
 	private final SocketHub hub;
 	private final FriendshipRepository friendships;
 	private final UserRepository users;
+	private final RoomService rooms;
 
-	PresenceService(SocketHub hub, FriendshipRepository friendships, UserRepository users) {
+	PresenceService(SocketHub hub, FriendshipRepository friendships, UserRepository users, RoomService rooms) {
 		this.hub = hub;
 		this.friendships = friendships;
 		this.users = users;
+		this.rooms = rooms;
+	}
+
+	/** Their friends see them in another public room, or none (decision 114). After the commit, or at once outside one. */
+	@TransactionalEventListener(fallbackExecution = true)
+	void roomsChanged(RoomsChanged event) {
+		event.userIds().forEach(this::broadcast);
 	}
 
 	public void online(String userId) {
@@ -52,8 +62,14 @@ public class PresenceService {
 	}
 
 	/** Presence of `owner` as seen by one of their friends. Callers must have checked friendship. */
-	public PresenceView viewOf(User owner) {
-		return view(owner, hub.isOnline(owner.getId()), media.get(owner.getId()));
+	public PresenceView viewOf(User owner, String viewer) {
+		PresenceView v = view(owner, hub.isOnline(owner.getId()), media.get(owner.getId()));
+		// Online, watching or not; never for one hiding their activity (publicRoomOf checks visibility 친구).
+		if (v.status() == PresenceView.Status.OFFLINE) {
+			return v;
+		}
+		MediaPresence m = v.media();
+		return new PresenceView(v.status(), m, rooms.publicRoomOf(owner.getId(), m != null ? m.provider() : null, m != null ? m.contentId() : null, viewer));
 	}
 
 	static PresenceView view(User owner, boolean online, MediaPresence current) {
@@ -73,10 +89,11 @@ public class PresenceService {
 		if (owner == null) {
 			return;
 		}
-		PresenceView view = viewOf(owner);
-		// Blocking deletes the friendship, so blocked users are never in this list.
+		// Blocking deletes the friendship, so blocked users are never in this list. Each friend's own view: the public
+		// room shown depends on who looks (decision 114). ponytail: a few reads per friend per change; one shared
+		// lookup of the owner's room with per-viewer filtering if friend lists grow large.
 		for (String friendId : friendships.friendIds(userId)) {
-			hub.sendEvent(friendId, "presence:update", userId, view);
+			hub.sendEvent(friendId, "presence:update", userId, viewOf(owner, friendId));
 		}
 	}
 }

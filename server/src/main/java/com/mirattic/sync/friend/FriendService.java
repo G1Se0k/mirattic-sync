@@ -43,7 +43,7 @@ public class FriendService {
 	@Transactional(readOnly = true)
 	public List<FriendView> friends(String me) {
 		return users.findAllById(friendships.friendIds(me)).stream()
-				.map(u -> new FriendView(UserSummary.of(u), presence.viewOf(u)))
+				.map(u -> new FriendView(UserSummary.of(u), presence.viewOf(u, me)))
 				.toList();
 	}
 

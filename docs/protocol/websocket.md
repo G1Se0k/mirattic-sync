@@ -31,7 +31,7 @@ null 필드는 JSON에서 생략된다.
 | type | 방향 | payload | 비고 |
 |---|---|---|---|
 | `presence:update` | C→S | `MediaPresence \| null` | null이면 시청 종료. 세션당 250ms보다 빠른 연속 전송은 `rate_limited` |
-| `presence:update` | S→C | `PresenceView` `{ status, media? }` | `userId` = 친구. 수락된 친구에게만 전송 |
+| `presence:update` | S→C | `PresenceView` `{ status, media?, publicRoom? }` | `userId` = 친구. 수락된 친구에게만 전송. `publicRoom { name? }`: 친구가 들어가 있는 공개 방(결정 114, 공개 범위 "친구"일 때만). 그 친구가 있는 방의 `room:update`마다 다시 보냄 |
 | `friend:update` | S→C | 없음 | 친구 요청 / 수락 / 거절 / 삭제 / 차단 시 양쪽에 전송. 클라이언트는 목록을 다시 조회 |
 | `error` | S→C | `{ reqId, code }` | code: `bad_json`, `bad_payload`, `unknown_type`, `rate_limited`, `not_member`, `not_host` |
 

@@ -111,6 +111,7 @@ class FriendController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void unblock(@AuthenticationPrincipal Jwt jwt, @PathVariable String userId) {
 		friends.unblock(jwt.getSubject(), userId);
+		notify(jwt.getSubject(), userId); // public rooms with the other may show in friend rows again (decision 114)
 	}
 
 	private void notify(String a, String b) {

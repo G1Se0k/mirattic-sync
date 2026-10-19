@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>같이 보기 초대 · Mirattic Sync</title>
+<!-- link preview: /r/{code} replaces this block with the room's (InviteController) -->
+<meta property="og:site_name" content="Mirattic Sync">
+<meta property="og:title" content="Mirattic Sync 같이 보기 초대">
+<meta property="og:description" content="링크를 열고 수락하면 같은 영상을 같은 순간에 함께 봅니다.">
+<meta property="og:image" content="https://sync.mirattic.com/landing/logo.png">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#2563eb">
+<!-- /link preview -->
+<link rel="icon" href="/landing/logo-64.png">
+<!-- Invitation link page (plan.md decision 113), served at /r/{code}. Tokens as index.html. -->
+<style>
+  :root {
+    --fg: #191f28; --bg: #f2f4f6; --surface: #ffffff; --muted: #4e5968; --line: #e5e8eb;
+    --strong: #2563eb; --strong-hover: #1d4ed8; --on-strong: #ffffff; --weak-bg: #e8f3ff; --weak-fg: #1b64da;
+    --danger: #b4443c; --shade: rgba(0, 23, 51, 0.25); --radius: 12px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #f2f4f6; --bg: #101318; --surface: #1a1e25; --muted: #b0b8c1; --line: #2c323b;
+      --weak-bg: #172a4d; --weak-fg: #9cc2ff; --danger: #e0786f; --shade: rgba(0, 0, 0, 0.6);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; word-break: keep-all;
+  }
+  main { max-width: 420px; margin: 0 auto; padding: 28px 16px 48px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; margin-bottom: 24px; color: inherit; text-decoration: none; }
+  .brand img { width: 24px; height: 24px; }
+  .brand span { color: var(--muted); font-weight: 500; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; box-shadow: 0 18px 40px -24px var(--shade); }
+  .from { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+  .from b { color: var(--fg); }
+  .av { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--weak-bg); color: var(--weak-fg); font-weight: 700; font-size: 13px; }
+  h1 { font-size: 21px; line-height: 1.35; letter-spacing: -0.02em; margin: 16px 0 14px; overflow-wrap: anywhere; }
+  .video { display: flex; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+  .video img { width: 24px; height: 24px; flex: none; border-radius: 4px; }
+  .video small { display: block; color: var(--muted); font-size: 12px; }
+  .video b { display: block; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+  .meta { display: flex; gap: 14px; margin: 12px 0 18px; font-size: 13px; color: var(--muted); }
+  .btn {
+    display: flex; align-items: center; justify-content: center; width: 100%; min-height: 48px; border: 0; border-radius: var(--radius);
+    background: var(--strong); color: var(--on-strong); font: inherit; font-size: 16px; font-weight: 600; text-decoration: none; cursor: pointer;
+    transition: background-color 0.12s ease, transform 0.12s ease;
+  }
+  .btn:hover { background: var(--strong-hover); }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+  .btn:focus-visible, a:focus-visible { outline: 2px solid var(--strong); outline-offset: 2px; }
+  .note { font-size: 13px; color: var(--muted); margin: 12px 0 0; text-align: center; }
+  .note.err { color: var(--danger); }
+  .code { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding: 10px 12px; border-radius: var(--radius); background: var(--weak-bg); font-size: 13px; }
+  .code b { font-family: ui-monospace, Menlo, monospace; letter-spacing: 0.12em; font-size: 15px; color: var(--weak-fg); }
+  .ok { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--weak-bg); color: var(--weak-fg); margin: 4px auto 10px; }
+  .center { text-align: center; }
+  .center h1 { margin: 6px 0 8px; }
+  .center p { margin: 0; color: var(--muted); font-size: 14px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <a class="brand" href="/"><img src="/landing/logo-64.png" alt="">Mirattic <span>Sync</span></a>
+
+  <div class="card" id="room" hidden>
+    <div class="from"><span class="av" id="initial"></span><div><b id="host"></b>님이 같이 보기에 초대했습니다</div></div>
+    <h1 id="name"></h1>
+    <div class="video"><img id="site-icon" alt=""><div><small id="site"></small><b id="video"></b></div></div>
+    <div class="meta"><span id="members"></span><span id="visibility"></span></div>
+    <button class="btn" id="accept" hidden>수락하고 입장</button>
+    <a class="btn" id="install" href="https://chromewebstore.google.com/detail/ffoifpjldcgdiipbhljkofgifmefgohk" hidden>Chrome 웹 스토어에서 설치</a>
+    <p class="note" id="note"></p>
+    <div class="code" id="code-box" hidden><span>방 코드</span><b id="code"></b></div>
+  </div>
+
+  <div class="card center" id="done" hidden>
+    <div class="ok"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+    <h1>패널을 열었습니다</h1>
+    <p>오른쪽 Mirattic Sync 패널에서 방에 들어갑니다. 로그인하지 않았다면 로그인한 뒤 바로 입장합니다.</p>
+  </div>
+
+  <div class="card center" id="missing" hidden>
+    <h1 id="missing-title">초대받은 방이 없습니다</h1>
+    <p id="missing-text">방이 닫혔거나 링크가 잘못되었습니다. 초대한 친구에게 새 링크를 받아 주세요.</p>
+  </div>
+</main>
+<script>
+(() => {
+  const EXTENSION = 'ffoifpjldcgdiipbhljkofgifmefgohk'; // the store item's id (unpacked builds share it via `key`)
+  const SITES = { youtube: 'YouTube', netflix: 'Netflix', laftel: 'Laftel' };
+  const $ = (id) => document.getElementById(id);
+  const code = decodeURIComponent(location.pathname.split('/').pop() || '').toUpperCase().replace(/[\s-]/g, '');
+
+  function missing(title, text) {
+    $('missing-title').textContent = title;
+    $('missing-text').textContent = text;
+    $('missing').hidden = false;
+  }
+
+  /**
+   * Asks the extension, if it is here and new enough to take links; resolves with its answer or null. `ms`: give up
+   * after it (null: wait for the answer, which always comes — an error if the extension can't answer).
+   */
+  function ask(message, ms) {
+    return new Promise((resolve) => {
+      const runtime = window.chrome && chrome.runtime;
+      if (!runtime || !runtime.sendMessage) return resolve(null);
+      const timer = ms == null ? undefined : setTimeout(() => resolve(null), ms);
+      try {
+        runtime.sendMessage(EXTENSION, message, (reply) => {
+          clearTimeout(timer);
+          resolve(runtime.lastError ? null : reply || null);
+        });
+      } catch (e) {
+        clearTimeout(timer);
+        resolve(null);
+      }
+    });
+  }
+
+  async function show(room) {
+    $('initial').textContent = room.hostName.slice(0, 1);
+    $('host').textContent = room.hostName;
+    $('name').textContent = room.name || room.title || `${room.hostName}님의 방`;
+    if (room.provider) {
+      $('site-icon').src = `/landing/${room.provider}.png`;
+      $('site').textContent = SITES[room.provider] || room.provider;
+      $('video').textContent = room.title || '';
+    } else {
+      $('site-icon').hidden = true;
+      $('site').textContent = '영상';
+      $('video').textContent = '아직 고른 영상이 없습니다';
+    }
+    $('members').textContent = `${room.members}/${room.memberLimit}명`;
+    $('visibility').textContent = room.isPublic ? '공개 방' : '비공개 방';
+    $('room').hidden = false;
+
+    const full = room.members >= room.memberLimit;
+    const here = await ask({ type: 'mirattic:ping' }, 1500);
+    if (!here) {
+      $('install').hidden = false;
+      $('note').textContent = full
+        ? `방이 가득 찼습니다 (${room.members}/${room.memberLimit}명). 자리가 나면 설치한 뒤 이 링크를 다시 열어 주세요`
+        : '설치하거나 최신 버전으로 업데이트한 뒤 이 링크를 다시 열면 바로 입장할 수 있습니다';
+      $('note').classList.toggle('err', full);
+      $('code').textContent = `${code.slice(0, 4)}-${code.slice(4)}`;
+      $('code-box').hidden = false;
+      return;
+    }
+    $('accept').hidden = false;
+    $('accept').disabled = full;
+    $('note').textContent = full ? `방이 가득 찼습니다 (${room.members}/${room.memberLimit}명)` : '누르면 Mirattic Sync 패널이 열리고 방에 들어갑니다';
+    $('note').classList.toggle('err', full);
+    $('accept').addEventListener('click', async () => {
+      $('accept').disabled = true;
+      // No time limit: a late answer must not leave the page offering a retry for an invitation already taken.
+      const reply = await ask({ type: 'mirattic:invite', code }, null);
+      if (reply && reply.ok) {
+        $('room').hidden = true;
+        $('done').hidden = false;
+        return;
+      }
+      $('accept').disabled = false;
+      $('note').textContent = '패널을 열지 못했습니다. 다시 눌러 주세요.';
+      $('note').classList.add('err');
+    });
+  }
+
+  if (!/^[2-9A-HJKMNP-Z]{8}$/.test(code)) {
+    missing('초대받은 방이 없습니다', '링크가 잘못되었습니다. 초대한 친구에게 새 링크를 받아 주세요.');
+    return;
+  }
+  fetch(`/api/invite/${code}`).then(async (res) => {
+    if (res.ok) return show(await res.json());
+    if (res.status === 429) return missing('잠시 후 다시 열어 주세요', '짧은 시간에 너무 많이 열었습니다. 1분 뒤에 다시 시도해 주세요.');
+    missing('초대받은 방이 없습니다', '방이 닫혔거나 링크가 잘못되었습니다. 초대한 친구에게 새 링크를 받아 주세요.');
+  }, () => missing('불러오지 못했습니다', '인터넷 연결을 확인하고 다시 열어 주세요.'));
+})();
+</script>
+</body>
+</html>

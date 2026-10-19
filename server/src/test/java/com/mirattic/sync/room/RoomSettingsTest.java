@@ -1,6 +1,7 @@
 package com.mirattic.sync.room;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -14,7 +15,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.JsonNode;
 
-/** Decisions 109–110: a room's name, member limit and public setting, and the public list. */
+/** Decisions 109–110, 113: a room's name, member limit and public setting, the public list, and invitation links. */
 class RoomSettingsTest extends IntegrationTest {
 
 	@Autowired
@@ -76,13 +77,15 @@ class RoomSettingsTest extends IntegrationTest {
 		TestUser host = signup();
 		JsonNode room = create(host, "Public", ",\"memberLimit\":3,\"isPublic\":true");
 		String id = room.path("id").asString();
-		Client hostWs = present(host, id);
+		Client hostWs = connect(host);
 
 		TestUser me = signup();
 		befriend(me, host);
-		askToJoin(me, host, true).andExpect(status().isAccepted()); // in it but watching nothing: not told, asked
+		askToJoin(me, host, true).andExpect(status().isAccepted()); // online, in no room yet: asked
 		hostWs.nextOfType("watch:request");
-		watch(hostWs);
+		hostWs.send("{\"type\":\"room:join\",\"roomId\":\"%s\",\"payload\":{}}".formatted(id));
+		hostWs.nextOfType("playback:update");
+		// In it, watching nothing (decision 114): joined at once all the same.
 		askToJoin(me, host, true).andExpect(status().isOk()).andExpect(jsonPath("$.roomId").value(id));
 		assertThat(hostWs.nextOfType("room:update")).isNotNull();
 		// The request that was open is closed with it: the host no longer answers it.
@@ -143,6 +146,120 @@ class RoomSettingsTest extends IntegrationTest {
 		TestUser other = signup();
 		befriend(other, hidden);
 		askToJoin(other, hidden, true).andExpect(status().isAccepted());
+	}
+
+	@Test
+	void friendsSeeThePublicRoomOneIsIn() throws Exception {
+		TestUser host = signup();
+		TestUser me = signup();
+		befriend(me, host);
+		Client meWs = connect(me);
+		String id = create(host, "Movie", ",\"name\":\"금요 모임\",\"isPublic\":true").path("id").asString();
+		Client hostWs = present(host, id);
+		// Decision 114: told as they go in, watching or not, and in the friend list.
+		JsonNode update = meWs.nextOfType("presence:update");
+		while (update.path("payload").path("publicRoom").isMissingNode()) {
+			update = meWs.nextOfType("presence:update");
+		}
+		assertThat(update.path("payload").path("publicRoom").path("name").asString()).isEqualTo("금요 모임");
+		assertThat(body(call(HttpMethod.GET, "/api/friends", me.accessToken(), null)).get(0)
+				.path("presence").path("publicRoom").path("name").asString()).isEqualTo("금요 모임");
+
+		// Someone in it blocks me: not shown to me (as the public list hides it), still to other friends.
+		TestUser blocker = signup();
+		TestUser other = signup();
+		befriend(other, host);
+		call(HttpMethod.POST, "/api/rooms/" + id + "/join", blocker.accessToken(), null).andExpect(status().isOk());
+		Client blockerWs = present(blocker, id);
+		call(HttpMethod.PUT, "/api/blocks/" + me.id(), blocker.accessToken(), null).andExpect(status().is2xxSuccessful());
+		assertThat(body(call(HttpMethod.GET, "/api/friends", me.accessToken(), null)).get(0)
+				.path("presence").has("publicRoom")).isFalse();
+		assertThat(body(call(HttpMethod.GET, "/api/friends", other.accessToken(), null)).get(0)
+				.path("presence").path("publicRoom").path("name").asString()).isEqualTo("금요 모임");
+		call(HttpMethod.DELETE, "/api/rooms/" + id + "/members/me", blocker.accessToken(), null).andExpect(status().isNoContent());
+		blockerWs.session().close();
+
+		// In two: the newer one is shown first, but hidden from me (the blocker is in it), so I see the other one.
+		String second = create(host, "Movie", ",\"name\":\"토요 모임\",\"isPublic\":true").path("id").asString();
+		hostWs.send("{\"type\":\"room:join\",\"roomId\":\"%s\",\"payload\":{}}".formatted(second)); // in both
+		hostWs.nextOfType("playback:update");
+		call(HttpMethod.POST, "/api/rooms/" + second + "/join", blocker.accessToken(), null).andExpect(status().isOk());
+		assertThat(body(call(HttpMethod.GET, "/api/friends", other.accessToken(), null)).get(0)
+				.path("presence").path("publicRoom").path("name").asString()).isEqualTo("토요 모임");
+		assertThat(body(call(HttpMethod.GET, "/api/friends", me.accessToken(), null)).get(0)
+				.path("presence").path("publicRoom").path("name").asString()).isEqualTo("금요 모임");
+		// Joining from the row enters the room it shows.
+		askToJoin(me, host, true).andExpect(status().isOk()).andExpect(jsonPath("$.roomId").value(id));
+		call(HttpMethod.DELETE, "/api/rooms/" + id + "/members/me", me.accessToken(), null).andExpect(status().isNoContent());
+		// Unblocked: I'm told to refetch, and the newer room shows again.
+		call(HttpMethod.DELETE, "/api/blocks/" + me.id(), blocker.accessToken(), null).andExpect(status().isNoContent());
+		assertThat(meWs.nextOfType("friend:update")).isNotNull();
+		assertThat(body(call(HttpMethod.GET, "/api/friends", me.accessToken(), null)).get(0)
+				.path("presence").path("publicRoom").path("name").asString()).isEqualTo("토요 모임");
+		call(HttpMethod.DELETE, "/api/rooms/" + second + "/members/me", host.accessToken(), null).andExpect(status().isNoContent());
+
+		// Made private: gone from it.
+		call(HttpMethod.PUT, "/api/rooms/" + id + "/settings", host.accessToken(),
+				"{\"name\":\"금요 모임\",\"memberLimit\":8,\"isPublic\":false}").andExpect(status().isNoContent());
+		update = meWs.nextOfType("presence:update");
+		while (!update.path("payload").path("publicRoom").isMissingNode()) {
+			update = meWs.nextOfType("presence:update");
+		}
+		assertThat(body(call(HttpMethod.GET, "/api/friends", me.accessToken(), null)).get(0)
+				.path("presence").has("publicRoom")).isFalse();
+
+		// Their activity hidden from friends: not shown even in a public room.
+		call(HttpMethod.PUT, "/api/rooms/" + id + "/settings", host.accessToken(),
+				"{\"name\":\"금요 모임\",\"memberLimit\":8,\"isPublic\":true}").andExpect(status().isNoContent());
+		update = meWs.nextOfType("presence:update");
+		while (update.path("payload").path("publicRoom").isMissingNode()) {
+			update = meWs.nextOfType("presence:update");
+		}
+		call(HttpMethod.PUT, "/api/me/privacy", host.accessToken(), "{\"presenceVisibility\":\"OFF\"}").andExpect(status().isOk());
+		// Told at once, not left showing until their next change (earlier updates may still be queued before it).
+		update = meWs.nextOfType("presence:update");
+		while (update != null && update.path("payload").has("publicRoom")) {
+			update = meWs.nextOfType("presence:update");
+		}
+		assertThat(update).isNotNull();
+		assertThat(body(call(HttpMethod.GET, "/api/friends", me.accessToken(), null)).get(0)
+				.path("presence").has("publicRoom")).isFalse();
+		hostWs.session().close();
+	}
+
+	@Test
+	void anInvitationLinkShowsItsRoomToAnyoneButNotItsCodeOrMembers() throws Exception {
+		TestUser host = signup();
+		JsonNode room = create(host, "Video", ",\"name\":\"금요 \\\"<영화>\\\"\",\"memberLimit\":4");
+		String code = room.path("code").asString();
+		JsonNode shown = body(call(HttpMethod.GET, "/api/invite/" + code, null, null).andExpect(status().isOk()));
+		assertThat(shown.path("name").asString()).isEqualTo("금요 \"<영화>\"");
+		assertThat(shown.path("provider").asString()).isEqualTo("youtube");
+		assertThat(shown.path("title").asString()).isEqualTo("Video");
+		assertThat(shown.path("hostName").asString()).isEqualTo("Tester");
+		assertThat(shown.path("members").asInt()).isEqualTo(1);
+		assertThat(shown.path("memberLimit").asInt()).isEqualTo(4);
+		assertThat(shown.path("isPublic").asBoolean()).isFalse();
+		assertThat(shown.propertyNames()).containsExactlyInAnyOrder("name", "provider", "title", "hostName", "members",
+				"memberLimit", "isPublic");
+		// Typed as the panel takes it, and the page itself.
+		call(HttpMethod.GET, "/api/invite/" + code.toLowerCase().substring(0, 4) + "-" + code.toLowerCase().substring(4), null, null)
+				.andExpect(status().isOk());
+		// The page's link preview (chat apps don't run its script): the room, escaped, the logo, not the members.
+		String page = mvc.perform(get("/r/" + code)).andExpect(status().isOk()).andReturn().getResponse()
+				.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+		assertThat(page).contains("<meta property=\"og:title\" content=\"Tester님의 같이 보기 초대: 금요 &quot;&lt;영화&gt;&quot;\">")
+				.contains("<meta property=\"og:description\" content=\"YouTube · Video\">")
+				.contains("/landing/logo.png").contains("twitter:card").doesNotContain("1/4").doesNotContain("<!-- link preview");
+		assertThat(mvc.perform(get("/r/" + "Z".repeat(8))).andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8))
+				.contains("Mirattic Sync 같이 보기 초대");
+		// Unknown or malformed: the same 404.
+		call(HttpMethod.GET, "/api/invite/" + "Z".repeat(8), null, null).andExpect(status().isNotFound());
+		call(HttpMethod.GET, "/api/invite/nope", null, null).andExpect(status().isNotFound());
+		// Closed: gone.
+		call(HttpMethod.DELETE, "/api/rooms/" + room.path("id").asString() + "/members/me", host.accessToken(), null)
+				.andExpect(status().isNoContent());
+		call(HttpMethod.GET, "/api/invite/" + code, null, null).andExpect(status().isNotFound());
 	}
 
 	@Test

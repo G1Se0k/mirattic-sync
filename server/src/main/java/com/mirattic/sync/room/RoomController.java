@@ -247,11 +247,12 @@ class RoomController {
 		rooms.requireApart(me.id(), body.friendId());
 		// In a public room (decision 111): in at once, as from the public list (full: 409, said so). Kicked from it or a
 		// block with a member there (404): asked as before, for the friend to answer.
-		// Only while their friends see them watching (WATCHING: something playing, shown to friends), as the app offers
-		// 합류 요청 only then: a hidden or idle friend's room isn't told by this.
+		// Only for one who shows friends their activity (decision 114: their friends see that room in the list anyway).
 		MediaPresence theirs = presence.watching(body.friendId());
-		String open = Boolean.TRUE.equals(body.joinPublic()) && theirs != null
-				? rooms.publicRoomWith(body.friendId(), theirs.provider(), theirs.contentId()) : null;
+		String open = Boolean.TRUE.equals(body.joinPublic())
+				? rooms.publicRoomWith(body.friendId(), theirs != null ? theirs.provider() : null, theirs != null ? theirs.contentId() : null,
+						me.id())
+				: null;
 		// ponytail: the friend may leave between this check and the join, which then still goes in — a public room
 		// anyone may join, so it opens nothing; lock their membership through it if that must hold.
 		if (open != null) {

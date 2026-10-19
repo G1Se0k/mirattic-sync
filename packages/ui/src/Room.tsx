@@ -269,9 +269,11 @@ function Invite({ roomId, code, isHost, memberIds, onClose, onInvited }: {
 }) {
   const [friends, setFriends] = useState<FriendView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [, tick] = useState(0);
   const shown = code && `${code.slice(0, 4)}-${code.slice(4)}`;
+  /** The invitation link (decision 113): opens the room's page, whose button hands the code to the extension. */
+  const link = code && platform.inviteUrl?.(code);
 
   useEffect(() => {
     if (isHost) api.friends().then(setFriends, () => setError("친구 목록을 불러오지 못했습니다."));
@@ -295,10 +297,10 @@ function Invite({ roomId, code, isHost, memberIds, onClose, onInvited }: {
     }
   }
 
-  async function copy() {
-    await navigator.clipboard.writeText(shown!);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  async function copy(what: "code" | "link") {
+    await navigator.clipboard.writeText(what === "code" ? shown! : link!);
+    setCopied(what);
+    setTimeout(() => setCopied((c) => (c === what ? null : c)), 1500);
   }
 
   return (
@@ -328,10 +330,13 @@ function Invite({ roomId, code, isHost, memberIds, onClose, onInvited }: {
       {error && <p className="error" role="alert">{error}</p>}
       {shown && (
         <>
-          <p className="muted">{isHost ? "또는 방 코드로 초대" : "방 코드로 초대"}</p>
+          <p className="muted">{isHost ? "또는 방 코드나 링크로 초대" : "방 코드나 링크로 초대"}</p>
           <div className="card row">
             <code className="code grow">{shown}</code>
-            <IconButton icon={copied ? "check" : "copy"} label={copied ? "복사됨" : "복사"} onClick={() => void copy()} />
+            <IconButton icon={copied === "code" ? "check" : "copy"} label={copied === "code" ? "복사됨" : "코드 복사"} onClick={() => void copy("code")} />
+            {link && (
+              <IconButton icon={copied === "link" ? "check" : "link"} label={copied === "link" ? "링크 복사됨" : "링크로 초대하기"} onClick={() => void copy("link")} />
+            )}
           </div>
         </>
       )}

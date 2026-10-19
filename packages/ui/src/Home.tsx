@@ -289,6 +289,21 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     setOpenRoom(id);
   }
 
+  // An invitation link's code (decision 113), handed over by the platform: joined as by 코드로 입장, here or in a room.
+  // Two accepted close together: only the last one's answer moves the screen.
+  const invite = useSyncExternalStore(platform.subscribe ?? noSubscribe, platform.invite ?? nothing);
+  const inviteJoins = useRef(0);
+  useEffect(() => {
+    if (!invite) return;
+    platform.inviteTaken?.(invite.id);
+    setScreen("home");
+    setError(null);
+    const join = ++inviteJoins.current;
+    api.joinRoomByCode(invite.code).then(
+      (r) => { void reload(); if (join === inviteJoins.current) enter(r.id); },
+      (err) => { if (join === inviteJoins.current) setError(joinError(err)); });
+  }, [invite]); // once per invitation (its object changes only with another)
+
   const sorted = [...friends].sort((a, b) => rank(a.presence) - rank(b.presence));
   /** In a room of mine right now: nothing to ask them to join (the server refuses it too). */
   const together = (friendId: string) =>
@@ -693,12 +708,13 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
                 <Avatar name={f.user.displayName} on={f.presence.status !== "OFFLINE"} />
                 <div className="grow">
                   <div className="name ellipsis">{f.user.displayName}</div>
-                  {describe(f.presence).map((line, i) => <div key={i} className="muted ellipsis">{line || "\u00a0"}</div>)}
+                  {(f.presence.publicRoom ? ["공개방 참여중", f.presence.publicRoom.name ?? "영상 없음"] : describe(f.presence))
+                    .map((line, i) => <div key={i} className="muted ellipsis">{line || "\u00a0"}</div>)}
                 </div>
                 <span className="actions">
                   {asked.includes(f.user.id) && live(`a:${f.user.id}`) ? (
                     <IconButton icon="close" label="합류 요청 취소" disabled={asking.includes(f.user.id)} onClick={() => void cancelWatch(f.user)} />
-                  ) : f.presence.status === "WATCHING" && !together(f.user.id) && (
+                  ) : (f.presence.status === "WATCHING" || f.presence.publicRoom) && !together(f.user.id) && (
                     <IconButton icon="join" label="합류 요청" onClick={() => void requestWatch(f.user)} />
                   )}
                   <Menu label={`${f.user.displayName} 메뉴`} items={[
@@ -790,6 +806,12 @@ function Menu({ label, items }: { label: string; items: MenuItem[] }) {
   );
 }
 
+/** Why joining by a code (typed, or an invitation link's) failed. */
+function joinError(err: unknown): string {
+  const status = err instanceof ApiError ? err.status : 0;
+  return status === 404 ? "그 코드의 방이 없습니다." : status === 409 ? "방이 가득 찼습니다." : status === 429 ? "잠시 후 다시 시도하세요." : "입장하지 못했습니다.";
+}
+
 function JoinByCode({ onJoined, onClose }: { onJoined: (roomId: string) => void; onClose: () => void }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -800,8 +822,7 @@ function JoinByCode({ onJoined, onClose }: { onJoined: (roomId: string) => void;
     try {
       onJoined((await api.joinRoomByCode(code)).id);
     } catch (err) {
-      const status = err instanceof ApiError ? err.status : 0;
-      setError(status === 404 ? "그 코드의 방이 없습니다." : status === 409 ? "방이 가득 찼습니다." : status === 429 ? "잠시 후 다시 시도하세요." : "입장하지 못했습니다.");
+      setError(joinError(err));
     }
   }
 
@@ -908,5 +929,5 @@ export function describe(p: { status: PresenceView["status"]; media?: WatchingIn
 }
 
 function rank(p: PresenceView) {
-  return p.status === "WATCHING" ? 0 : p.status === "ONLINE" ? 1 : 2;
+  return p.status === "WATCHING" || p.publicRoom ? 0 : p.status === "ONLINE" ? 1 : 2;
 }

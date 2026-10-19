@@ -12,6 +12,7 @@ import {
   type AlertKind, type ToastAnswer, type ToastClear, type ToastDismiss, type ToastMessage, type ToastOverVideo,
 } from '../toast';
 import { ROOM_ACTIONS, UI_PORT, type FromPanel, type Shared, type ToPanel } from '../ui-port';
+import { INVITE_KEY, INVITE_PING, acceptances, inviteCode } from '../invite';
 
 // The extension's engine (plan.md decision 69): signed-in session, socket, presence, the followed tab and the
 // room's sync live here, not in the side panel, so closing the panel neither breaks the sync nor leaves the room.
@@ -1059,6 +1060,25 @@ export default defineBackground(() => {
     // First, while the click may still count as the user's gesture; entering a room shows in it.
     if (m.accept && m.kind !== 'pause' && m.kind !== 'type') void browser.sidePanel.open({ windowId: sender.tab.windowId }).catch(() => {});
     void answerAlert(m);
+  });
+
+  // An invitation link (decision 113): only from the server's own page. The panel opens first, while the click on
+  // 수락하고 입장 still counts as the user's gesture; it takes the code from storage.session and joins.
+  const inviteOrigin = new URL(API_URL).origin;
+  const accept = acceptances();
+  browser.runtime.onMessageExternal.addListener((m, sender, reply) => {
+    const windowId = sender.tab?.windowId;
+    if (sender.origin !== inviteOrigin || windowId === undefined) return;
+    if ((m as { type?: unknown } | null)?.type === INVITE_PING) return void reply({ ok: true });
+    const code = inviteCode(m);
+    if (!code) return;
+    // Called at once (the gesture); the code is left only once the panel is open, so a failed open leaves nothing to
+    // join later and the page asks again. One accepted after it wins, however their opens and writes end.
+    void accept(
+      () => browser.sidePanel.open({ windowId }),
+      () => browser.storage.session.set({ [INVITE_KEY]: { code, id: crypto.randomUUID(), at: Date.now(), windowId } }),
+    ).then((ok) => reply({ ok }), () => reply({ ok: false }));
+    return true; // replied once opened and stored
   });
 
   /**

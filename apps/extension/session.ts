@@ -1,7 +1,8 @@
 import { browser } from 'wxt/browser';
 import { ApiError, socketUrl, type Authorize, type RefreshTokenStore } from '@mirattic/client';
+import { API_URL } from './server';
 
-export const API_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
+export { API_URL };
 export const SOCKET_URL = socketUrl(API_URL);
 
 // Used by the background only: it is the one API client, so refresh tokens are never rotated from two places.

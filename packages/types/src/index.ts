@@ -114,8 +114,11 @@ export type AuthTokens = { accessToken: string; refreshToken: string; user: User
 
 export type PresenceStatus = "OFFLINE" | "ONLINE" | "WATCHING";
 
-/** A friend's presence as the server lets you see it. `media` is absent when hidden or not watching. */
-export type PresenceView = { status: PresenceStatus; media?: MediaPresence };
+/**
+ * A friend's presence as the server lets you see it. `media` is absent when hidden or not watching. `publicRoom`: the
+ * public room they are in (decision 114; its name, else its video's title), absent when none or hidden.
+ */
+export type PresenceView = { status: PresenceStatus; media?: MediaPresence; publicRoom?: { name?: string } };
 
 export type FriendView = { user: UserSummary; presence: PresenceView };
 

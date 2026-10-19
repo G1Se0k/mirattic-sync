@@ -31,7 +31,8 @@ public class SecurityConfig {
 				.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
 						.requestMatchers(AccountController.DELETION_ORDER, AdminController.PATH + "/**").permitAll()
-						.requestMatchers("/actuator/health", "/api/auth/**", "/auth/**", "/ws", "/privacy.html", "/patch-notes.html", "/", "/index.html", "/landing/**").permitAll()
+						.requestMatchers("/actuator/health", "/api/auth/**", "/auth/**", "/ws", "/privacy.html", "/patch-notes.html", "/", "/index.html", "/landing/**",
+								"/r/*", "/invite.html", "/api/invite/*").permitAll()
 						.anyRequest().authenticated())
 				// Auth's orders (deletion, admin reads) are not access tokens: their controllers verify them.
 				.oauth2ResourceServer(o -> o.jwt(withDefaults()).bearerTokenResolver(request ->

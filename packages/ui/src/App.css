@@ -110,7 +110,7 @@ button.danger:not(.link):not(.icon-button) { background: var(--danger); color: v
 .icon { display: block; }
 label { padding: 4px 0; }
 .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.06em; }
-code.code { font-size: calc(14px * var(--text-scale)); font-weight: 600; }
+code.code { font-size: calc(14px * var(--text-scale)); font-weight: 600; white-space: nowrap; }
 input.code::placeholder { font-family: inherit; letter-spacing: normal; }
 .banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
 

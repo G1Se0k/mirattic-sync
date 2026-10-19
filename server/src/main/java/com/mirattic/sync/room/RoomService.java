@@ -2,6 +2,8 @@ package com.mirattic.sync.room;
 
 import com.mirattic.sync.friend.FriendshipRepository;
 import com.mirattic.sync.presence.MediaProvider;
+import com.mirattic.sync.presence.PresenceView;
+import com.mirattic.sync.presence.RoomsChanged;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.FriendCode;
@@ -25,6 +27,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Limit;
 import org.springframework.http.HttpStatus;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -65,6 +68,14 @@ public class RoomService {
 	/** A public room as the list shows it to anyone (decision 110): no code, no members beyond the host's name. */
 	public record PublicRoom(String id, String name, MediaProvider provider, String title, String hostName, int members,
 			int memberLimit) {
+	}
+
+	/**
+	 * What an invitation link shows (decision 113), to anyone who has it, signed in or not: a public list row's
+	 * fields and whether the room is public — no code, ids or members.
+	 */
+	public record InvitePreview(String name, MediaProvider provider, String title, String hostName, int members,
+			int memberLimit, boolean isPublic) {
 	}
 
 	/** A page of the public list; `next`: the `before` of the next page, null at the end. */
@@ -121,10 +132,13 @@ public class RoomService {
 	private final ChatMessageRepository messages;
 	private final SocketHub hub;
 	private final BlockRepository blocks;
+	private final ApplicationEventPublisher events;
 
 
 	RoomService(RoomRepository rooms, RoomMemberRepository members, FriendshipRepository friendships,
-			UserRepository users, ChatMessageRepository messages, SocketHub hub, BlockRepository blocks) {
+			UserRepository users, ChatMessageRepository messages, SocketHub hub, BlockRepository blocks,
+			ApplicationEventPublisher events) {
+		this.events = events;
 		this.blocks = blocks;
 		this.rooms = rooms;
 		this.members = members;
@@ -758,26 +772,63 @@ public class RoomService {
 		return join(me, found);
 	}
 
+	/** An invitation link's room (decision 113), by its code; 404 for one that can't be or isn't a room's. */
+	@Transactional(readOnly = true)
+	public InvitePreview invitePreview(String input) {
+		String code = FriendCode.normalize(input);
+		Room found = code == null ? null : rooms.findByCode(code).orElse(null);
+		if (found == null) {
+			throw notFound();
+		}
+		List<RoomMember> in = members.findByRoomId(found.getId());
+		String hostName = in.stream().filter(m -> m.getRole() == RoomMember.Role.HOST).findFirst()
+				.flatMap(m -> users.findById(m.getUserId())).map(User::getDisplayName).orElseThrow(RoomService::notFound);
+		RoomContent c = found.content();
+		return new InvitePreview(found.getName(), c == null ? null : c.provider(), c == null ? null : c.title(), hostName,
+				in.size(), memberLimit(found), found.isPublic());
+	}
+
 	/**
 	 * The public room this friend is in right now (decision 111), or null — only for one whose presence shows friends
-	 * what they watch (the caller checks they watch something: together WATCHING, when the app shows 합류 요청), so this
-	 * tells nothing they hide.
+	 * their activity (visibility 친구), watching or not (decision 114: their friend list shows it too), so this tells
+	 * nothing they hide. `provider`/`contentId`: what they watch, if anything (null: none).
 	 */
 	@Transactional(readOnly = true)
-	public String publicRoomWith(String friendId, MediaProvider provider, String contentId) {
+	public String publicRoomWith(String friendId, MediaProvider provider, String contentId, String viewer) {
+		return publicRoom(friendId, provider, contentId, shownTo(viewer)).map(Room::getId).orElse(null);
+	}
+
+	/** As the public list shows `viewer` rooms: none they were kicked from or with someone blocked either way. */
+	private java.util.function.Predicate<Room> shownTo(String viewer) {
+		Set<String> blocked = Set.copyOf(blocks.othersOf(viewer));
+		Set<String> banned = Set.copyOf(rooms.findBannedIds(viewer));
+		return r -> !banned.contains(r.getId()) && memberIds(r.getId()).stream().noneMatch(blocked::contains);
+	}
+
+	/** The same room as {@link #publicRoomWith} (the one joining it enters), as `viewer`'s friend list shows it (decision 114), or null. */
+	@Transactional(readOnly = true)
+	public PresenceView.PublicRoom publicRoomOf(String friendId, MediaProvider provider, String contentId, String viewer) {
+		return publicRoom(friendId, provider, contentId, shownTo(viewer))
+				.map(r -> new PresenceView.PublicRoom(r.getName() != null ? r.getName() : r.content() != null ? r.content().title() : null))
+				.orElse(null);
+	}
+
+	/** `shown`: rooms the asker may be told of, applied before choosing (another of theirs may still show). */
+	private Optional<Room> publicRoom(String friendId, MediaProvider provider, String contentId,
+			java.util.function.Predicate<Room> shown) {
 		if (users.findById(friendId).map(u -> u.getPresenceVisibility() != Visibility.FRIENDS).orElse(true)) {
-			return null;
+			return Optional.empty();
 		}
 		// In several: the one on what they watch now, then one with room, then the newest (then by id).
-		Comparator<Room> pick = Comparator.<Room, Boolean>comparing(r -> r.content() != null && r.content().provider() == provider
-						&& r.content().contentId().equals(contentId))
+		Comparator<Room> pick = Comparator.<Room, Boolean>comparing(r -> r.content() != null && provider != null && r.content().provider() == provider
+						&& java.util.Objects.equals(r.content().contentId(), contentId))
 				.thenComparing(r -> memberIds(r.getId()).size() < memberLimit(r))
 				.thenComparing(Room::getCreatedAt)
 				.thenComparing(Room::getId); // made in the same millisecond: still one answer
 		return members.findByUserId(friendId).stream().map(RoomMember::getRoomId)
 				.filter(id -> hub.presentIn(id).contains(friendId))
 				.map(rooms::findById).flatMap(Optional::stream)
-				.filter(Room::isPublic).max(pick).map(Room::getId).orElse(null);
+				.filter(Room::isPublic).filter(shown).max(pick);
 	}
 
 	/** Joining a public room from the list (decision 110): as by its code; 404 once it isn't public. */
@@ -956,6 +1007,7 @@ public class RoomService {
 		for (String id : memberIds) {
 			hub.sendEvent(id, event);
 		}
+		events.publishEvent(new RoomsChanged(memberIds));
 	}
 
 	private RoomMember requireMember(String me, String roomId) {

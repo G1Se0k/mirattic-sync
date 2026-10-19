@@ -1,8 +1,11 @@
 package com.mirattic.sync.user;
 
 import com.mirattic.sync.auth.MiratticAuth;
+import com.mirattic.sync.presence.RoomsChanged;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.Objects;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -33,8 +36,10 @@ public class UserController {
 
 	private final UserRepository users;
 	private final MiratticAuth auth;
+	private final ApplicationEventPublisher events;
 
-	UserController(UserRepository users, MiratticAuth auth) {
+	UserController(UserRepository users, MiratticAuth auth, ApplicationEventPublisher events) {
+		this.events = events;
 		this.users = users;
 		this.auth = auth;
 	}
@@ -54,6 +59,7 @@ public class UserController {
 		if (req.friendCodeOnly() != null) {
 			me.setFriendCodeOnly(req.friendCodeOnly());
 		}
+		events.publishEvent(new RoomsChanged(List.of(me.getId()))); // friends see what the new setting shows, once saved
 		return me(me, jwt);
 	}
 

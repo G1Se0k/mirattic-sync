@@ -76,6 +76,15 @@ export type Platform = {
     setRoom?(room: { inRoom: boolean; site: MediaProvider | null | undefined }): void;
   };
   subscribe?(onChange: () => void): () => void;
+  /**
+   * An invitation link's room code waiting to be joined (decision 113), else null; the same object until another
+   * invitation comes (each its own `id`, so one to the same room again is still new). Announced via `subscribe`.
+   */
+  invite?(): { code: string; id: string } | null;
+  /** That invitation was taken (joined, or the join failed): not offered again. */
+  inviteTaken?(id: string): void;
+  /** The invitation link of a room code, to share (decision 113). */
+  inviteUrl?(code: string): string;
   /** The socket went up (or down: null). The extension publishes presence through it. */
   connected?(socket: Socket | null): void;
   /** The background's socket, shared with the screens. */

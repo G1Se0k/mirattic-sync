@@ -4,6 +4,8 @@ import { emptyRoomState, type RoomSyncState } from '@mirattic/sync-core';
 import type { MediaProvider, ServerEvent } from '@mirattic/types';
 import { textSizeOf, type Platform, type RoomHandle, type VideoTab } from '@mirattic/ui';
 import { ASK_ON_SWITCH_KEY, experimentKey, TEXT_SIZE_ITEM, UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
+import { INVITE_KEY, INVITE_TAKEN_KEY, INVITE_TTL_MS, pendingInvite, takenKey, type Invitation } from '../../invite';
+import { API_URL } from '../../server';
 
 const RECONNECT_MS = 500;
 /** This page is the panel in its own window (opened by "창으로 분리"), not the side panel. */
@@ -84,6 +86,32 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
     updateReady = details.version;
     subscribers.forEach((s) => s());
   });
+  // An invitation link's room code (decision 113), left by the background: Home takes it and joins. Dropped when it
+  // runs out even while nothing reads storage (a panel left on the sign-in screen).
+  let invite: Invitation | null = null;
+  let inviteExpiry: ReturnType<typeof setTimeout> | undefined;
+  let inviteReads = 0;
+  /** Taken here: never offered again, even by a read that began before its marker was stored. */
+  let takenHere: string | null = null;
+  const readInvite = async () => {
+    const mine = ++inviteReads;
+    const v = await browser.storage.session.get(INVITE_KEY).catch(() => null);
+    const id = (v?.[INVITE_KEY] as { id?: unknown } | undefined)?.id;
+    const t = typeof id === 'string' ? await browser.storage.session.get(takenKey(id)).catch(() => null) : {};
+    if (!v || !t || mine !== inviteReads) return; // a later read is newer
+    const found = pendingInvite(v[INVITE_KEY], typeof id === 'string' ? t[takenKey(id)] : undefined, Date.now());
+    // Only the panel of the window it was accepted in (a detached one never: the side panel there is opened for it).
+    const next = found?.id === takenHere || DETACHED || found?.windowId !== windowId ? null : found;
+    clearTimeout(inviteExpiry);
+    if (next) inviteExpiry = setTimeout(() => void readInvite(), next.at + INVITE_TTL_MS - Date.now());
+    if (next?.id === invite?.id) return;
+    invite = next;
+    subscribers.forEach((s) => s());
+  };
+  browser.storage.onChanged.addListener((changed, area) => {
+    if (area === 'session' && Object.keys(changed).some((k) => k === INVITE_KEY || k.startsWith(INVITE_TAKEN_KEY))) void readInvite();
+  });
+  void readInvite();
   /** A tab choice the background hasn't shown back yet: said again after a worker restart (the port may have dropped it). */
   let choosingTab: { tabId: number | null } | null = null;
   /** Tab choices made here: a failed move resent only while it is the latest. */
@@ -279,6 +307,16 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       const key = `${shown.userId}|${roomId}`;
       dismissed.set(key, { roomId, userId: shown.userId });
       seen({ roomId, userId: shown.userId });
+    },
+    inviteUrl: (code) => `${API_URL}/r/${code}`,
+    invite: () => invite,
+    inviteTaken: (id) => {
+      if (invite?.id !== id) return;
+      takenHere = id;
+      // Marked, not removed: a newer invitation stored meanwhile keeps waiting (another id).
+      void browser.storage.session.set({ [takenKey(id)]: true }).catch(() => {}); // ponytail: one small key per taken invitation, gone with the browser session
+      invite = null;
+      subscribers.forEach((s) => s());
     },
     subscribe: (onChange) => {
       subscribers.add(onChange);
