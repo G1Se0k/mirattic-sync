@@ -7,13 +7,16 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
 저장소: https://github.com/G1Se0k/mirattic-sync (private)
 
 ## Completed
+### 확장 버전 1.3.1 (2026-10-19, 사용자 요청)
+- 초대 링크(결정 113)와 친구 줄 공개방 표시(결정 114)
+- 빌드: `apps/extension/.output/chrome-mv3`, 스토어 업로드용 `.output/mirattic-sync-1.3.1-store.zip`(manifest key 뺌, `externally_connectable`은 `https://sync.mirattic.com/*`만). 패치 노트에 1.3.1 항목 추가
 ### 친구 줄에 공개방 표시 (2026-10-19, 사용자 요청, 결정 114)
 - 친구가 공개 방에 들어가 있으면 친구 줄에 "공개방 참여중 / 방 이름"(이름 없으면 방 영상 제목, 없으면 "영상 없음"). 시청 중이 아니어도 표시, 공개 범위 "친구"일 때만. 합류 버튼도 그때 보이고 누르면 바로 입장(결정 111 확장)
 - 보는 친구마다 따로: 그 친구가 내보내진 방, 서로 차단한 사람이 있는 방은 보이지 않음(공개 방 목록과 같은 규칙). 공개 범위를 바꾸면 친구들에게 바로 다시 보냄
 - 서버: `PresenceView.publicRoom`, `RoomService.publicRoomOf`(결정 111의 방 고르기 재사용), `room:update`마다 `RoomsChanged` 이벤트로 그 방 멤버의 친구들에게 `presence:update` 다시 보냄
 - 검증: 서버 테스트 `friendsSeeThePublicRoomOneIsIn`(입장 시 알림 · 친구 목록 · 비공개 전환 시 사라짐 · 공개 범위 끔), 결정 111 테스트를 시청 없이도 바로 입장으로 갱신
 
-### 초대 링크 (2026-10-19, 사용자 요청; 확장 1.3.1로 낼 예정 — 버전은 스토어 제출 때 올림)
+### 초대 링크 (2026-10-19, 사용자 요청; 확장 1.3.1)
 - 결정 113: 방의 "방에 초대하기"의 방 코드 줄에 코드 복사 · 링크로 초대하기 아이콘(링크 `https://sync.mirattic.com/r/{코드}` 복사), 초대장 페이지(목업 확정, `static/invite.html`)에 방 제목 · 영상 · 호스트 · 인원 · 공개 여부와 [수락하고 입장]. 확장이 없으면 웹 스토어 버튼과 방 코드, 없는 방 · 가득 찬 방 안내
 - 서버: `GET /r/{code}`(페이지), `GET /api/invite/{code}`(로그인 없음, IP당 분당 제한 — `AuthRateLimitFilter`), `RoomService.invitePreview`
 - 확장: manifest `externally_connectable`(운영 `https://sync.mirattic.com/*`, 개발 `http://localhost/*`, 권한 경고 없음), background가 그 origin의 메시지만 받아 패널을 먼저 열고 코드를 `storage.session`에 둠(10분, `invite.ts`), 패널 Home이 꺼내 코드 입장. `API_URL`을 부작용 없는 `server.ts`로 분리(패널이 링크를 만들 때 씀)
