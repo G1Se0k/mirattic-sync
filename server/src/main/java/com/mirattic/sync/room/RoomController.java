@@ -91,7 +91,9 @@ class RoomController {
 	 * Orders answering a watch request (an invite, through its room write) against cancelling it.
 	 * ponytail: one lock for every create/invite on this instance; per-pair locks if invites ever get busy.
 	 */
-	private final Object answerLock = new Object();
+	// A lock, not a monitor: a virtual thread waiting for it lets its carrier go (Java 21 pins one waiting on a monitor,
+	// and enough waiters pinned every carrier while the holder needed one to finish).
+	private final java.util.concurrent.locks.ReentrantLock answerLock = new java.util.concurrent.locks.ReentrantLock();
 
 	private final RoomService rooms;
 	private final SocketHub hub;
@@ -114,7 +116,8 @@ class RoomController {
 			@RequestParam(required = false) String others) {
 		String me = jwt.getSubject();
 		RoomService.Others how = RoomService.Others.of(others);
-		synchronized (answerLock) { // also one switch at a time (decision 115)
+		answerLock.lock();
+		try { // also one switch at a time (decision 115)
 			rooms.requireSwitch(me, null, how);
 			Map<String, Long> answering = answering(me, body.inviteIds());
 			RoomService.RoomView room;
@@ -128,6 +131,8 @@ class RoomController {
 			sendInvites(me, room, List.of(me), body.inviteIds(), answering.keySet());
 			depart(me, rooms.leaveOthers(me, room.id(), how));
 			return room;
+		} finally {
+			answerLock.unlock();
 		}
 	}
 
@@ -137,7 +142,8 @@ class RoomController {
 			@Valid @RequestBody Invite body) {
 		String me = jwt.getSubject();
 		RoomService.Invited invited;
-		synchronized (answerLock) {
+		answerLock.lock();
+		try {
 			Map<String, Long> answering = answering(me, body.userIds());
 			try {
 				invited = rooms.invite(me, id, body.userIds(), answering.keySet());
@@ -146,6 +152,8 @@ class RoomController {
 				throw e;
 			}
 			sendInvites(me, invited.room(), invited.before(), body.userIds(), answering.keySet());
+		} finally {
+			answerLock.unlock();
 		}
 		rooms.announce(id, invited.before());
 		return invited.room();
@@ -162,7 +170,8 @@ class RoomController {
 	RoomService.RoomView accept(@AuthenticationPrincipal Jwt jwt, @PathVariable String id,
 			@RequestParam(required = false) String others) {
 		RoomService.Others how = RoomService.Others.of(others);
-		synchronized (answerLock) { // one switch at a time (decision 115): two joins can't each leave the other's room
+		answerLock.lock();
+		try { // one switch at a time (decision 115): two joins can't each leave the other's room
 			RoomService.Invited joined = rooms.accept(jwt.getSubject(), id, how); // asked there, once it could join
 			if (!joined.before().contains(jwt.getSubject())) {
 				rooms.announce(id, joined.before());
@@ -170,6 +179,8 @@ class RoomController {
 			answered(jwt.getSubject(), id);
 			depart(jwt.getSubject(), rooms.leaveOthers(jwt.getSubject(), id, how));
 			return joined.room();
+		} finally {
+			answerLock.unlock();
 		}
 	}
 
@@ -216,13 +227,16 @@ class RoomController {
 		if (!allowed[0]) {
 			throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
 		}
-		synchronized (answerLock) { // one switch at a time (decision 115)
+		answerLock.lock();
+		try { // one switch at a time (decision 115)
 			RoomService.Invited joined = rooms.joinByCode(me, body.code(), how); // asked there, once it could join
 			if (!joined.before().contains(me)) {
 				rooms.announce(joined.room().id(), joined.before());
 			}
 			depart(me, rooms.leaveOthers(me, joined.room().id(), how));
 			return joined.room();
+		} finally {
+			answerLock.unlock();
 		}
 	}
 
@@ -242,13 +256,16 @@ class RoomController {
 			@RequestParam(required = false) String others) {
 		String me = jwt.getSubject();
 		RoomService.Others how = RoomService.Others.of(others);
-		synchronized (answerLock) { // one switch at a time (decision 115)
+		answerLock.lock();
+		try { // one switch at a time (decision 115)
 			RoomService.Invited joined = rooms.joinPublic(me, id, how);
 			if (!joined.before().contains(me)) {
 				rooms.announce(id, joined.before());
 			}
 			depart(me, rooms.leaveOthers(me, id, how));
 			return joined.room();
+		} finally {
+			answerLock.unlock();
 		}
 	}
 
@@ -284,10 +301,13 @@ class RoomController {
 				// The join and closing my earlier request to them as one step under the lock an answer (create/invite)
 				// claims requests under: their answer came first (I'm in their room by it) or finds nothing to answer.
 				// One switch at a time too (decision 115): asked, joined and out of my other rooms in one step.
-				synchronized (answerLock) {
+				answerLock.lock();
+				try {
 					joined = rooms.joinPublic(me.id(), open, how);
 					removed = openWatchRequests.remove(me.id() + ">" + body.friendId());
 					gone = rooms.leaveOthers(me.id(), open, how);
+				} finally {
+					answerLock.unlock();
 				}
 				if (!joined.before().contains(me.id())) {
 					rooms.announce(open, joined.before());
@@ -325,12 +345,15 @@ class RoomController {
 		// Opened under the lock a direct join closes requests under, checked apart again inside it: a join of mine to
 		// their room that went through meanwhile (decision 111) either came first (refused here, 409) or comes after
 		// (it closes this one), so no request outlives it.
-		synchronized (answerLock) {
+		answerLock.lock();
+		try {
 			rooms.requireApart(me.id(), body.friendId());
 			openWatchRequests.values().removeIf(at -> now - at >= OPEN_WATCH_REQUEST_MS);
 			openWatchRequests.put(me.id() + ">" + body.friendId(), now);
 			hub.sendEvent(body.friendId(), new ServerEvent("watch:request", null, me.id(), null, now,
 					new IncomingRequest(me.id(), me.displayName(), OPEN_WATCH_REQUEST_MS)));
+		} finally {
+			answerLock.unlock();
 		}
 		return ResponseEntity.status(HttpStatus.ACCEPTED).body(new Asked(now, null));
 	}
@@ -352,8 +375,11 @@ class RoomController {
 	void cancelWatchRequest(@AuthenticationPrincipal Jwt jwt, @PathVariable String friendId) {
 		UserSummary me = rooms.requestWatch(jwt.getSubject(), friendId);
 		Long removed;
-		synchronized (answerLock) { // after an invite answering it: gone (answered) or back (the invite failed)
+		answerLock.lock();
+		try { // after an invite answering it: gone (answered) or back (the invite failed)
 			removed = openWatchRequests.remove(me.id() + ">" + friendId);
+		} finally {
+			answerLock.unlock();
 		}
 		if (removed != null) {
 			hub.sendEvent(friendId, new ServerEvent("watch:cancel", null, me.id(), null, System.currentTimeMillis(), me));
@@ -461,8 +487,11 @@ class RoomController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void dismissWatchRequest(@AuthenticationPrincipal Jwt jwt, @PathVariable String friendId) {
 		Long removed;
-		synchronized (answerLock) {
+		answerLock.lock();
+		try {
 			removed = openWatchRequests.remove(friendId + ">" + jwt.getSubject());
+		} finally {
+			answerLock.unlock();
 		}
 		// The requester's panel shows it was declined: once (a second dismissal sends nothing), and only while it
 		// still counted (an expired one just goes).
@@ -552,8 +581,11 @@ class RoomController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	void handOver(@AuthenticationPrincipal Jwt jwt, @PathVariable String id, @Valid @RequestBody HandOver body) {
 		RoomService.Logged handed;
-		synchronized (answerLock) { // not in the middle of the new host's join elsewhere (decision 115: asked, or left)
+		answerLock.lock();
+		try { // not in the middle of the new host's join elsewhere (decision 115: asked, or left)
 			handed = rooms.handOver(jwt.getSubject(), id, body.userId());
+		} finally {
+			answerLock.unlock();
 		}
 		hub.refreshHostVideo(id, () -> rooms.hostOf(id)); // the former host's report no longer counts: unknown (announced below)
 		roomLog.post(id, handed.log());
