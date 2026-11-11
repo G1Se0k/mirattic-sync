@@ -54,16 +54,22 @@ public class User {
 		return n.length() > 32 ? n.substring(0, 32) : n;
 	}
 
-	/** The name follows Mirattic Auth's (decision 99): Auth owns it, Sync shows it. None (or blank): the kept one stays. */
-	public void syncName(String authName) {
-		if (authName != null && !authName.isBlank()) {
-			this.displayName = nameFromAuth(authName);
+	/** The name follows Mirattic Auth's (decision 99): Auth owns it, Sync shows it. None (or blank): the kept one stays. True if it changed. */
+	public boolean syncName(String authName) {
+		if (authName == null || authName.isBlank() || nameFromAuth(authName).equals(displayName)) {
+			return false;
 		}
+		this.displayName = nameFromAuth(authName);
+		return true;
 	}
 
-	/** The photo follows Mirattic Auth's too: its URL only (checked by MiratticAuth.avatar), none = none. */
-	public void syncAvatar(String url) {
+	/** The photo follows Mirattic Auth's too: its URL only (checked by MiratticAuth.avatar), none = none. True if it changed. */
+	public boolean syncAvatar(String url) {
+		if (java.util.Objects.equals(url, avatarUrl)) {
+			return false;
+		}
 		this.avatarUrl = url;
+		return true;
 	}
 
 	public String getId() { return id; }

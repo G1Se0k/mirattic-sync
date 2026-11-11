@@ -75,8 +75,11 @@ public class UserController {
 	private Me me(User u, Jwt jwt) {
 		MiratticAuth.UserInfo info = auth.userInfo(jwt.getTokenValue());
 		if (info != null) {
-			u.syncName(info.name()); // stored only if it changed (none or blank: kept)
-			u.syncAvatar(info.avatarUrl()); // the photo as Auth has it now, none included
+			boolean changed = u.syncName(info.name()); // stored only if it changed (none or blank: kept)
+			changed |= u.syncAvatar(info.avatarUrl()); // the photo as Auth has it now, none included
+			if (changed) {
+				events.publishEvent(new ProfileChanged(u.getId())); // open friend lists and rooms show it, once saved
+			}
 		}
 		return new Me(u.getId(), info == null ? null : info.email(), u.getDisplayName(), u.getAvatarUrl(), u.getFriendCode(),
 				u.getPresenceVisibility(), u.getPositionVisibility(), u.isFriendCodeOnly());

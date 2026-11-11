@@ -3,6 +3,7 @@ package com.mirattic.sync.presence;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.mirattic.sync.AuthStub;
 import com.mirattic.sync.IntegrationTest;
 import java.util.concurrent.LinkedBlockingQueue;
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,44 @@ class PresenceSocketTest extends IntegrationTest {
 
 		connect(a);
 		assertThat(bWs.nextOfType("presence:update")).isNull();
+	}
+
+	@Test
+	void photoChangeTellsFriendsAndRooms() throws Exception {
+		TestUser a = signup();
+		TestUser b = signup();
+		TestUser blocker = signup();
+		TestUser invitee = signup();
+		befriend(a, b);
+		befriend(a, blocker);
+		befriend(a, invitee);
+		call(HttpMethod.PUT, "/api/blocks/" + a.id(), blocker.accessToken(), null); // a is now on their blocked list
+		call(HttpMethod.POST, "/api/rooms", a.accessToken(), """
+				{"content":{"provider":"youtube","contentId":"9bZkp7q19f0","title":"T","durationMs":600000},"inviteIds":["%s"]}"""
+				.formatted(invitee.id()));
+		call(HttpMethod.DELETE, "/api/friends/" + a.id(), invitee.accessToken(), null); // the invitation may stay
+		Client aWs = connect(a);
+		Client bWs = connect(b);
+		Client blockerWs = connect(blocker);
+		Client inviteeWs = connect(invitee);
+
+		AuthStub.PICTURES.put(a.id(), "https://avatar.mirattic.com/avatars/" + a.id() + "/p.jpg");
+		try {
+			call(HttpMethod.GET, "/api/me", a.accessToken(), null);
+			assertThat(bWs.nextOfType("friend:update")).isNotNull(); // the friend list refetches the photo
+			assertThat(aWs.nextOfType("room:update")).isNotNull(); // and the rooms they're in
+			assertThat(blockerWs.nextOfType("friend:update")).isNotNull(); // one who blocked them: their blocked list
+			// An invitee, friends no more: a full refetch, never room:update (that settles the invitation), before or after.
+			java.util.List<String> toInvitee = new java.util.ArrayList<>();
+			for (JsonNode e = inviteeWs.next(); e != null; e = inviteeWs.next()) {
+				toInvitee.add(e.path("type").asString());
+			}
+			assertThat(toInvitee).contains("friend:update").doesNotContain("room:update");
+			call(HttpMethod.GET, "/api/me", a.accessToken(), null);
+			assertThat(bWs.nextOfType("friend:update")).isNull(); // unchanged: nothing sent
+		} finally {
+			AuthStub.PICTURES.remove(a.id());
+		}
 	}
 
 	@Test

@@ -1,7 +1,9 @@
 package com.mirattic.sync.presence;
 
+import com.mirattic.sync.friend.BlockRepository;
 import com.mirattic.sync.friend.FriendshipRepository;
 import com.mirattic.sync.room.RoomService;
+import com.mirattic.sync.user.ProfileChanged;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.Visibility;
@@ -21,12 +23,15 @@ public class PresenceService {
 	private final Map<String, MediaPresence> media = new ConcurrentHashMap<>();
 	private final SocketHub hub;
 	private final FriendshipRepository friendships;
+	private final BlockRepository blocks;
 	private final UserRepository users;
 	private final RoomService rooms;
 
-	PresenceService(SocketHub hub, FriendshipRepository friendships, UserRepository users, RoomService rooms) {
+	PresenceService(SocketHub hub, FriendshipRepository friendships, BlockRepository blocks, UserRepository users,
+			RoomService rooms) {
 		this.hub = hub;
 		this.friendships = friendships;
+		this.blocks = blocks;
 		this.users = users;
 		this.rooms = rooms;
 	}
@@ -35,6 +40,14 @@ public class PresenceService {
 	@TransactionalEventListener(fallbackExecution = true)
 	void roomsChanged(RoomsChanged event) {
 		event.userIds().forEach(this::broadcast);
+	}
+
+	/** A name or photo changed: everyone with a tie to them, and their rooms, refetch it (after the commit). */
+	@TransactionalEventListener(fallbackExecution = true)
+	void profileChanged(ProfileChanged event) {
+		friendships.contactIds(event.userId()).forEach(id -> hub.sendEvent(id, "friend:update", null, null));
+		blocks.findByBlockedId(event.userId()).forEach(b -> hub.sendEvent(b.getBlockerId(), "friend:update", null, null)); // their blocked list
+		rooms.announceMemberOf(event.userId());
 	}
 
 	public void online(String userId) {

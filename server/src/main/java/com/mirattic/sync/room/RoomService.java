@@ -1073,6 +1073,19 @@ public class RoomService {
 		members.seeType(roomId, me, Math.min(version, room.typeVersion()));
 	}
 
+	/**
+	 * A name or photo changed: every room they're in or invited to refetches it. Invitees get `friend:update` (a full
+	 * refetch), not `room:update`: to the extension that one means their invitation was settled and drops its alert.
+	 */
+	public void announceMemberOf(String userId) {
+		Set<String> roomIds = new HashSet<>(members.findByUserId(userId).stream().map(RoomMember::getRoomId).toList());
+		rooms.findInviting(userId).forEach(r -> roomIds.add(r.getId()));
+		for (Room room : rooms.findAllById(roomIds)) {
+			announce(room.getId(), memberIds(room.getId()));
+			room.invitedIds().forEach(id -> hub.sendEvent(id, "friend:update", null, null));
+		}
+	}
+
 	public void announce(String roomId, Collection<String> memberIds) {
 		ServerEvent event = new ServerEvent("room:update", roomId, null, null, System.currentTimeMillis(), null);
 		for (String id : memberIds) {

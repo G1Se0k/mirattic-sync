@@ -932,7 +932,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
   - Netflix 다음 화 감지 수정은 가짜 페이지로만 확인 (실제 DOM 구조 미확인)
   - Netflix 내부 데이터 구조(`videoMetadata[id]._metadata.video`)는 공개 자료 기준, 실제 Netflix에서 미확인 — 없으면 예전처럼 "Netflix 콘텐츠"
   - Netflix "크레딧 보기" 버튼 선택자는 `watch-credits-seamless-button`(다음 화 버튼 이름에서 추정) 또는 `data-uia`에 credits가 들어간 첫 버튼 — 실제 이름 미확인, 같은 페이지에 다른 credits 버튼이 먼저 있으면 그것을 누를 수 있음
-  - 호스트가 Netflix 끝 화면의 "다음 화"(`data-uia="next-episode-seamless-button"`)를 누르면 새로고침되며 그 화에 머무는 문제: **특정 브라우저에서만 발생** (다른 브라우저에서는 재현되지 않음, 2026-09-29 사용자 확인). 확장의 탭 이동 로그 없음 — 확장이 옮긴 것은 아님. 원인 미확인
+  - 호스트가 Netflix 끝 화면의 "다음 화"(`data-uia="next-episode-seamless-button"`)를 누르면 새로고침되며 그 화에 머무는 문제: **특정 브라우저에서만 발생** (다른 브라우저에서는 재현되지 않음, 2026-09-29 사용자 확인). 확장의 탭 이동 로그 없음 — 확장이 옮긴 것은 아님. 2026-10-20: 전체화면에서 누르면 전체화면이 풀리며 같은 화 몇 초 전으로 다시 열림(Netflix가 저장 지점에서 재개), **확장을 끈 상태 · 시크릿 창에서도 재현 → 확장과 무관**. 새로고침 뒤 `performance.getEntriesByType('navigation')[0].type`이 `reload` → Netflix 페이지가 스스로 다시 불러온 것 (전체화면이 아니어도 재현, Chrome 155, 원인 미확인)
   - **Desktop 앱의 "방 생성"은 지금 보는 영상이 없으면 사이트 선택 없이 안내만 표시** (Desktop은 탭의 영상을 감지하지 못함, 설치 파일도 더 만들지 않음). 영상을 보며 만드는 방 생성은 확장에서
   - 서버를 다시 시작하면(배포 포함) 다시 연결되는 사람마다 "들어왔습니다"가 한 번씩 더 남음 (입장 여부를 메모리에만 기억)
   - Netflix/Laftel 권한이 설치 권한이 되어, 업데이트하면 Chrome이 확장을 멈추고 새 권한 승인을 받음. 전에 제어를 켜 둔 사람도 업데이트 후 다시 켜야 함
@@ -1039,7 +1039,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Mirattic Auth 프로필 사진 표시 (2026-11-11, 결정 116)
-V28 `users.avatar_url`, 로그인(ID 토큰 `picture`)과 `/api/me`(UserInfo `picture`)에서 맞춤, 허용 주소 접두사 검사, `UserSummary.avatarUrl`, UI `Avatar` 이미지(실패 시 이니셜). 서버 테스트 104개, 타입체크, 클라이언트 테스트 통과. Codex 검토(코드 diff를 붙여 `codex_consult`, 이 환경의 Codex 도구는 Auth 저장소만 직접 읽음): URL 검증 우회 없음, 사진 로딩 실패 뒤 새 URL이 안 뜨는 UI 버그 수정(`failed`에 실패한 URL 기억), 접두사 설정은 `https://…/`가 아니면 시작 거부. 아직: 배포, 실제 확장에서 `avatar.mirattic.com` 이미지가 CSP에 막히지 않는지 확인.
+V28 `users.avatar_url`, 로그인(ID 토큰 `picture`)과 `/api/me`(UserInfo `picture`)에서 맞춤, 허용 주소 접두사 검사, `UserSummary.avatarUrl`, UI `Avatar` 이미지(실패 시 이니셜). 서버 테스트 104개, 타입체크, 클라이언트 테스트 통과. Codex 검토(코드 diff를 붙여 `codex_consult`, 이 환경의 Codex 도구는 Auth 저장소만 직접 읽음): URL 검증 우회 없음, 사진 로딩 실패 뒤 새 URL이 안 뜨는 UI 버그 수정(`failed`에 실패한 URL 기억), 접두사 설정은 `https://…/`가 아니면 시작 거부. Codex Sol 리뷰(FAIL): 바뀐 사진이 열린 친구 · 방 화면에 바로 안 보임 → 이름 · 사진이 바뀌면 커밋 뒤 친구 · 신청 상대 · 그 사람을 차단한 사람에게 `friend:update`, 속하거나 초대된 방의 멤버에게 `room:update`, 초대 대기자에게는 `friend:update`(`room:update`는 확장이 초대 알림을 지움)(`ProfileChanged`, 이름 변경도 같이 해결), 서버 테스트 105개. 확장은 CSP를 따로 정하지 않아(MV3 기본은 `img-src` 제한 없음) 사진이 막히지 않음. 아직: 실제 확장에서 사진 표시 확인.
 
 ## Next Task
 Phase 10 남은 일 (사용자 결정 필요)

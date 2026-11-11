@@ -28,5 +28,6 @@ public class Block {
 		this.createdAt = System.currentTimeMillis();
 	}
 
+	public String getBlockerId() { return blockerId; }
 	public String getBlockedId() { return blockedId; }
 }

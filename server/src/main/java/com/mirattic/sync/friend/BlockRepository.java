@@ -23,6 +23,8 @@ public interface BlockRepository extends JpaRepository<Block, Block.Key> {
 
 	List<Block> findByBlockerId(String blockerId);
 
+	List<Block> findByBlockedId(String blockedId);
+
 	/** Everyone `me` blocks or is blocked by. */
 	@Query("""
 			select case when b.blockerId = :me then b.blockedId else b.blockerId end from Block b

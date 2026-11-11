@@ -1,5 +1,6 @@
 package com.mirattic.sync.auth;
 
+import com.mirattic.sync.user.ProfileChanged;
 import com.mirattic.sync.user.User;
 import com.mirattic.sync.user.UserRepository;
 import com.mirattic.sync.user.UserSummary;
@@ -13,6 +14,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -55,15 +57,17 @@ class MiratticLoginController {
 	private final MiratticAuth auth;
 	private final Handoffs handoffs;
 	private final UserRepository users;
+	private final ApplicationEventPublisher events;
 	private final List<String> extensionRedirects;
 	private final boolean secureCookie;
 	private final ShortLived<Pending> pending = new ShortLived<>(LOGIN_TTL);
 
-	MiratticLoginController(MiratticAuth auth, Handoffs handoffs, UserRepository users,
+	MiratticLoginController(MiratticAuth auth, Handoffs handoffs, UserRepository users, ApplicationEventPublisher events,
 			@Value("${app.auth.extension-redirects}") List<String> extensionRedirects) {
 		this.auth = auth;
 		this.handoffs = handoffs;
 		this.users = users;
+		this.events = events;
 		this.extensionRedirects = extensionRedirects;
 		this.secureCookie = auth.redirectUri.startsWith("https://");
 	}
@@ -116,9 +120,12 @@ class MiratticLoginController {
 			// Auth has it now (decision 99).
 			String name = id.getClaimAsString("name");
 			User user = users.findById(id.getSubject()).orElseGet(() -> User.fromAuth(id.getSubject(), User.nameFromAuth(name)));
-			user.syncName(name); // no name in the token: the one kept stays
-			user.syncAvatar(auth.avatar(id.getClaimAsString("picture"))); // no (valid) photo: none
+			boolean changed = user.syncName(name); // no name in the token: the one kept stays
+			changed |= user.syncAvatar(auth.avatar(id.getClaimAsString("picture"))); // no (valid) photo: none
 			user = users.save(user);
+			if (changed) {
+				events.publishEvent(new ProfileChanged(user.getId())); // open friend lists and rooms show it, once saved
+			}
 			Instant authTime = id.hasClaim("auth_time") ? id.getClaimAsInstant("auth_time") : Instant.EPOCH;
 			handoff = new Handoffs.Handoff(new AuthTokens(t.access_token(), t.refresh_token(), UserSummary.of(user)), authTime);
 		} catch (RuntimeException e) {
