@@ -416,7 +416,9 @@ export default defineBackground(() => {
     }
     if (ports.size || pendingMention !== pm) return; // a panel opened meanwhile: handed to it (or kept for its hello)
     const title = view ? roomTitle(view) : undefined;
-    alert('mention', roomId, ms, `${name}님이 나를 언급했습니다`, msg.text, title ? `방: ${title}` : undefined);
+    // The host's "@everyone" (anyone else's is just text): told as such.
+    const everyone = msg.mentions?.includes('everyone') === true; // marked by the server as sent
+    alert('mention', roomId, ms, `${name}님이 ${everyone ? '모두를' : '나를'} 언급했습니다`, msg.text, title ? `방: ${title}` : undefined);
     const entry = alerts.find((a) => a.kind === 'mention' && a.target === roomId);
     pm.title = title;
     if (entry) Object.assign(pm, { alertId: entry.toast.alertId, until: entry.until });

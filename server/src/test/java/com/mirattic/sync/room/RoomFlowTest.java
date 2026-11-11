@@ -633,6 +633,22 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(friendWs.nextOfType("chat:message").path("payload").hasNonNull("mentions")).isFalse();
 		hostWs.send(event("chat:message", roomId, "{\"text\":\"x\",\"mentions\":\"nope\"}"));
 		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+
+		// "@everyone": from the host, every other member (nothing sent with it); from a member, just text.
+		Thread.sleep(1_100); // past the chat budget (5 a second) the messages above used
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"@everyone start\"}"));
+		JsonNode all = friendWs.nextOfType("chat:message").path("payload").path("mentions");
+		assertThat(all.size()).isEqualTo(2);
+		assertThat(all.get(0).asString()).isEqualTo("everyone"); // marked as the host's, as sent
+		assertThat(all.get(1).asString()).isEqualTo(friend.id());
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"mail x@everyone.com\"}")); // not a mention
+		assertThat(friendWs.nextOfType("chat:message").path("payload").hasNonNull("mentions")).isFalse();
+		friendWs.send(event("chat:message", roomId, "{\"text\":\"@everyone hey\"}"));
+		JsonNode fromFriend = hostWs.nextOfType("chat:message").path("payload");
+		while (!fromFriend.path("userId").asString().equals(friend.id())) {
+			fromFriend = hostWs.nextOfType("chat:message").path("payload"); // the host's own, before it
+		}
+		assertThat(fromFriend.hasNonNull("mentions")).isFalse();
 	}
 
 	@Test

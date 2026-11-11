@@ -149,6 +149,7 @@ export type ChatMessage = {
   /** Deleted for everyone: `text` is empty, shown as a placeholder. */
   deleted?: boolean;
   /** Members it mentions with "@name" (decision 118); absent for none. */
+  /** Mentioned members' IDs (decision 118); led by "everyone" for the host's @everyone (118a). */
   mentions?: string[] | null;
   /** A message's author's name (decision 112), so one who left shows by name; absent on log lines and older servers. */
   userName?: string | null;

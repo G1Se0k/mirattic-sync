@@ -766,9 +766,14 @@ public class RoomService {
 	 * `contentKey`: the video the sender's position is on. Only one that is the room's video now has it stored with
 	 * the position (a message sent as the host moved on keeps its time, just not as the new video's).
 	 */
+	/** "@everyone" (decision 118): the host's mention of every member. */
+	public static final String EVERYONE = "everyone";
+
 	private static boolean names(String text, String name) {
 		return name != null && !name.isEmpty()
-				&& java.util.regex.Pattern.compile("@" + java.util.regex.Pattern.quote(name) + "(?![\\p{L}\\p{N}_])").matcher(text).find();
+				// A word of its own: nothing word-like before the "@" (not "x@everyone.com") nor after the name.
+				&& java.util.regex.Pattern.compile("(?<![\\p{L}\\p{N}_])@" + java.util.regex.Pattern.quote(name) + "(?![\\p{L}\\p{N}_])")
+						.matcher(text).find();
 	}
 
 	/**
@@ -780,16 +785,20 @@ public class RoomService {
 			Collection<String> mentions) {
 		// Under the room lock, like a kick: a member kicked meanwhile can't post after it.
 		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
-		requireMember(me, roomId);
+		RoomMember self = requireMember(me, roomId);
 		String trimmed = text == null ? "" : text.strip();
 		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
 		}
 		boolean same = contentKey != null && contentKey.equals(room.contentKey());
-		List<String> in = mentions.isEmpty() ? List.of() : memberIds(roomId);
-		// …and only those the text names as "@<their name>" (not followed by a letter or digit, as the client finds them).
-		List<String> named = mentions.stream().distinct().filter(id -> !id.equals(me) && in.contains(id) && names(trimmed, nameOf(id)))
-				.toList();
+		// "@everyone" from the host: every other member (whatever the client sent), led by "everyone" itself — so the
+		// message keeps what it was when sent, whoever hosts later; from anyone else, just text.
+		boolean everyone = self.getRole() == RoomMember.Role.HOST && names(trimmed, EVERYONE);
+		List<String> in = mentions.isEmpty() && !everyone ? List.of() : memberIds(roomId);
+		// …else only those the text names as "@<their name>" (not followed by a letter or digit, as the client finds them).
+		List<String> named = everyone
+				? java.util.stream.Stream.concat(java.util.stream.Stream.of(EVERYONE), in.stream().filter(id -> !id.equals(me))).toList()
+				: mentions.stream().distinct().filter(id -> !id.equals(me) && in.contains(id) && names(trimmed, nameOf(id))).toList();
 		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null, same ? room : null).mentioning(named))
 				.view().named(nameOf(me));
 	}

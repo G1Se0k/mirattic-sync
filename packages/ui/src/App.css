@@ -18,13 +18,15 @@
   --on-danger: #ffffff;
   --on: #3fa56b;
   --flash: #fff4c7;
+  --mention-bg: #fff4c7; /* a message that mentions me (decision 118) */
+  --mention-fg: #2563eb; /* an "@name" */
   color: var(--fg);
   background: var(--bg);
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --fg: #ececea; --bg: #171717; --surface: #202020; --muted: #a8a8a5; --line: #2e2e2d; --hover: #2a2a29;
-    --strong: #ececea; --on-strong: #171717; --accent: #8cc4a8; --accent-tint: rgba(140, 196, 168, 0.14); --danger: #e0786f; --on-danger: #1c1210; --on: #5cc389; --flash: #4a4125;
+    --strong: #ececea; --on-strong: #171717; --accent: #8cc4a8; --accent-tint: rgba(140, 196, 168, 0.14); --danger: #e0786f; --on-danger: #1c1210; --on: #5cc389; --flash: #4a4125; --mention-bg: #4a4125; --mention-fg: #7aa7ff;
   }
 }
 * { box-sizing: border-box; }
@@ -207,8 +209,17 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .chat button.author { padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
 .chat button.author:hover, .chat button.author.on { text-decoration: underline; }
 /* Mentioning me (decision 118): an accent edge and tint; any "@name" it names in bold. */
-.chat li.mentioned { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 3px 0 0 var(--accent); border-radius: 6px; }
-.chat .mention { font-weight: 700; }
+.chat li.mentioned { background: var(--mention-bg); border-radius: 0; }
+.chat .mention { color: var(--mention-fg); font-weight: 600; }
+/* "@" typed: the members to name, over the input. */
+.mention-suggest { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 5; list-style: none; margin: 0; padding: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
+.mention-suggest li { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+.mention-suggest li.on { background: var(--hover); }
+.mention-suggest .sub { margin-left: auto; color: var(--muted); font-size: calc(11px * var(--text-scale)); }
+.mention-suggest .avatar { width: 22px; height: 22px; font-size: calc(11px * var(--text-scale)); }
+.mention-suggest .everyone { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: var(--accent-tint); color: var(--accent); font-weight: 700; }
 .chat li.member-box { padding: 10px; border-radius: 10px; overflow-y: auto; }
 /* No height of its own: a row with the delete button is as tall as one without (the button overflows, centered). */
 .chat li .tools { visibility: hidden; display: flex; align-items: center; height: 0; }
@@ -224,7 +235,7 @@ button.stamp { padding: 0 2px; background: none; color: var(--accent); font-weig
 .chat li.log button.stamp:hover { background: var(--hover); }
 .message { white-space: pre-wrap; overflow-wrap: anywhere; }
 .composer { padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 4px; }
-.composer form { display: flex; gap: 6px; align-items: center; }
+.composer form { position: relative; display: flex; gap: 6px; align-items: center; }
 .composer input { flex: 1; }
 .emoji { font-size: calc(15px * var(--text-scale)); }
 

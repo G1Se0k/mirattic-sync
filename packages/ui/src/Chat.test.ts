@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import type { ChatMessage } from "@mirattic/types";
-import { logText, mentionsIn, merge, receive, reconcile, scrollFor, tombstone, visible, without } from "./Chat";
+import type { ChatMessage, RoomMemberView } from "@mirattic/types";
+import { completeMention, logText, mentionChoices, mentionsIn, mentionTyped, merge, receive, reconcile, scrollFor, tombstone, visible, without } from "./Chat";
 import { parseClock } from "./format";
 
 const msg = (id: string, createdAt: number): ChatMessage => ({ id, roomId: "r", userId: "u", text: id, createdAt });
@@ -91,6 +91,36 @@ it("mentions name whole members only, never me", () => {
   const users = [{ id: "a", displayName: "민수" }, { id: "b", displayName: "민수2" }, { id: "me", displayName: "나" }];
   expect(mentionsIn("@민수2 봐봐", users, "me")).toEqual(["b"]);
   expect(mentionsIn("@민수, @민수2!", users, "me")).toEqual(["a", "b"]);
-  expect(mentionsIn("@나 혼잣말 메일 x@민수y", users, "me")).toEqual([]);
+  expect(mentionsIn("@나 혼잣말 메일 x@민수y x@민수", users, "me")).toEqual([]);
   expect(mentionsIn("(@민수.)", users, "me")).toEqual(["a"]);
+});
+
+it("@everyone names every other member, from the host only", () => {
+  const users = [{ id: "a", displayName: "민수" }, { id: "me", displayName: "나" }, { id: "c", displayName: "지현" }];
+  expect(mentionsIn("@everyone 시작", users, "me", true)).toEqual(["a", "c"]);
+  expect(mentionsIn("@everyone 시작", users, "me", false)).toEqual([]);
+  expect(mentionsIn("@everyones", users, "me", true)).toEqual([]);
+  expect(mentionsIn("x@everyone.com", users, "me", true)).toEqual([]);
+});
+
+it("finds the @… being typed before the caret", () => {
+  expect(mentionTyped("ㅇㅋ @지", 5)).toEqual({ at: 3, query: "지" });
+  expect(mentionTyped("@", 1)).toEqual({ at: 0, query: "" });
+  expect(mentionTyped("mail x@y", 8)).toBeNull(); // inside a word: not a mention
+  expect(mentionTyped("@지현 다음", 7)).toBeNull(); // a space typed after it
+});
+
+it("suggests other members by name, those starting with it first, everyone for the host", () => {
+  const m = (id: string, displayName: string, role: "HOST" | "MEMBER" = "MEMBER"): RoomMemberView =>
+    ({ user: { id, displayName }, role, present: true });
+  const members = [m("me", "기석", "HOST"), m("a", "하지현"), m("b", "지훈")];
+  expect(mentionChoices("지", members, "me", false).map((c) => c.id)).toEqual(["b", "a"]);
+  expect(mentionChoices("", members, "me", true).map((c) => c.id)).toEqual(["everyone", "a", "b"]);
+  expect(mentionChoices("ev", members, "a", false).map((c) => c.id)).toEqual([]);
+});
+
+it("completes the whole @… at the caret", () => {
+  expect(completeMention("@지현", 2, "지현")).toEqual({ text: "@지현 ", caret: 4 }); // caret inside it
+  expect(completeMention("ㅇㅋ @지 봐", 5, "지현")).toEqual({ text: "ㅇㅋ @지현 봐", caret: 7 });
+  expect(completeMention("그냥", 2, "지현")).toBeNull();
 });

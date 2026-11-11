@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { Socket, SocketStatus } from "@mirattic/client";
 import type { ChatDeleted, ChatMessage, RoomMemberView, ServerEvent } from "@mirattic/types";
 import { api } from "./session";
 import { clock, parseClock } from "./format";
-import { IconButton } from "./Icons";
+import { Avatar, IconButton } from "./Icons";
 import { Actions, Dialog, useAsk } from "./Dialog";
 
 type Props = {
@@ -41,6 +41,37 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   const shownLines = useMemo(() => messages.filter(visible), [messages]);
   const [text, setText] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  /** Where the caret is (what "@…" is being typed before it), and the suggestion chosen; closed by Esc until it changes. */
+  const [caret, setCaret] = useState(0);
+  const suggestId = useId();
+  const [pick, setPick] = useState(0);
+  const [closedAt, setClosedAt] = useState<string | null>(null);
+  const typing = mentionTyped(text, caret);
+  const choices = typing === null || closedAt === `${caret}:${text}` ? [] : mentionChoices(typing.query, members, meId, isHost);
+  const chosen = Math.min(pick, Math.max(choices.length - 1, 0));
+  function complete(name: string) {
+    const done = completeMention(text, caret, name);
+    if (!done) return;
+    const { text: next, caret: at } = done;
+    setText(next);
+    setCaret(at);
+    setPick(0);
+    requestAnimationFrame(() => input.current?.setSelectionRange(at, at));
+  }
+  function onMentionKey(e: KeyboardEvent<HTMLInputElement>) {
+    if (!choices.length || e.nativeEvent.isComposing) return; // the IME's keys while composing
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setPick((chosen + (e.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length);
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      const c = choices[chosen];
+      if (c) complete(c.name);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setClosedAt(`${caret}:${text}`);
+    }
+  }
   useEffect(() => {
     if (!mention) return;
     // Whole or not at all: a draft without room for it is left as it is (a cut name would name no one).
@@ -165,7 +196,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     const trimmed = text.trim();
     if (!trimmed) return;
     // With the video the position is on (the room's as this panel knows it): kept only while it is the room's.
-    const mentions = mentionsIn(trimmed, members.map((m) => m.user), meId);
+    const mentions = mentionsIn(trimmed, members.map((m) => m.user), meId, isHost);
     if (socket.send({ type: "chat:message", roomId, payload: { text: trimmed, mediaPositionMs: await position(), contentKey: video,
       ...(mentions.length ? { mentions } : {}) } })) setText("");
   }
@@ -327,10 +358,14 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
                 ) : (
                   <>
                     {timestamp(item.mediaPositionMs, item.contentKey)}
-                    <span className="message">{withMentions(item.text, (item.mentions ?? []).flatMap((id) => {
-                      const m = members.find((x) => x.user.id === id);
-                      return m ? [m.user.displayName] : [];
-                    }))}</span>
+                    <span className="message">{withMentions(item.text, [
+                      ...(item.mentions ?? []).flatMap((id) => {
+                        const m = members.find((x) => x.user.id === id);
+                        return m ? [m.user.displayName] : [];
+                      }),
+                      // The host's "@everyone" (anyone else's is just text).
+                      ...(item.mentions?.includes(EVERYONE) ? [EVERYONE] : []), // marked by the server, as sent
+                    ])}</span>
                   </>
                 )}
               </span>
@@ -354,7 +389,24 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
       <div className="composer">
         {failed && <p className="error" role="alert">{failed}</p>}
         <form onSubmit={send}>
-          <input ref={input} placeholder="메시지" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
+          {choices.length > 0 && (
+            <ul id={suggestId} className="mention-suggest" role="listbox" aria-label="언급할 사람">
+              {choices.map((c, i) => (
+                <li key={c.id} id={`${suggestId}-${i}`} role="option" aria-selected={i === chosen} className={i === chosen ? "on" : undefined}
+                  onMouseDown={(e) => { e.preventDefault(); complete(c.name); }} onMouseEnter={() => setPick(i)}>
+                  {c.id === EVERYONE ? <span className="everyone" aria-hidden="true">@</span> : <Avatar name={c.name} src={c.avatarUrl} />}
+                  {c.name}
+                  {c.sub && <span className="sub">{c.sub}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <input ref={input} placeholder="메시지" maxLength={1000} value={text} role="combobox" aria-expanded={choices.length > 0}
+            aria-autocomplete="list" aria-controls={choices.length ? suggestId : undefined}
+            aria-activedescendant={choices.length ? `${suggestId}-${chosen}` : undefined} onKeyDown={onMentionKey}
+            onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); setPick(0); }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)} onBlur={() => setClosedAt(`${caret}:${text}`)}
+            onFocus={() => setClosedAt(null)} />
           <IconButton icon="clock" label="타임스탬프 찍기" disabled={status !== "open" || !video || !canStamp} onClick={() => void openStamp()} />
           <IconButton icon="send" label="보내기" type="submit" tone="primary" disabled={status !== "open"} />
         </form>
@@ -465,13 +517,48 @@ export function logText(m: ChatMessage) {
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-/** "@name" as a whole word: not "@민수" inside "@민수2". */
+/** "@name" as a whole word: not "@민수" inside "@민수2", nor after a letter ("x@everyone.com"). */
 const mentionRe = (names: string[], flags = "u") =>
-  new RegExp(`@(${names.map(escapeRe).join("|")})(?![\\p{L}\\p{N}_])`, flags);
+  new RegExp(`(?<![\\p{L}\\p{N}_])@(${names.map(escapeRe).join("|")})(?![\\p{L}\\p{N}_])`, flags);
 
-/** The other members a message names with "@name" (decision 118), each once. */
-export function mentionsIn(text: string, users: { id: string; displayName: string }[], meId: string): string[] {
+/** The host's mention of every member (decision 118). */
+export const EVERYONE = "everyone";
+
+/** The other members a message names with "@name" (decision 118), each once — all of them for the host's "@everyone". */
+export function mentionsIn(text: string, users: { id: string; displayName: string }[], meId: string, isHost = false): string[] {
+  if (isHost && mentionRe([EVERYONE]).test(text)) return users.filter((u) => u.id !== meId).map((u) => u.id);
   return users.filter((u) => u.id !== meId && u.displayName && mentionRe([u.displayName]).test(text)).map((u) => u.id);
+}
+
+/** An "@…" being typed right before the caret (at the start or after a space): where its "@" is, and what follows. */
+export function mentionTyped(text: string, caret: number): { at: number; query: string } | null {
+  const m = /(?:^|\s)@([^\s@]*)$/u.exec(text.slice(0, caret));
+  const query = m?.[1];
+  return query === undefined ? null : { at: caret - query.length - 1, query };
+}
+
+/**
+ * "@name " in place of the "@…" at the caret — the whole of it, also what follows the caret up to a space — and the
+ * caret after it; null if there is none, or past 1000 characters (a cut name would name no one).
+ */
+export function completeMention(text: string, caret: number, name: string): { text: string; caret: number } | null {
+  const typed = mentionTyped(text, caret);
+  if (!typed) return null;
+  const end = caret + (/^[^\s@]*/u.exec(text.slice(caret))?.[0].length ?? 0);
+  const next = `${text.slice(0, typed.at)}@${name} ${text.slice(end).replace(/^ /, "")}`;
+  return next.length > 1000 ? null : { text: next, caret: typed.at + name.length + 2 };
+}
+
+/** Whom "@query" may name: the other members whose name has it (those starting with it first), "everyone" for the host. */
+export function mentionChoices(query: string, members: RoomMemberView[], meId: string, isHost: boolean) {
+  const q = query.toLocaleLowerCase();
+  const people = members
+    .filter((m) => m.user.id !== meId && m.user.displayName.toLocaleLowerCase().includes(q))
+    .sort((a, b) => Number(!a.user.displayName.toLocaleLowerCase().startsWith(q)) - Number(!b.user.displayName.toLocaleLowerCase().startsWith(q)))
+    .map((m) => ({ id: m.user.id, name: m.user.displayName, avatarUrl: m.user.avatarUrl, sub: m.role === "HOST" ? "호스트" : undefined }));
+  const all = isHost && EVERYONE.startsWith(q) && members.some((m) => m.user.id !== meId)
+    ? [{ id: EVERYONE, name: EVERYONE, avatarUrl: undefined, sub: "방 멤버 모두" }] : [];
+  return [...all, ...people].slice(0, 6);
 }
 
 /** The text with each "@name" of these (the mentioned members') in bold. */
