@@ -17,6 +17,7 @@ const INVITE_COOLDOWN_MS = 30_000;
 
 /** Members who are my friends, and those I asked (pending). */
 type Ties = { friends: string[]; sent: string[] };
+type Manage = "host" | "kick" | "block";
 
 type Props = {
   roomId: string;
@@ -117,8 +118,9 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
     );
   }
 
-  /** Host only (decision 79). The room's refetch (room:update) shows the result. */
-  async function manage(name: string, action: "host" | "kick", userId: string) {
+  /** Host only (decision 79), but "block" (anyone's). The room's refetch (room:update) shows the result. */
+  async function manage(name: string, action: Manage, userId: string) {
+    if (action === "block") return block(name, userId);
     const yes = action === "host"
       ? await asker.ask(`${name}님에게 호스트를 넘길까요?`, { body: `이후 재생은 ${name}님의 플레이어를 따라갑니다.`, ok: "호스트 넘기기" })
       : await asker.ask(`${name}님을 방에서 내보낼까요?`, { body: "다시 초대하기 전에는 방 코드로도 들어올 수 없습니다.", ok: "내보내기", danger: true });
@@ -127,6 +129,22 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       await (action === "host" ? api.makeHost(roomId, userId) : api.kickMember(roomId, userId));
     } catch {
       void asker.tell(action === "host" ? "호스트를 넘기지 못했습니다" : "내보내지 못했습니다", "다시 시도해 주세요.");
+    }
+  }
+
+  /**
+   * As from a report (Report.tsx): the server parts us from each other's rooms, this one included — whoever doesn't
+   * host it leaves (RoomService.separate), so a member blocking leaves it themselves; told before.
+   */
+  async function block(name: string, userId: string) {
+    const here = isHost ? `${name}님은 이 방에서 나가게 됩니다.` : "호스트가 아니므로 내가 이 방에서 나가게 됩니다.";
+    const yes = await asker.ask(`${name}님을 차단할까요?`, {
+      body: `차단하면 서로 친구·방에서 빠지고 다시 요청할 수 없습니다. ${here} 설정 > 차단한 사용자에서 풀 수 있습니다.`, ok: "차단", danger: true });
+    if (!yes) return;
+    try {
+      await api.block(userId);
+    } catch {
+      void asker.tell("차단하지 못했습니다", "다시 시도해 주세요.");
     }
   }
 
@@ -443,7 +461,7 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
   ties: Ties | null;
   onBefriend: (id: string) => void;
   onReport: (id: string, name: string) => void;
-  onManage: (name: string, action: "host" | "kick", id: string) => void;
+  onManage: (name: string, action: Manage, id: string) => void;
 }) {
   const [open, setOpen] = useState(() => {
     try {
@@ -476,7 +494,11 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
     const el = box.current;
     if (!chip || !el || !list.current) return;
     el.style.left = `${Math.max(0, Math.min(chip.offsetLeft, list.current.clientWidth - el.offsetWidth))}px`;
-    el.style.top = `${chip.offsetTop - el.offsetHeight - 4}px`;
+    // Under the chip instead when the room body shows less above it than the box needs (near its top, scrolled or not).
+    const body = chip.closest(".room-body");
+    const above = body ? chip.getBoundingClientRect().top - body.getBoundingClientRect().top : Infinity;
+    el.style.top = above >= el.offsetHeight + 4
+      ? `${chip.offsetTop - el.offsetHeight - 4}px` : `${chip.offsetTop + chip.offsetHeight + 4}px`;
   }, [picked, members, ties]); // ties: 친구 추가 may appear and widen it
 
   // Opened: focus in it and in view (the panel may be short); closed by the keyboard or an action: back to its chip.
@@ -547,8 +569,10 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
 }
 
 /**
- * A member's box (the members' list and the chat's names): the name ("(나)" for me), "호스트", and on someone else
- * 친구 추가 (not on a friend; greyed once asked), report, and for the host hand over and remove. `onDone` closes the box
+ * A member's box (the members' list and the chat's names): their photo, the name ("(나)" for me), "호스트" and whether
+ * they're in the room, and on someone else
+ * 친구 추가 (not on a friend; greyed once asked), report, block, and for the host hand over and remove. The line under
+ * the name says 친구 / 친구 요청 보냄 too. `onDone` closes the box
  * before an action that opens a dialog; 친구 추가 opens none and keeps it open, so the button is seen turning grey.
  */
 function MemberActions({ member, meId, isHost, ties, onBefriend, onReport, onManage, onDone }: {
@@ -558,22 +582,28 @@ function MemberActions({ member, meId, isHost, ties, onBefriend, onReport, onMan
   ties: Ties | null;
   onBefriend: (id: string) => void;
   onReport: (id: string, name: string) => void;
-  onManage: (name: string, action: "host" | "kick", id: string) => void;
+  onManage: (name: string, action: Manage, id: string) => void;
   onDone: () => void;
 }) {
-  const { id, displayName: name } = member.user;
+  const { id, displayName: name, avatarUrl } = member.user;
   return (
     <>
-      <span className="who">
-        {name}{id === meId && " (나)"}
-        {member.role === "HOST" && <span className="muted"> · 호스트</span>}
+      <span className="who-card">
+        <Avatar name={name} src={avatarUrl} on={member.present} />
+        <span className="who-text">
+          <span className="who">{name}{id === meId && " (나)"}</span>
+          <span className="muted">{[member.role === "HOST" && "호스트", member.present ? "참가 중" : "방 밖",
+            id !== meId && ties?.friends.includes(id) && "친구", id !== meId && ties?.sent.includes(id) && "친구 요청 보냄"]
+            .filter(Boolean).join(" · ")}</span>
+        </span>
       </span>
       {id !== meId && (
-        <span className="row">
+        <span className="row who-actions">
           {ties && !ties.friends.includes(id) && (ties.sent.includes(id)
             ? <IconButton icon="userPlus" label="친구 요청을 보냈습니다" disabled />
             : <IconButton icon="userPlus" label="친구 추가" onClick={() => onBefriend(id)} />)}
           <IconButton icon="flag" label="신고" onClick={() => { onDone(); onReport(id, name); }} />
+          <IconButton icon="ban" label="차단" onClick={() => { onDone(); onManage(name, "block", id); }} />
           {isHost && (
             <>
               <IconButton icon="crown" label="호스트 넘기기" onClick={() => { onDone(); onManage(name, "host", id); }} />

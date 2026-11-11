@@ -1039,7 +1039,7 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
 ## Mirattic Auth 프로필 사진 표시 (2026-11-11, 결정 116)
-V28 `users.avatar_url`, 로그인(ID 토큰 `picture`)과 `/api/me`(UserInfo `picture`)에서 맞춤, 허용 주소 접두사 검사, `UserSummary.avatarUrl`, UI `Avatar` 이미지(실패 시 이니셜). 서버 테스트 104개, 타입체크, 클라이언트 테스트 통과. Codex 검토(코드 diff를 붙여 `codex_consult`, 이 환경의 Codex 도구는 Auth 저장소만 직접 읽음): URL 검증 우회 없음, 사진 로딩 실패 뒤 새 URL이 안 뜨는 UI 버그 수정(`failed`에 실패한 URL 기억), 접두사 설정은 `https://…/`가 아니면 시작 거부. Codex Sol 리뷰(FAIL): 바뀐 사진이 열린 친구 · 방 화면에 바로 안 보임 → 이름 · 사진이 바뀌면 커밋 뒤 친구 · 신청 상대 · 그 사람을 차단한 사람에게 `friend:update`, 속하거나 초대된 방의 멤버에게 `room:update`, 초대 대기자에게는 `friend:update`(`room:update`는 확장이 초대 알림을 지움)(`ProfileChanged`, 이름 변경도 같이 해결), 서버 테스트 105개. 확장은 CSP를 따로 정하지 않아(MV3 기본은 `img-src` 제한 없음) 사진이 막히지 않음. 아직: 실제 확장에서 사진 표시 확인.
+V28 `users.avatar_url`, 로그인(ID 토큰 `picture`)과 `/api/me`(UserInfo `picture`)에서 맞춤, 허용 주소 접두사 검사, `UserSummary.avatarUrl`, UI `Avatar` 이미지(실패 시 이니셜). 서버 테스트 104개, 타입체크, 클라이언트 테스트 통과. Codex 검토(코드 diff를 붙여 `codex_consult`, 이 환경의 Codex 도구는 Auth 저장소만 직접 읽음): URL 검증 우회 없음, 사진 로딩 실패 뒤 새 URL이 안 뜨는 UI 버그 수정(`failed`에 실패한 URL 기억), 접두사 설정은 `https://…/`가 아니면 시작 거부. Codex Sol 리뷰(FAIL): 바뀐 사진이 열린 친구 · 방 화면에 바로 안 보임 → 이름 · 사진이 바뀌면 커밋 뒤 친구 · 신청 상대 · 그 사람을 차단한 사람에게 `friend:update`, 속하거나 초대된 방의 멤버에게 `room:update`, 초대 대기자에게는 `friend:update`(`room:update`는 확장이 초대 알림을 지움)(`ProfileChanged`, 이름 변경도 같이 해결), 서버 테스트 105개. 확장은 CSP를 따로 정하지 않아(MV3 기본은 `img-src` 제한 없음) 사진이 막히지 않음. 실제 확장에서 사진 표시 · 캐시(`public, max-age=31536000, immutable`) 확인(2026-11-11). 방의 멤버 상자(멤버 칩 · 채팅 이름): 48px 사진, 이름, "호스트 · 참가 중 · 친구 / 친구 요청 보냄", 버튼 줄에 차단(확인 창: 호스트가 아닌 쪽이 방에서 나감), 짧은 패널에서 잘리지 않게 위치 조정.
 
 ## Next Task
 Phase 10 남은 일 (사용자 결정 필요)

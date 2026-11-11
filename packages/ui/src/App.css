@@ -166,12 +166,17 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .member:hover { background: var(--hover); }
 .member[aria-expanded="true"] { border-color: var(--accent); }
 /* A member's box over their chip, on top of what comes before (nothing moves): name, role, actions. */
-.member-box { position: absolute; z-index: 5; max-width: calc(100% - 4px); display: flex; align-items: center; gap: 6px; min-height: 36px;
-  padding: 4px 4px 4px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+.member-box { position: absolute; z-index: 5; max-width: calc(100% - 4px); display: flex; flex-direction: column; align-items: stretch;
+  gap: 8px; min-width: 180px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
   font-size: calc(12px * var(--text-scale)); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
 .member-box:focus { outline: none; }
 .member-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.member-box .who { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 4px; }
+.member-box .who-card { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.member-box .who-card .avatar { width: 48px; height: 48px; flex: none; font-size: calc(18px * var(--text-scale)); }
+.member-box .who-card .avatar .presence { width: 11px; height: 11px; }
+.member-box .who-text { display: grid; gap: 2px; min-width: 0; }
+.member-box .who { font-weight: 600; font-size: calc(14px * var(--text-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member-box .who-actions { padding-top: 6px; border-top: 1px solid var(--line); }
 .member .avatar { width: 20px; height: 20px; font-size: calc(10px * var(--text-scale)); }
 /* A card's heading line that folds what's below it (인식할 탭), like the members' gauge line. */
 .card-head { display: flex; align-items: center; gap: 8px; width: calc(100% + 12px); margin: -4px -6px; padding: 4px 6px; border: none;
@@ -200,7 +205,7 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 /* A member's name opens their box (as the members' chips do): floats in the list, under or over the name. */
 .chat button.author { padding: 0; border: none; background: none; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
 .chat button.author:hover, .chat button.author.on { text-decoration: underline; }
-.chat li.member-box { padding: 4px 4px 4px 10px; border-radius: 10px; }
+.chat li.member-box { padding: 10px; border-radius: 10px; overflow-y: auto; }
 /* No height of its own: a row with the delete button is as tall as one without (the button overflows, centered). */
 .chat li .tools { visibility: hidden; display: flex; align-items: center; height: 0; }
 .chat li:hover .tools { visibility: visible; }

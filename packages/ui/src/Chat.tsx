@@ -224,8 +224,14 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     if (!nick || !el || !ul) return;
     const n = nick.getBoundingClientRect();
     const u = ul.getBoundingClientRect();
-    const below = n.bottom + 4 + el.offsetHeight <= u.bottom;
-    el.style.top = `${(below ? n.bottom + 4 : n.top - 4 - el.offsetHeight) - u.top + ul.scrollTop}px`;
+    // Under the name if it fits in view, else over it if that fits, else the side with more room — then kept in view
+    // (a short chat: from its top, scrolling inside when taller than the chat).
+    el.style.maxHeight = `${ul.clientHeight}px`;
+    const h = el.offsetHeight;
+    const fitsBelow = n.bottom + 4 + h <= u.bottom;
+    const below = fitsBelow || (n.top - 4 - h < u.top && u.bottom - n.bottom > n.top - u.top);
+    const top = (below ? n.bottom + 4 : n.top - 4 - h) - u.top + ul.scrollTop;
+    el.style.top = `${Math.max(ul.scrollTop, Math.min(top, ul.scrollTop + ul.clientHeight - h))}px`;
     el.style.left = `${Math.max(0, Math.min(n.left - u.left - 6, ul.clientWidth - el.offsetWidth))}px`;
   });
   useEffect(() => {
