@@ -315,7 +315,7 @@ function Invite({ roomId, code, isHost, memberIds, onClose, onInvited }: {
               const recent = Date.now() - (invitedAt.get(`${roomId}|${f.user.id}`) ?? 0) < INVITE_COOLDOWN_MS;
               return (
                 <li key={f.user.id} className="friend">
-                  <Avatar name={f.user.displayName} />
+                  <Avatar name={f.user.displayName} src={f.user.avatarUrl} />
                   <span className="grow name">{f.user.displayName}</span>
                   {inRoom || recent ? (
                     <button className="secondary" disabled>{inRoom ? "방에 있음" : "초대됨"}</button>
@@ -528,7 +528,7 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
           <button key={m.user.id} type="button" className="member" data-member={m.user.id} aria-haspopup="dialog"
             aria-expanded={picked === m.user.id} title={m.present ? "참가 중" : "방 밖"}
             onClick={() => setPicked((p) => (p === m.user.id ? null : m.user.id))}>
-            <Avatar name={m.user.displayName} on={m.present} />
+            <Avatar name={m.user.displayName} src={m.user.avatarUrl} on={m.present} />
             {m.user.displayName}
           </button>
             ))}

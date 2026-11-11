@@ -51,16 +51,22 @@ public class MiratticAuth {
 	final String issuer;
 	final String clientId;
 	final String redirectUri;
+	private final String avatarPrefix;
 	private final RestClient http;
 	private final NimbusJwtDecoder decoder;
 	private final UserRepository users;
 
 	MiratticAuth(@Value("${app.auth.issuer}") String issuer, @Value("${app.auth.client-id}") String clientId,
-			@Value("${app.auth.client-secret}") String clientSecret, @Value("${app.auth.redirect-uri}") String redirectUri,
+			@Value("${app.auth.client-secret}") String clientSecret, @Value("${app.auth.redirect-uri}") String redirectUri, @Value("${app.auth.avatar-url-prefix}") String avatarPrefix,
 			UserRepository users) {
 		this.issuer = issuer;
 		this.clientId = clientId;
 		this.redirectUri = redirectUri;
+		// Without the closing slash `https://avatar.mirattic.com.evil.example/` would pass the check.
+		if (!avatarPrefix.startsWith("https://") || !avatarPrefix.endsWith("/")) {
+			throw new IllegalStateException("app.auth.avatar-url-prefix must be https://host/ (with the closing slash)");
+		}
+		this.avatarPrefix = avatarPrefix;
 		this.users = users;
 		SimpleClientHttpRequestFactory timeouts = new SimpleClientHttpRequestFactory();
 		timeouts.setConnectTimeout(Duration.ofSeconds(5));
@@ -134,7 +140,13 @@ public class MiratticAuth {
 	}
 
 	/** The account's email and name as Auth's UserInfo has them now (Auth owns both); either null if absent. */
-	public record UserInfo(String email, String name) {
+	public record UserInfo(String email, String name, String avatarUrl) {
+	}
+
+	/** Auth's `picture` if it is a photo on Auth's own photo domain (at most 255 chars), else null: nothing else is shown. */
+	public String avatar(String picture) {
+		return picture != null && picture.length() <= 255 && picture.startsWith(avatarPrefix) && picture.chars().noneMatch(Character::isWhitespace)
+				? picture : null;
 	}
 
 	/** Auth's UserInfo for this access token, or null if Auth can't say right now. */
@@ -144,7 +156,8 @@ public class MiratticAuth {
 			if (info == null) {
 				return null;
 			}
-			return new UserInfo(info.get("email") instanceof String e ? e : null, info.get("name") instanceof String n ? n : null);
+			return new UserInfo(info.get("email") instanceof String e ? e : null, info.get("name") instanceof String n ? n : null,
+					avatar(info.get("picture") instanceof String pic ? pic : null));
 		} catch (RestClientException e) {
 			log.warn("Mirattic Auth userinfo failed: {}", e.getClass().getSimpleName());
 			return null;

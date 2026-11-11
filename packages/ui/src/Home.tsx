@@ -731,7 +731,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           <ul className="list box">
             {sorted.map((f) => (
               <li key={f.user.id} className="item">
-                <Avatar name={f.user.displayName} on={f.presence.status !== "OFFLINE"} />
+                <Avatar name={f.user.displayName} src={f.user.avatarUrl} on={f.presence.status !== "OFFLINE"} />
                 <div className="grow">
                   <div className="name ellipsis">{f.user.displayName}</div>
                   {(f.presence.publicRoom ? ["공개방 참여중", f.presence.publicRoom.name ?? "영상 없음"] : describe(f.presence))
@@ -765,7 +765,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
             <ul className="list box">
               {requests.incoming.map((r) => (
                 <li key={r.id} className="item">
-                  <Avatar name={r.user.displayName} />
+                  <Avatar name={r.user.displayName} src={r.user.avatarUrl} />
                   <div className="grow">
                     <div className="name ellipsis">{r.user.displayName}</div>
                     <div className="muted">친구 요청을 보냈습니다</div>
@@ -776,7 +776,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               ))}
               {requests.outgoing.map((r) => (
                 <li key={r.id} className="item">
-                  <Avatar name={r.user.displayName} />
+                  <Avatar name={r.user.displayName} src={r.user.avatarUrl} />
                   <div className="grow">
                     <div className="name ellipsis">{r.user.displayName}</div>
                     <div className="muted">요청 보냄 · 대기 중</div>
@@ -791,7 +791,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       <footer className="me-bar">
         {showCode && <MyFriendCode me={me} />}
         <div className="friend">
-          <Avatar name={me.displayName} on={status === "open"} />
+          <Avatar name={me.displayName} src={me.avatarUrl} on={status === "open"} />
           <div className="grow">
             <div className="name ellipsis">{me.displayName} <span className="muted">(나)</span></div>
             {/* What I watch is the card on top; here only how I'm connected. */}

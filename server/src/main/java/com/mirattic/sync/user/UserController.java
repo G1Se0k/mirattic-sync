@@ -26,7 +26,7 @@ public class UserController {
 	 * `email` is the Mirattic account's email, read live from Mirattic Auth (null if Auth can't be reached).
 	 * `friendCode` is only ever shown to its owner, who shares it to be added as a friend.
 	 */
-	public record Me(String id, String email, String displayName, String friendCode, Visibility presenceVisibility,
+	public record Me(String id, String email, String displayName, String avatarUrl, String friendCode, Visibility presenceVisibility,
 			Visibility positionVisibility, boolean friendCodeOnly) {
 	}
 
@@ -76,8 +76,9 @@ public class UserController {
 		MiratticAuth.UserInfo info = auth.userInfo(jwt.getTokenValue());
 		if (info != null) {
 			u.syncName(info.name()); // stored only if it changed (none or blank: kept)
+			u.syncAvatar(info.avatarUrl()); // the photo as Auth has it now, none included
 		}
-		return new Me(u.getId(), info == null ? null : info.email(), u.getDisplayName(), u.getFriendCode(),
+		return new Me(u.getId(), info == null ? null : info.email(), u.getDisplayName(), u.getAvatarUrl(), u.getFriendCode(),
 				u.getPresenceVisibility(), u.getPositionVisibility(), u.isFriendCodeOnly());
 	}
 

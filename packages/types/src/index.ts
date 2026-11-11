@@ -94,7 +94,8 @@ export interface MediaProviderAdapter {
 export type Visibility = "OFF" | "FRIENDS" | "ROOM_ONLY";
 
 // REST DTOs (mirror server records).
-export type UserSummary = { id: string; displayName: string };
+/** `avatarUrl`: the photo on Mirattic Auth's photo domain; none = initials. */
+export type UserSummary = { id: string; displayName: string; avatarUrl?: string };
 
 /**
  * `id` is the Mirattic UID — never an email. `email` is the Mirattic account's, read live from Mirattic Auth

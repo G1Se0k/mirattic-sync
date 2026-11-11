@@ -43,6 +43,18 @@ class MiratticLoginTest extends IntegrationTest {
 		AuthStub.NAMES.remove(uid);
 		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.displayName").value("Alice Kim")); // none: kept
 
+		// The photo follows Auth too, but only from Auth's photo domain; none (or elsewhere) = none.
+		String photo = "https://avatar.mirattic.com/avatars/" + uid + "/abc.jpg";
+		AuthStub.PICTURES.put(uid, photo);
+		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.avatarUrl").value(photo));
+		AuthStub.PICTURES.put(uid, "https://evil.example/x.jpg");
+		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.avatarUrl").doesNotExist());
+		AuthStub.PICTURES.put(uid, photo);
+		JsonNode withPhoto = body(redeem(signIn(uid, "Alice Kim", false, Instant.now())).andExpect(status().isOk()));
+		assertThat(withPhoto.path("user").path("avatarUrl").asString()).isEqualTo(photo); // from the ID token
+		AuthStub.PICTURES.remove(uid);
+		call(HttpMethod.GET, "/api/me", access, null).andExpect(jsonPath("$.avatarUrl").doesNotExist());
+
 		// Second login of the same UID: same profile, not a new one — with the name Auth has now.
 		JsonNode again = body(redeem(signIn(uid, "Renamed", false, Instant.now())).andExpect(status().isOk()));
 		assertThat(again.path("user").path("id").asString()).isEqualTo(uid);

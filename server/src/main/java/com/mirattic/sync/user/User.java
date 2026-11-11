@@ -14,6 +14,7 @@ public class User {
 	@Id
 	private String id;
 	private String displayName;
+	private String avatarUrl;
 	private String friendCode;
 	@Enumerated(EnumType.STRING)
 	private Visibility presenceVisibility;
@@ -60,7 +61,13 @@ public class User {
 		}
 	}
 
+	/** The photo follows Mirattic Auth's too: its URL only (checked by MiratticAuth.avatar), none = none. */
+	public void syncAvatar(String url) {
+		this.avatarUrl = url;
+	}
+
 	public String getId() { return id; }
+	public String getAvatarUrl() { return avatarUrl; }
 	public String getDisplayName() { return displayName; }
 	public String getFriendCode() { return friendCode; }
 	public Visibility getPresenceVisibility() { return presenceVisibility; }

@@ -1038,6 +1038,9 @@ Phase 10 — Deployment (서버 배포 · 릴리스 자동화 완료, 2026-09-29
   - side panel 실제 컨테이너에서 `confirm()`/`alert()` 미확인 (탭으로 연 페이지에서만 확인)
   - Extension / Desktop / ui 자동 테스트 없음, lint 없음
 
+## Mirattic Auth 프로필 사진 표시 (2026-11-11, 결정 116)
+V28 `users.avatar_url`, 로그인(ID 토큰 `picture`)과 `/api/me`(UserInfo `picture`)에서 맞춤, 허용 주소 접두사 검사, `UserSummary.avatarUrl`, UI `Avatar` 이미지(실패 시 이니셜). 서버 테스트 104개, 타입체크, 클라이언트 테스트 통과. Codex 검토(코드 diff를 붙여 `codex_consult`, 이 환경의 Codex 도구는 Auth 저장소만 직접 읽음): URL 검증 우회 없음, 사진 로딩 실패 뒤 새 URL이 안 뜨는 UI 버그 수정(`failed`에 실패한 URL 기억), 접두사 설정은 `https://…/`가 아니면 시작 거부. 아직: 배포, 실제 확장에서 `avatar.mirattic.com` 이미지가 CSP에 막히지 않는지 확인.
+
 ## Next Task
 Phase 10 남은 일 (사용자 결정 필요)
 1. 백업 외부 보관 위치 결정 (현재 같은 호스트에만 7일)

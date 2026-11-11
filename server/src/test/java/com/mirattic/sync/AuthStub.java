@@ -44,6 +44,8 @@ public final class AuthStub {
 	public static final Set<String> REVOKED = ConcurrentHashMap.newKeySet();
 	/** The name UserInfo reports for a UID (none when absent). */
 	public static final Map<String, String> NAMES = new ConcurrentHashMap<>();
+	/** The photo URL Auth reports for a UID, in UserInfo and the ID token (none when absent). */
+	public static final Map<String, String> PICTURES = new ConcurrentHashMap<>();
 	/** Sending this refresh token makes the stub answer 400 invalid_request (not invalid_grant). */
 	public static final String INVALID_REQUEST = "force-invalid-request";
 
@@ -57,7 +59,8 @@ public final class AuthStub {
 				String bearer = String.valueOf(ex.getRequestHeaders().getFirst("Authorization"));
 				try {
 					String sub = SignedJWT.parse(bearer.replace("Bearer ", "")).getJWTClaimsSet().getSubject();
-					String name = NAMES.containsKey(sub) ? ",\"name\":\"" + NAMES.get(sub) + "\"" : "";
+					String name = (NAMES.containsKey(sub) ? ",\"name\":\"" + NAMES.get(sub) + "\"" : "")
+							+ (PICTURES.containsKey(sub) ? ",\"picture\":\"" + PICTURES.get(sub) + "\"" : "");
 					send(ex, 200, "{\"sub\":\"" + sub + "\",\"email\":\"" + email(sub) + "\"" + name + "}");
 				} catch (java.text.ParseException e) {
 					send(ex, 401, "{}");
@@ -157,6 +160,9 @@ public final class AuthStub {
 		Map<String, Object> id = new HashMap<>(Map.of("sub", sub, "aud", CLIENT_ID));
 		if (name != null) {
 			id.put("name", name);
+		}
+		if (PICTURES.containsKey(sub)) {
+			id.put("picture", PICTURES.get(sub));
 		}
 		if (authTime != null) {
 			id.put("auth_time", authTime.getEpochSecond());

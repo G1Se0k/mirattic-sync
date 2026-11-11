@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import type { MediaProvider } from "@mirattic/types";
 import { PROVIDER_NAMES } from "./format";
 import { platform } from "./session";
@@ -127,10 +127,15 @@ export function ProviderIcon({ provider }: { provider: MediaProvider }) {
 }
 
 /** Initials in a circle: a face for a name without pictures. */
-export function Avatar({ name, on }: { name: string; on?: boolean }) {
+export function Avatar({ name, src, on }: { name: string; src?: string; on?: boolean }) {
+  const [failed, setFailed] = useState<string>(); // the URL that failed: a new photo gets its own try
   return (
     <span className="avatar" aria-hidden="true">
-      {[...name.trim()][0]?.toUpperCase() ?? "?"}
+      {src && src !== failed ? (
+        <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(src)} />
+      ) : (
+        ([...name.trim()][0]?.toUpperCase() ?? "?")
+      )}
       {on !== undefined && <span className={`presence ${on ? "on" : ""}`} />}
     </span>
   );

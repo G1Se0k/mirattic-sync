@@ -29,7 +29,7 @@ export function Settings({ me, blocked, onMeChange, savePrivacy: save, onUnblock
       </header>
       <main className="container settings">
         <section className="profile">
-          <Avatar name={me.displayName} />
+          <Avatar name={me.displayName} src={me.avatarUrl} />
           <div className="grow">
             <strong>{me.displayName}</strong>
             <div className="muted ellipsis">{me.email}</div>
@@ -57,7 +57,7 @@ export function Settings({ me, blocked, onMeChange, savePrivacy: save, onUnblock
                   <ul className="list fold-body">
                     {blocked.map((u) => (
                       <li key={u.id} className="row">
-                        <Avatar name={u.displayName} />
+                        <Avatar name={u.displayName} src={u.avatarUrl} />
                         <span className="grow ellipsis">{u.displayName}</span>
                         <button className="secondary small" onClick={() => onUnblock(u.id)}>차단 해제</button>
                       </li>
