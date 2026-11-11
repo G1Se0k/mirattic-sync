@@ -4,6 +4,8 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -15,11 +17,14 @@ public class ChatMessage {
 	 * "join" / "leave" (text = the name then), "content" (text = the title), "kick" / "host" (text = that member's name),
 	 * "stamp" (a member's timestamp, text = their name then). `contentKey`: the video a position belongs to.
 	 */
-	/** `userName`: a message's author's name now (decision 112), so one who left still shows by name; else null. */
+	/**
+	 * `userName`: a message's author's name now (decision 112), so one who left still shows by name; else null.
+	 * `mentions`: the members it names with "@name" (decision 118), null for none.
+	 */
 	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, String kind,
-			long createdAt, boolean deleted, String contentKey, String userName) {
+			long createdAt, boolean deleted, String contentKey, String userName, List<String> mentions) {
 		View named(String name) {
-			return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, name);
+			return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, name, mentions);
 		}
 	}
 
@@ -33,6 +38,8 @@ public class ChatMessage {
 	/** "<provider>:<contentId>" of the room's video when written, with a position only. */
 	private String contentKey;
 	private boolean deleted;
+	/** Mentioned members' IDs, comma-separated (decision 118); null for none. */
+	private String mentions;
 	/** Insert order (AUTO_INCREMENT), for read marks. */
 	@Column(insertable = false, updatable = false)
 	private long seq;
@@ -58,7 +65,14 @@ public class ChatMessage {
 	}
 
 	View view() {
-		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, null);
+		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, null,
+				mentions == null ? null : Arrays.asList(mentions.split(",")));
+	}
+
+	/** Names these members (none: nothing). */
+	ChatMessage mentioning(List<String> ids) {
+		this.mentions = ids.isEmpty() ? null : String.join(",", ids);
+		return this;
 	}
 
 	/** A "content" line: about `room`'s video now (which video it names, for its title read late). */
@@ -79,6 +93,7 @@ public class ChatMessage {
 		this.text = "";
 		this.mediaPositionMs = null;
 		this.contentKey = null;
+		this.mentions = null;
 	}
 
 	boolean isLog() {
@@ -88,4 +103,7 @@ public class ChatMessage {
 	boolean isDeleted() {
 		return deleted;
 	}
+
+	String kind() { return kind; }
+	long createdAt() { return createdAt; }
 }

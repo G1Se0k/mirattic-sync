@@ -93,6 +93,11 @@ export type Platform = {
   room(roomId: string): RoomHandle;
   /** When an invitation or watch request alerted before the panel opened runs out (epoch ms), if known. */
   alertUntil?(kind: "invite" | "request", target: string): number | undefined;
+  /**
+   * A mention of `userId` alerted while no panel was open (decision 118), for Home's banner as it first shows; else
+   * null. Taken once.
+   */
+  mention?(userId: string): { roomId: string; name: string; title?: string; open?: boolean } | null;
   /** Rooms of mine their host closed (decision 90), to tell about; the same array until it changes (`subscribe`). */
   closedRooms?(): { roomId: string; title: string }[];
   /** Its notice was shown: not again (in any panel). */

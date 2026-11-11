@@ -71,6 +71,10 @@ export type Shared = {
   typeNotices: { roomId: string; type: MediaProvider; version: number }[];
   /** Rooms of mine their host closed (decision 90), until a panel showed the notice (`closed:seen`). */
   closedRooms: { roomId: string; title: string; userId: string }[];
+  /** A mention alerted before this panel opened (decision 118), sent with its first state only; else absent. */
+  mention?: { roomId: string; name: string; title?: string; userId: string; until: number } | null;
+  /** A mention toast's 채팅 보기 answered as this panel opened: that room's screen (before any banner). */
+  mentionOpen?: { roomId: string; name: string; title?: string; userId: string; until: number; open: true } | null;
 };
 
 export type ToPanel =

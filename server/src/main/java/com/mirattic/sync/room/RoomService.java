@@ -101,7 +101,7 @@ public class RoomService {
 	}
 
 	/** Members a room takes, the host included (decision 106). */
-	static final int MAX_MEMBERS = 8;
+	public static final int MAX_MEMBERS = 8;
 	/** The fewest a room may be set to take: the host and one more. */
 	static final int MIN_MEMBERS = 2;
 	static final int MAX_NAME_LENGTH = 20;
@@ -706,6 +706,19 @@ public class RoomService {
 		return name == null ? null : messages.save(new ChatMessage(roomId, userId, name, null, kind)).view();
 	}
 
+	/**
+	 * Already logged as in the room: their latest join / leave line is a "join" written since they became a member
+	 * (a kick or leaving ends a membership; coming back starts a new one). Asked once the server's memory doesn't know
+	 * them — after a restart — so a reconnect writes no second "join".
+	 */
+	@Transactional(readOnly = true)
+	public boolean loggedIn(String roomId, String userId) {
+		return members.findByRoomIdAndUserId(roomId, userId)
+				.flatMap(m -> messages.findFirstByRoomIdAndUserIdAndKindInOrderBySeqDesc(roomId, userId, List.of("join", "leave"))
+						.filter(line -> "join".equals(line.kind()) && line.createdAt() >= m.joinedAt()))
+				.isPresent();
+	}
+
 	/** Members to tell, and the log line it made ("kick" / "host", text = that member's name). */
 	public record Logged(List<String> memberIds, ChatMessage.View log) {
 	}
@@ -753,8 +766,18 @@ public class RoomService {
 	 * `contentKey`: the video the sender's position is on. Only one that is the room's video now has it stored with
 	 * the position (a message sent as the host moved on keeps its time, just not as the new video's).
 	 */
+	private static boolean names(String text, String name) {
+		return name != null && !name.isEmpty()
+				&& java.util.regex.Pattern.compile("@" + java.util.regex.Pattern.quote(name) + "(?![\\p{L}\\p{N}_])").matcher(text).find();
+	}
+
+	/**
+	 * `mentions` (decision 118): the members it names, as the client found "@name" in it — kept only for members of
+	 * the room now, not the author, each once, whose "@name" the text has.
+	 */
 	@Transactional
-	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs, String contentKey) {
+	public ChatMessage.View chat(String me, String roomId, String text, Long mediaPositionMs, String contentKey,
+			Collection<String> mentions) {
 		// Under the room lock, like a kick: a member kicked meanwhile can't post after it.
 		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		requireMember(me, roomId);
@@ -763,8 +786,12 @@ public class RoomService {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
 		}
 		boolean same = contentKey != null && contentKey.equals(room.contentKey());
-		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null, same ? room : null)).view()
-				.named(nameOf(me));
+		List<String> in = mentions.isEmpty() ? List.of() : memberIds(roomId);
+		// …and only those the text names as "@<their name>" (not followed by a letter or digit, as the client finds them).
+		List<String> named = mentions.stream().distinct().filter(id -> !id.equals(me) && in.contains(id) && names(trimmed, nameOf(id)))
+				.toList();
+		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null, same ? room : null).mentioning(named))
+				.view().named(nameOf(me));
 	}
 
 	/**

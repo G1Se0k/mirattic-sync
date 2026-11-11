@@ -43,6 +43,9 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
   const [inviting, setInviting] = useState(false);
   const [configuring, setConfiguring] = useState(false);
   const asker = useAsk();
+  /** "@ 언급" from a member's box: the chat's input gets `@name` (`n`: each press, the same name again too). */
+  const [mention, setMention] = useState<{ name: string; n: number }>();
+  const mentionOf = (name: string) => setMention((m) => ({ name, n: (m?.n ?? 0) + 1 }));
   const room = s.room;
   // Which members are friends, or asked by me: the member box offers 친구 추가 to the others (none until loaded).
   // Only the latest read counts: an older one answering last doesn't bring back a button.
@@ -216,7 +219,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
           roomType={roomType} onPickSite={pickSite} onRequestPause={() => setAskingPause(true)} />
         {isHost && <TabPicker type={roomType} />}
         <Members members={room.members} meId={me.id} isHost={isHost} limit={limit} ties={ties} onBefriend={(id) => void befriend(id)}
-          onReport={(id, name) => setReporting({ id, name })}
+          onReport={(id, name) => setReporting({ id, name })} onMention={mentionOf}
           onManage={(name, action, id) => void manage(name, action, id)} />
       </div>
 
@@ -224,9 +227,9 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
         subscribe={subscribe} position={position} onSeek={isHost && showsRoomVideo(s, content) ? (ms) => handle.seek(ms) : undefined}
         canStamp={showsRoomVideo(s, content) && (isHost || s.hostVideo !== false)}
         memberBox={(member, done) => <MemberActions member={member} meId={me.id} isHost={isHost} ties={ties}
-          onBefriend={(id) => void befriend(id)} onReport={(id, name) => setReporting({ id, name })}
+          onBefriend={(id) => void befriend(id)} onReport={(id, name) => setReporting({ id, name })} onMention={mentionOf}
           onManage={(name, action, id) => void manage(name, action, id)} onDone={done} />}
-        video={content ? contentKey(content) : undefined} videoMs={content?.durationMs} />
+        video={content ? contentKey(content) : undefined} videoMs={content?.durationMs} mention={mention} />
 
       {reporting && <ReportDialog target={{ userId: reporting.id }} user={reporting} onClose={() => setReporting(null)} />}
       {asker.dialog}
@@ -453,7 +456,7 @@ const MEMBERS_OPEN_KEY = "mirattic.membersOpen";
  * (remembered on this device), and chips with the avatar and name. A chip opens a small box over it — on top of what
  * comes before, nothing moves: its `MemberActions`.
  */
-function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onManage }: {
+function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onMention, onManage }: {
   members: RoomMemberView[];
   meId: string;
   isHost: boolean;
@@ -461,6 +464,7 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
   ties: Ties | null;
   onBefriend: (id: string) => void;
   onReport: (id: string, name: string) => void;
+  onMention: (name: string) => void;
   onManage: (name: string, action: Manage, id: string) => void;
 }) {
   const [open, setOpen] = useState(() => {
@@ -560,7 +564,7 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
         {shown && (
           <div className="member-box" ref={box} tabIndex={-1} role="dialog" aria-label={`${shown.user.displayName} 메뉴`}>
             <MemberActions member={shown} meId={meId} isHost={isHost} ties={ties} onBefriend={onBefriend}
-              onReport={onReport} onManage={onManage} onDone={closeBox} />
+              onReport={onReport} onMention={onMention} onManage={onManage} onDone={closeBox} />
           </div>
         )}
       </div>
@@ -575,13 +579,14 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
  * the name says 친구 / 친구 요청 보냄 too. `onDone` closes the box
  * before an action that opens a dialog; 친구 추가 opens none and keeps it open, so the button is seen turning grey.
  */
-function MemberActions({ member, meId, isHost, ties, onBefriend, onReport, onManage, onDone }: {
+function MemberActions({ member, meId, isHost, ties, onBefriend, onReport, onMention, onManage, onDone }: {
   member: RoomMemberView;
   meId: string;
   isHost: boolean;
   ties: Ties | null;
   onBefriend: (id: string) => void;
   onReport: (id: string, name: string) => void;
+  onMention: (name: string) => void;
   onManage: (name: string, action: Manage, id: string) => void;
   onDone: () => void;
 }) {
@@ -602,6 +607,7 @@ function MemberActions({ member, meId, isHost, ties, onBefriend, onReport, onMan
           {ties && !ties.friends.includes(id) && (ties.sent.includes(id)
             ? <IconButton icon="userPlus" label="친구 요청을 보냈습니다" disabled />
             : <IconButton icon="userPlus" label="친구 추가" onClick={() => onBefriend(id)} />)}
+          <IconButton icon="at" label="언급" onClick={() => { onDone(); onMention(name); }} />
           <IconButton icon="flag" label="신고" onClick={() => { onDone(); onReport(id, name); }} />
           <IconButton icon="ban" label="차단" onClick={() => { onDone(); onManage(name, "block", id); }} />
           {isHost && (

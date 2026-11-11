@@ -27,6 +27,8 @@ type Props = {
   videoMs?: number;
   /** A member's box, opened from their name on a message; `done` closes it. */
   memberBox: (member: RoomMemberView, done: () => void) => ReactNode;
+  /** "@ 언급" pressed (a new `n` each time): `@name ` added to what is being written, the input focused. */
+  mention?: { name: string; n: number };
 };
 
 const PAGE = 100; // the server's page size: a full page means there may be more
@@ -34,10 +36,20 @@ const NEAR_BOTTOM_PX = 40;
 const FLASH_MS = 1600;
 const STAMP_WAIT_MS = 5000;
 
-export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, canStamp, videoMs, memberBox }: Props) {
+export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, canStamp, videoMs, memberBox, mention }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const shownLines = useMemo(() => messages.filter(visible), [messages]);
   const [text, setText] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!mention) return;
+    // Whole or not at all: a draft without room for it is left as it is (a cut name would name no one).
+    setText((t) => {
+      const next = `${t}${t && !t.endsWith(" ") ? " " : ""}@${mention.name} `;
+      return next.length <= 1000 ? next : t;
+    });
+    input.current?.focus();
+  }, [mention]);
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [unseen, setUnseen] = useState(false); // new messages below while reading older ones
@@ -153,7 +165,9 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     const trimmed = text.trim();
     if (!trimmed) return;
     // With the video the position is on (the room's as this panel knows it): kept only while it is the room's.
-    if (socket.send({ type: "chat:message", roomId, payload: { text: trimmed, mediaPositionMs: await position(), contentKey: video } })) setText("");
+    const mentions = mentionsIn(trimmed, members.map((m) => m.user), meId);
+    if (socket.send({ type: "chat:message", roomId, payload: { text: trimmed, mediaPositionMs: await position(), contentKey: video,
+      ...(mentions.length ? { mentions } : {}) } })) setText("");
   }
 
   async function openStamp() {
@@ -298,7 +312,8 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
               )}
             </li>
           ) : (
-            <li key={item.id} className={`row${fresh.has(item.id) ? " fresh" : ""}`} data-line={item.id}>
+            <li key={item.id} className={`row${fresh.has(item.id) ? " fresh" : ""}${item.mentions?.includes(meId) ? " mentioned" : ""}`}
+              data-line={item.id}>
               <span className="grow">
                 {members.some((m) => m.user.id === item.userId) ? (
                   <button type="button" className={`author${picked?.line === item.id ? " on" : ""}`} aria-haspopup="dialog"
@@ -312,7 +327,10 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
                 ) : (
                   <>
                     {timestamp(item.mediaPositionMs, item.contentKey)}
-                    <span className="message">{item.text}</span>
+                    <span className="message">{withMentions(item.text, (item.mentions ?? []).flatMap((id) => {
+                      const m = members.find((x) => x.user.id === id);
+                      return m ? [m.user.displayName] : [];
+                    }))}</span>
                   </>
                 )}
               </span>
@@ -336,7 +354,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
       <div className="composer">
         {failed && <p className="error" role="alert">{failed}</p>}
         <form onSubmit={send}>
-          <input placeholder="메시지" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
+          <input ref={input} placeholder="메시지" maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} />
           <IconButton icon="clock" label="타임스탬프 찍기" disabled={status !== "open" || !video || !canStamp} onClick={() => void openStamp()} />
           <IconButton icon="send" label="보내기" type="submit" tone="primary" disabled={status !== "open"} />
         </form>
@@ -408,7 +426,7 @@ export function tombstone(messages: ChatMessage[], deleted: ChatDeleted[]) {
   if (deleted.length === 0) return messages;
   return messages
     .filter((m) => !deleted.some((d) => d.userId === m.userId))
-    .map((m) => (deleted.some((d) => d.id === m.id) && !m.deleted ? { ...m, text: "", mediaPositionMs: undefined, deleted: true } : m));
+    .map((m) => (deleted.some((d) => d.id === m.id) && !m.deleted ? { ...m, text: "", mediaPositionMs: undefined, mentions: null, deleted: true } : m));
 }
 
 /**
@@ -444,4 +462,22 @@ export function logText(m: ChatMessage) {
     case "stamp": return `${m.text}님이 ${clock(m.mediaPositionMs ?? 0)}에 스탬프를 찍었습니다`;
     default: return "";
   }
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** "@name" as a whole word: not "@민수" inside "@민수2". */
+const mentionRe = (names: string[], flags = "u") =>
+  new RegExp(`@(${names.map(escapeRe).join("|")})(?![\\p{L}\\p{N}_])`, flags);
+
+/** The other members a message names with "@name" (decision 118), each once. */
+export function mentionsIn(text: string, users: { id: string; displayName: string }[], meId: string): string[] {
+  return users.filter((u) => u.id !== meId && u.displayName && mentionRe([u.displayName]).test(text)).map((u) => u.id);
+}
+
+/** The text with each "@name" of these (the mentioned members') in bold. */
+export function withMentions(text: string, names: string[]): ReactNode {
+  if (!names.length) return text;
+  const parts = text.split(mentionRe([...names].sort((a, b) => b.length - a.length), "gu"));
+  // split with one group: the names at odd places
+  return parts.map((part, i) => (i % 2 ? <strong key={i} className="mention">@{part}</strong> : part));
 }

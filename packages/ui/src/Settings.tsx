@@ -16,10 +16,11 @@ type Props = {
   onUnblock: (userId: string) => void;
   onSignedOut: () => void;
   onClose: () => void;
+  banner?: ReactNode;
 };
 
 /** Everything that isn't watching together, in groups: a row each, its text left and its control right. */
-export function Settings({ me, blocked, onMeChange, savePrivacy: save, onUnblock, onSignedOut, onClose }: Props) {
+export function Settings({ me, blocked, onMeChange, savePrivacy: save, onUnblock, onSignedOut, onClose, banner }: Props) {
   const [showBlocked, setShowBlocked] = useState(false);
   return (
     <>
@@ -28,6 +29,7 @@ export function Settings({ me, blocked, onMeChange, savePrivacy: save, onUnblock
         <h1>설정</h1>
       </header>
       <main className="container settings">
+        {banner /* a notice from elsewhere (a mention, decision 118), seen first */}
         <section className="profile">
           <Avatar name={me.displayName} src={me.avatarUrl} />
           <div className="grow">

@@ -13,7 +13,8 @@ import org.springframework.stereotype.Component;
  * Joins and leaves: a user joins with their first connection in the room; they leave once none of their
  * connections has been in it for the grace period, so a reconnect or the extension's worker restarting writes nothing.
  * The host's play / pause / seek write no line (decision 103); a video change writes its "content" line.
- * ponytail: in memory, single instance; after a server restart everyone reconnecting is logged as joining again.
+ * ponytail: in memory, single instance. After a restart, one reconnecting whose latest line is their "join" is followed
+ * without a second one (RoomService.loggedIn); one who never reconnects gets no "leave" line.
  * Lines are written under one lock (a few per minute), so a leave can't land after a newer join.
  */
 @Component
@@ -52,6 +53,11 @@ public class RoomLog {
 			return;
 		}
 		if (!hub.presentIn(roomId).contains(userId)) {
+			return;
+		}
+		// Logged before the server restarted (its line still the latest): followed from here, nothing written.
+		if (rooms.loggedIn(roomId, userId)) {
+			inRoom.put(key, 0L);
 			return;
 		}
 		// Written only while still a member, checked under the room lock a kick also holds: no join after a kick.

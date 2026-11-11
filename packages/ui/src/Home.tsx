@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ApiError, HOST_MUST_SWITCH, type Socket, type SocketStatus } from "@mirattic/client";
 import type {
+  ChatMessage,
   FriendRequests,
   FriendView,
   Me,
@@ -134,8 +135,14 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     lastActive.current = activeRoom;
   }, [activeRoom]);
   // Read by the socket handler, which outlives renders.
-  const current = useRef({ rooms, openRoom, asked });
-  current.current = { rooms, openRoom, asked };
+  const current = useRef({ rooms, openRoom, asked, meId: me.id });
+  current.current = { rooms, openRoom, asked, meId: me.id };
+  /** Mentioned in a room whose screen isn't open (decision 118): a banner on Home until seen or dismissed. */
+  const [mentioned, setMentioned] = useState<{ roomId: string; name: string; title?: string } | null>(null);
+  // Seen once that room's screen opens, however it was opened (the list, a link, 보기).
+  useEffect(() => {
+    if (mentioned && openRoom === mentioned.roomId) setMentioned(null);
+  }, [mentioned, openRoom]);
   // Room lists answer in any order: only the latest one started is applied.
   const roomsLoad = useRef(latest()).current;
   const roomsSoon = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -240,6 +247,14 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           if (inFlight.current.has(event.userId)) pendingDeclines.current.set(event.userId, declinedAt);
           else decline(event.userId, declinedAt);
         }
+        if (event.type === "chat:message" && event.roomId) {
+          const msg = event.payload as ChatMessage;
+          const { meId, openRoom: shown, rooms: list } = current.current;
+          if (msg.mentions?.includes(meId) && msg.userId !== meId && shown !== event.roomId) {
+            const room = list.find((r) => r.id === event.roomId);
+            setMentioned({ roomId: event.roomId, name: msg.userName ?? "친구", title: room ? roomTitle(room) : undefined });
+          }
+        }
         if (event.type === "presence:update" && event.userId) {
           const presence = event.payload as PresenceView;
           setFriends((list) => list.map((f) => (f.user.id === event.userId ? { ...f, presence } : f)));
@@ -249,6 +264,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     // The extension's background owns the socket (it outlives the side panel).
     const socket: Socket = platform.connect(handlers);
     setSocket(socket);
+    // A mention from before Home listened (alerted before the panel opened, or during its start), for this account:
+    // taken once its handlers are in, so none falls between (later ones come as events).
+    const early = platform.mention?.(me.id);
+    if (early?.open) enter(early.roomId); // its toast's 채팅 보기: that room's screen
+    else if (early) setMentioned(early);
     return () => {
       clearTimeout(roomsSoon.current);
       socket.close();
@@ -593,11 +613,22 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     );
   }
 
+  // On every screen but that room's (decision 118): Home, Settings, another room.
+  const mentionBanner = mentioned && mentioned.roomId !== openRoom && (
+    <div className="card mention-banner" role="status">
+      <Icon name="at" />
+      <span className="grow">{mentioned.name}님이 {mentioned.title ? `'${mentioned.title}'에서 ` : ""}언급했습니다</span>
+      <button className="small" onClick={() => { setMentioned(null); enter(mentioned.roomId); }}>보기</button>
+      <IconButton icon="close" label="닫기" onClick={() => setMentioned(null)} />
+    </div>
+  );
+
   if (openRoom && socket && handle) {
     return (
       <div className="room-page">
         {error && <div className="banner"><p className="error grow" role="alert">{error}</p></div>}
         {askLine && <div className="ask-wrap">{askLine}</div>}
+        {mentionBanner && <div className="ask-wrap">{mentionBanner}</div>}
         {/* keyed: another room starts from fresh state (versions, clock, player) */}
         <Room key={openRoom} roomId={openRoom} me={me} handle={handle} socket={socket} status={status} subscribe={subscribe}
           onClose={closeRoom} onInvited={() => void reload()} />
@@ -614,7 +645,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     return (
       <>
         <Settings me={me} blocked={blocked} onMeChange={onMeChange} savePrivacy={savePrivacy} onUnblock={(id) => void act(() => api.unblock(id))()}
-          onSignedOut={onSignedOut} onClose={() => setScreen("home")} />
+          onSignedOut={onSignedOut} onClose={() => setScreen("home")} banner={mentionBanner} />
         {endedNotice /* a closure is told wherever the panel is */}
         {typeChanged}
       </>
@@ -638,6 +669,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         {error && <p className="error" role="alert">{error}</p>}
         {askLine}
         {notice && <p className="muted">{notice}</p>}
+        {mentionBanner}
         <div className="card">
           {watching ? (
             <div className="row">

@@ -1,5 +1,6 @@
 package com.mirattic.sync.room;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Limit;
@@ -20,4 +21,7 @@ interface ChatMessageRepository extends JpaRepository<ChatMessage, String> {
 	Optional<ChatMessage> findByIdAndRoomId(String id, String roomId);
 
 	Optional<ChatMessage> findFirstByRoomIdAndKindOrderBySeqDesc(String roomId, String kind);
+
+	/** Their latest line of these kinds in the room (their "join" / "leave"). */
+	Optional<ChatMessage> findFirstByRoomIdAndUserIdAndKindInOrderBySeqDesc(String roomId, String userId, Collection<String> kinds);
 }

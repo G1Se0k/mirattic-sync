@@ -609,6 +609,62 @@ class RoomFlowTest extends IntegrationTest {
 	}
 
 	@Test
+	void mentionsKeepOnlyOtherMembersOfTheRoom() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		TestUser outsider = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client hostWs = connect(host);
+		Client friendWs = connect(friend);
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"@Tester hi\",\"mentions\":[\"%s\",\"%s\",\"%s\",\"%s\"]}"
+				.formatted(friend.id(), friend.id(), host.id(), outsider.id())));
+		JsonNode got = friendWs.nextOfType("chat:message").path("payload");
+		List<String> named = new ArrayList<>();
+		got.path("mentions").forEach(n -> named.add(n.asString()));
+		assertThat(named).containsExactly(friend.id()); // once; not the author, not one outside the room
+		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
+		assertThat(history.get(history.size() - 1).path("mentions").get(0).asString()).isEqualTo(friend.id());
+
+		// An ID without its "@name" in the text: not a mention.
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"no name here\",\"mentions\":[\"%s\"]}".formatted(friend.id())));
+		assertThat(friendWs.nextOfType("chat:message").path("payload").hasNonNull("mentions")).isFalse();
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"plain\"}")); // none: no field
+		assertThat(friendWs.nextOfType("chat:message").path("payload").hasNonNull("mentions")).isFalse();
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"x\",\"mentions\":\"nope\"}"));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+	}
+
+	@Test
+	void aRestartForgettingWhoIsInWritesNoSecondJoin() throws Exception {
+		TestUser host = signup();
+		String roomId = body(createRoom(host)).path("id").asString();
+		Client ws = connect(host);
+		ws.send(event("room:join", roomId, "{}"));
+		assertThat(ws.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("join");
+
+		roomLog.forget(roomId, host.id()); // the server's memory of it gone, as after a restart
+		ws.session().close();
+		Client again = connect(host);
+		again.send(event("room:join", roomId, "{}"));
+		again.nextOfType("playback:update");
+		assertThat(loggedKinds(host, roomId)).containsExactly("join"); // its line still the latest: no second one
+
+		// Followed from there: leaving writes its line, and coming back a new join.
+		again.session().close();
+		for (int i = 0; i < 100 && !loggedKinds(host, roomId).contains("leave"); i++) {
+			roomLog.sweep();
+			Thread.sleep(20);
+		}
+		Client back = connect(host);
+		back.send(event("room:join", roomId, "{}"));
+		for (int i = 0; i < 100 && loggedKinds(host, roomId).size() < 3; i++) {
+			Thread.sleep(20);
+		}
+		assertThat(loggedKinds(host, roomId)).containsExactly("join", "leave", "join");
+	}
+
+	@Test
 	void aMemberInBeforeTheHostHearsTheHostShowsNothing() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();

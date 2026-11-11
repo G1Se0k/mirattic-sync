@@ -2,7 +2,7 @@ import { browser, type Browser } from 'wxt/browser';
 import { ApiError, connectSocket, createApi, HOST_MUST_SWITCH, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { PAUSE_REQUEST_SHOWN_MS, RoomSync } from '@mirattic/sync-core';
 import {
-  INCOMING_MS, PROVIDER_NAMES, roomTitle, roomToInvite, shownContent, type IncomingRequest, type MediaProvider, type RoomContent, type RoomView, type ServerEvent,
+  INCOMING_MS, PROVIDER_NAMES, roomTitle, roomToInvite, shownContent, type ChatMessage, type IncomingRequest, type MediaProvider, type RoomContent, type RoomView, type ServerEvent,
 } from '@mirattic/types';
 import { API_URL, SOCKET_URL, authorize, store } from '../session';
 import { hasConsent } from '../consent';
@@ -65,21 +65,65 @@ export default defineBackground(() => {
     const me = { openedAt, windowId };
     const latest = await latestPanel();
     if (latest && latest.windowId !== windowId && newerPanel(latest, me)) {
-      post(port, { kind: 'close' });
+      await closeKeepingFront(port, windowId, detached);
       return false;
     }
     if (!latest || !newerPanel(latest, me)) await setLatestPanel(me);
     panelWindows.set(port, { ...me, detached });
     if (detached) dropOffers(); // the panel is its own window: no window is offered it
-    for (const [other, p] of panelWindows) {
-      if (other !== port && p.windowId !== windowId && newerPanel(me, p)) {
-        panelAllowed.set(other, Promise.resolve(false)); // nothing more from it, already (it is closing)
-        lostTo.set(other, { windowId, at: Date.now() });
-        post(other, { kind: 'close' });
-      }
+    // Not one told already (a panel's second hello, its real connection after the consent one, finds it still open).
+    const losers = [...panelWindows].filter(([other, p]) => other !== port && p.windowId !== windowId && newerPanel(me, p) && !lostTo.has(other));
+    for (const [other] of losers) {
+      panelAllowed.set(other, Promise.resolve(false)); // nothing more from it, already (it is closing)
+      lostTo.set(other, { windowId, at: Date.now() });
     }
+    for (const [other, p] of losers) await closeKeepingFront(other, p.windowId, p.detached === true);
     return true;
   }
+  /**
+   * Chrome brings the window whose side panel an extension closes in front (sidePanel.close or the panel's own
+   * window.close(); seen in Chrome 157): the window in front just before is put back.
+   */
+  async function closeKeepingFront(port: Browser.runtime.Port, windowId: number | undefined, detached: boolean) {
+    const before = await browser.windows.getLastFocused().then((w) => (w.focused ? w.id : undefined), () => undefined);
+    if (before === undefined || windowId === undefined || before === windowId) return void (await closePanel(port, windowId, detached));
+    // As Chrome focuses the closed one (once): the window in front until then is put back, at once — the one before,
+    // or another the user went to meanwhile. Watched a short while past the close (a panel closing itself is done
+    // only later).
+    // ponytail: the user clicking into the closed window within that moment, with Chrome not having focused it, is
+    // taken for Chrome's and undone once.
+    let target = before;
+    let restored = false;
+    const seen = (w: number) => {
+      if (restored || w === browser.windows.WINDOW_ID_NONE) return;
+      if (w !== windowId) return void (target = w);
+      restored = true;
+      void browser.windows.update(target, { focused: true }).catch(() => {});
+    };
+    browser.windows.onFocusChanged.addListener(seen);
+    await closePanel(port, windowId, detached).finally(() =>
+      // Through the fallback close a moment later too (still connected then: told to close itself).
+      setTimeout(() => browser.windows.onFocusChanged.removeListener(seen), CLOSE_CHECK_MS + FOCUS_WATCH_MS));
+  }
+  const FOCUS_WATCH_MS = 600;
+  /**
+   * A panel that lost closed. A side panel: by Chrome (`sidePanel.close`, Chrome 141+) — one closing itself
+   * (`window.close()`) brings its window in front, over the one the user just opened the panel in. Older Chrome, or a
+   * detached panel (its own popup window): it closes itself. Still connected a moment after: told to, all the same.
+   * Window-wide, so only while no other panel of that window is known to be staying (it closes itself instead), and
+   * awaited in the panels' turn: a newer panel's arbitration comes after the close is done.
+   * ponytail: a panel reopened in that window in the very moment the request is in flight can still be closed by it
+   * (Chrome orders the two, not us); the user opens it again.
+   */
+  async function closePanel(port: Browser.runtime.Port, windowId: number | undefined, detached: boolean) {
+    const close = (browser.sidePanel as { close?: (o: { windowId: number }) => Promise<void> }).close;
+    const another = [...panelWindows].some(([other, p]) => other !== port && p.windowId === windowId && !lostTo.has(other));
+    if (detached || windowId === undefined || !close || another) return post(port, { kind: 'close' });
+    const done = await close.call(browser.sidePanel, { windowId }).then(() => true, () => false);
+    if (!done) return post(port, { kind: 'close' });
+    setTimeout(() => ports.has(port) && post(port, { kind: 'close' }), CLOSE_CHECK_MS);
+  }
+  const CLOSE_CHECK_MS = 1_000;
   /** Opened later — the same millisecond decided by the window id, so two windows never both win. */
   const newerPanel = (a: LatestPanel, b: LatestPanel) =>
     a.openedAt > b.openedAt || (a.openedAt === b.openedAt && (a.windowId ?? 0) > (b.windowId ?? 0));
@@ -343,6 +387,41 @@ export default defineBackground(() => {
     if (ms > 0) alert('answered', roomId, ms, `${host?.displayName ?? '친구'}님이 합류 요청을 수락했습니다`, shown?.title ?? '', meta);
   }
 
+  /**
+   * The latest mention alerted while no panel was open, for the next panel to open (its Home shows the banner): the
+   * toolbar icon's click opens a panel, which clears the alerts. Handed to one panel; gone once its alert is settled.
+   */
+  let pendingMention: { roomId: string; name: string; title?: string; userId: string; alertId: number; until: number } | null = null;
+  /** A mention toast's 채팅 보기 (decision 118): that room's screen in the panel the click opens; kept apart (a newer
+   * mention can't replace it), taken by that panel. */
+  let pendingOpen: { roomId: string; name: string; title?: string; userId: string; until: number } | null = null;
+  let mentionSeq = 0;
+  async function alertMention(roomId: string, msg: ChatMessage) {
+    if (ports.size || !meId) return; // a panel open: its chat or Home shows it
+    // Captured before the lookup: dropped if the account changed (signed out, another signed in) or a newer mention
+    // arrived meanwhile (its lookup may finish first).
+    const me = meId;
+    const mine = session;
+    const seq = ++mentionSeq;
+    const until = Date.now() + INCOMING_MS;
+    const name = msg.userName ?? '친구';
+    // Kept from now (no title yet): a panel opening during the lookup gets it (the chat event came before it).
+    const pm: NonNullable<typeof pendingMention> = { roomId, name, userId: me, alertId: -1, until };
+    pendingMention = pm;
+    const view = await within(api.room(roomId).catch(() => null), null);
+    const ms = until - Date.now();
+    if (mine !== session || meId !== me || seq !== mentionSeq || ms <= 0) {
+      if (pendingMention === pm) pendingMention = null;
+      return;
+    }
+    if (ports.size || pendingMention !== pm) return; // a panel opened meanwhile: handed to it (or kept for its hello)
+    const title = view ? roomTitle(view) : undefined;
+    alert('mention', roomId, ms, `${name}님이 나를 언급했습니다`, msg.text, title ? `방: ${title}` : undefined);
+    const entry = alerts.find((a) => a.kind === 'mention' && a.target === roomId);
+    pm.title = title;
+    if (entry) Object.assign(pm, { alertId: entry.toast.alertId, until: entry.until });
+  }
+
   /** Settled (answered, cancelled, expired): no longer counted, and off every page, so it can't be answered. */
   function dropAlerts(gone: (a: Alert) => boolean) {
     const settled = alerts.filter(gone);
@@ -350,6 +429,7 @@ export default defineBackground(() => {
     alerts = alerts.filter((a) => !gone(a));
     publishAlerts();
     for (const { kind, target } of settled) toTabs({ type: TOAST_DISMISS, kind, target });
+    if (settled.some((a) => a.kind === 'mention' && a.toast.alertId === pendingMention?.alertId)) pendingMention = null;
   }
 
   /** Still counting, and (if named) the same alert — not an earlier one for the same friend or room. */
@@ -410,6 +490,7 @@ export default defineBackground(() => {
     if (!answered || !meId) return;
     // Read now: a panel connecting meanwhile (the click opens it) clears the alerts and these codes.
     const code = kind === 'invite' ? inviteCodes.get(target) : undefined;
+    const mentioned = kind === 'mention' && pendingMention?.roomId === target ? pendingMention : null; // (dropped next)
     // Off the list now (a second click does nothing); back if the call fails, unless it is gone for good.
     dropAlerts((a) => a === answered);
     try {
@@ -427,6 +508,14 @@ export default defineBackground(() => {
       } else if (kind === 'type') {
         // The toast is the room's latest change (a newer one replaces it): its version is the notice's.
         await answerType(target, typeNotices.find((n) => n.roomId === target)?.version ?? 0, !accept, always === true);
+      } else if (kind === 'mention') {
+        // 채팅 보기: that room's screen in the panel the click opens — even the room I'm in already (Home shows the
+        // room it enters, not one it was in), told to it as it connects.
+        if (accept && meId) {
+          const name = mentioned?.name ?? '친구';
+          pendingOpen = { roomId: target, name, title: mentioned?.title, userId: meId, until: Date.now() + INCOMING_MS };
+          if (room?.state.roomId !== target) openRoom(target, true);
+        }
       } else if (kind === 'pause' && room?.state.roomId === target && room.state.pauseRequest) {
         if (accept) room.pauseAll();
         else room.dismissPauseRequest();
@@ -705,6 +794,11 @@ export default defineBackground(() => {
       pendingInvites.delete(event.roomId);
       dropAlerts((a) => a.kind === 'invite' && a.target === event.roomId);
     }
+    // Mentioned in a room's chat (decision 118), no panel open: told over the video, the room's name looked up.
+    if (event.type === 'chat:message' && event.roomId && meId) {
+      const msg = event.payload as ChatMessage;
+      if (msg.mentions?.includes(meId) && msg.userId !== meId) void alertMention(event.roomId, msg);
+    }
     // The friend I asked let me in: the panel does it when open (it asked), else it happens here.
     if (event.type === 'watch:answer' && event.roomId && !ports.size) void enterAnswered(event.roomId, event.userId);
     if (event.type === 'watch:request') {
@@ -867,6 +961,7 @@ export default defineBackground(() => {
   function stop() {
     session++;
     clearAlerts();
+    pendingMention = pendingOpen = null; // not handed to the next account's panel
     panelOffers.clear(); // not shown again to the next account's pages (a redraw asks for them)
     closeRoom();
     clearInterval(keepAlive);
@@ -1172,7 +1267,17 @@ export default defineBackground(() => {
             const here = m.windowId;
             if (here !== undefined && !m.hold) inTabTurn(() => bringMoved(here)); // the panel a choice moved here
           }
-          post(port, { kind: 'shared', shared: shared() });
+          {
+            // A mention alerted before it opened, this account's: to this panel only (its Home shows it once).
+            // Its time up meanwhile (a panel opening cleared the alerts, so no settling cleared it): not handed.
+            const valid = <T extends { userId: string; until: number }>(p: T | null) => (p && p.userId === meId && p.until > Date.now() ? p : null);
+            const p = valid(pendingMention);
+            const o = valid(pendingOpen);
+            const mention = p ? { roomId: p.roomId, name: p.name, title: p.title, userId: p.userId, until: p.until } : null;
+            const mentionOpen = o ? { ...o, open: true as const } : null;
+            if (!m.hold) pendingMention = pendingOpen = null;
+            post(port, { kind: 'shared', shared: { ...shared(), mention, mentionOpen } });
+          }
           post(port, { kind: 'status', status });
           if (room) post(port, { kind: 'room', state: room.state });
           break;

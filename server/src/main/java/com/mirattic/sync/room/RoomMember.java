@@ -50,6 +50,7 @@ public class RoomMember {
 	public String getUserId() { return userId; }
 	public Role getRole() { return role; }
 	public long getTypeSeenVersion() { return typeSeenVersion; }
+	long joinedAt() { return joinedAt; }
 
 	void role(Role role) { this.role = role; }
 }

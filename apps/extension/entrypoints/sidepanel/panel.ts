@@ -1,7 +1,7 @@
 import { browser, type Browser } from 'wxt/browser';
 import { ApiError, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { emptyRoomState, type RoomSyncState } from '@mirattic/sync-core';
-import type { MediaProvider, ServerEvent } from '@mirattic/types';
+import { INCOMING_MS, type ChatMessage, type MediaProvider, type ServerEvent } from '@mirattic/types';
 import { textSizeOf, type Platform, type RoomHandle, type VideoTab } from '@mirattic/ui';
 import { ASK_ON_SWITCH_KEY, experimentKey, TEXT_SIZE_ITEM, UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
 import { INVITE_KEY, INVITE_TAKEN_KEY, INVITE_TTL_MS, pendingInvite, takenKey, type Invitation } from '../../invite';
@@ -79,6 +79,13 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
   let view: { roomId: string; state: RoomSyncState; listeners: Set<() => void>; seen: boolean; shown: boolean } | null = null;
   const windowId = (await browser.windows.getCurrent()).id;
   const subscribers = new Set<() => void>();
+  /** A mention alerted before this panel opened (decision 118): Home's banner as it first shows. */
+  // Oldest first (the background's handoff, then messages before Home listens); the newest for the account wins.
+  // ponytail: kept to the last 20, plenty for a panel's startup.
+  let firstMentions: { roomId: string; name: string; title?: string; until: number; open?: boolean; for: (userId: string) => boolean }[] = [];
+  /** A mention toast's 채팅 보기 answered as this panel opened: taken before any mention above. */
+  let openChoice: (typeof firstMentions)[number] | null = null;
+  const keepMention = (m: (typeof firstMentions)[number]) => { firstMentions = [...firstMentions, m].slice(-20); };
   // A store update downloaded while this page is open (Settings offers it then). Listened here only, not in the
   // background: a background listener would hold the browser's own install-when-idle back.
   let updateReady: string | null = null;
@@ -162,6 +169,15 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
         return;
       }
       case 'shared': {
+        // Alerted before this panel connected, so older than any event it got: first, whenever `shared` arrives.
+        if (m.shared.mention) {
+          const { userId, ...rest } = m.shared.mention;
+          firstMentions = [{ ...rest, for: (id: string) => id === userId }, ...firstMentions].slice(-20);
+        }
+        if (m.shared.mentionOpen) {
+          const { userId, ...rest } = m.shared.mentionOpen;
+          openChoice = { ...rest, for: (id: string) => id === userId }; // apart from the buffer: never pushed out
+        }
         // Objects equal to the ones we have keep their identity: useSyncExternalStore reads them.
         const same = <T>(before: T, after: T) => (JSON.stringify(before) === JSON.stringify(after) ? before : after);
         shared = {
@@ -191,7 +207,18 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
         socketHandlers?.onStatus(m.status);
         return;
       case 'event':
-        socketHandlers?.onEvent(m.event);
+        if (socketHandlers) socketHandlers.onEvent(m.event);
+        else if (m.event.type === 'chat:message' && m.event.roomId) {
+          // Before Home listens (the panel starting): a mention kept for its banner as it mounts (decision 118).
+          const msg = m.event.payload as ChatMessage;
+          const ids = msg.mentions ?? [];
+          if (ids.length) {
+            keepMention({
+              roomId: m.event.roomId, name: msg.userName ?? '친구', until: Date.now() + INCOMING_MS,
+              for: (id) => ids.includes(id) && msg.userId !== id,
+            });
+          }
+        }
         return;
       case 'room': {
         const v = view;
@@ -298,6 +325,16 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
     activeRoom: () => shared.activeRoom,
     alertUntil: (kind, target) => shared.alertsUntil[`${kind}:${target}`],
     closedRooms: () => shared.closedRooms,
+    // Only for the account it was for, while its alert's time lasts; taken once (a Home mounting again gets none).
+    mention: (userId) => {
+      const now = Date.now();
+      const ok = (x: (typeof firstMentions)[number]) => x.for(userId) && x.until > now;
+      // A toast's 채팅 보기 first (the user's choice), else the newest.
+      const m = (openChoice && ok(openChoice) ? openChoice : null) ?? firstMentions.findLast(ok);
+      firstMentions = [];
+      openChoice = null;
+      return m ? { roomId: m.roomId, name: m.name, title: m.title, open: m.open } : null;
+    },
     roomTypeNotice: () => shared.typeNotices[0] ?? null, // one at a time, the others after it's answered
     answerRoomType: (roomId, version, leave, always) => send({ op: 'type:answer', roomId, version, leave, always }),
     seenClosed: (roomId) => {

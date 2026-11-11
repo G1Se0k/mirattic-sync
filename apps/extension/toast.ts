@@ -19,7 +19,7 @@ export const TOAST_CLEAR = 'mirattic:toast-clear';
  * `target`: the room (invite, pause, answered) or the friend who asked (request). `answered`: the friend I asked
  * invited me, and the background entered the room; its button opens the panel.
  */
-export type AlertKind = 'invite' | 'request' | 'pause' | 'answered' | 'type' | 'panel';
+export type AlertKind = 'invite' | 'request' | 'pause' | 'answered' | 'type' | 'panel' | 'mention';
 /**
  * `ms`: how long it shows (the alert's time, decision 87: 30 s). `total`: that alert's full time, when not 30 s (the
  * bar shows the share of it left). `meta`: where to watch ("YouTube · channel").
@@ -54,6 +54,7 @@ const ANSWERS: Record<AlertKind, [string, string]> = {
   answered: ['패널 열기', '닫기'],
   type: ['확인', '방 나가기'],
   panel: ['패널 열기', '닫기'],
+  mention: ['채팅 보기', '닫기'],
 };
 const FADE_MS = 200;
 const READY_DELAY_MS = 2_000;

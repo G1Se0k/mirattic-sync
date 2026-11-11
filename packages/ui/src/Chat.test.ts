@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ChatMessage } from "@mirattic/types";
-import { logText, merge, receive, reconcile, scrollFor, tombstone, visible, without } from "./Chat";
+import { logText, mentionsIn, merge, receive, reconcile, scrollFor, tombstone, visible, without } from "./Chat";
 import { parseClock } from "./format";
 
 const msg = (id: string, createdAt: number): ChatMessage => ({ id, roomId: "r", userId: "u", text: id, createdAt });
@@ -84,4 +84,13 @@ it("follows the bottom when a line there grows in place (a video-change line ret
   expect(scrollFor(before, { ...before, last: "new", height: 430 }, false, false)).toBe("unseen");
   expect(scrollFor(before, { ...before, last: "new", height: 430 }, false, true)).toBe("bottom"); // mine
   expect(scrollFor(before, { ...before, first: "older", height: 900 }, false, false)).toBe("keep");
+});
+
+
+it("mentions name whole members only, never me", () => {
+  const users = [{ id: "a", displayName: "민수" }, { id: "b", displayName: "민수2" }, { id: "me", displayName: "나" }];
+  expect(mentionsIn("@민수2 봐봐", users, "me")).toEqual(["b"]);
+  expect(mentionsIn("@민수, @민수2!", users, "me")).toEqual(["a", "b"]);
+  expect(mentionsIn("@나 혼잣말 메일 x@민수y", users, "me")).toEqual([]);
+  expect(mentionsIn("(@민수.)", users, "me")).toEqual(["a"]);
 });

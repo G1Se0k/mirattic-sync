@@ -9,6 +9,7 @@ import com.mirattic.sync.room.RoomService;
 import com.mirattic.sync.user.UserRepository;
 import jakarta.validation.Validator;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
 import java.util.Map;
@@ -53,6 +54,8 @@ class SocketHandler extends TextWebSocketHandler {
 	private static final String CHAT_WINDOW = "chatWindow";
 	private static final int MAX_CHAT_PER_SECOND = 5;
 	private static final int MAX_REASON = 200;
+	/** Members a chat message may mention: the room's largest member limit. */
+	private static final int MAX_MENTIONS = RoomService.MAX_MEMBERS;
 	static final long PAUSE_REQUEST_COOLDOWN_MS = 30_000;
 	private static final int MAX_PAUSE_REQUEST_ENTRIES = 10_000;
 
@@ -274,8 +277,16 @@ class SocketHandler extends TextWebSocketHandler {
 					return;
 				}
 				JsonNode key = payload.path("contentKey"); // the video the position is on (absent: an older client)
+				// Mentioned members (decision 118): a short list of IDs, absent from older clients.
+				JsonNode named = payload.path("mentions");
+				if (!(named.isMissingNode() || named.isNull() || named.isArray() && named.size() <= MAX_MENTIONS
+						&& named.valueStream().allMatch(n -> n.isString() && n.asString().length() <= 128))) {
+					error(session, reqId, "bad_payload");
+					return;
+				}
+				List<String> mentions = named.isArray() ? named.valueStream().map(JsonNode::asString).toList() : List.of();
 				ChatMessage.View message = rooms.chat(me, roomId, text.asString(),
-						position.canConvertToLong() ? position.asLong() : null, key.isString() ? key.asString() : null);
+						position.canConvertToLong() ? position.asLong() : null, key.isString() ? key.asString() : null, mentions);
 				// To every member's connections, in the room or not yet: one rejoining (a reconnect) doesn't miss it
 				// between reading the history and its join landing.
 				ServerEvent event = new ServerEvent("chat:message", roomId, me, null, message.createdAt(), message);
