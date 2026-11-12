@@ -653,6 +653,61 @@ class RoomFlowTest extends IntegrationTest {
 		assertThat(fromFriend.hasNonNull("mentions")).isFalse();
 	}
 
+	@Autowired
+	com.mirattic.sync.user.UserRepository userRepo;
+
+	@Test
+	void aMentionIsKeptByIdAndShownWithTheNameNow() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client hostWs = connect(host);
+		Client friendWs = connect(friend);
+		// The mark is no one's to send: dropped from the text.
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"@Tester hi \\uE000x\\uE000\",\"mentions\":[\"%s\"]}".formatted(friend.id())));
+		JsonNode got = friendWs.nextOfType("chat:message").path("payload");
+		assertThat(got.path("text").asString()).isEqualTo("@Tester hi x");
+		// Mentioned many times within 1000 characters: still sent (stored small; 60 keeps the reply within this test
+		// client's 8 KB frame).
+		Thread.sleep(1_100);
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"%s\",\"mentions\":[\"%s\"]}".formatted("@Tester ".repeat(60).strip(), friend.id())));
+		JsonNode many = friendWs.nextOfType("chat:message").path("payload");
+		assertThat(many.path("mentionSpans").size()).isEqualTo(60);
+		assertThat(many.path("text").asString()).isEqualTo("@Tester ".repeat(60).strip());
+		// Its marks still count toward the 1000 characters sent.
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"a%s\"}".formatted("\\uE000".repeat(1000))));
+		assertThat(hostWs.nextOfType("error").path("payload").path("code").asString()).isEqualTo("bad_payload");
+		assertThat(got.path("mentionSpans").get(0).path("id").asString()).isEqualTo(friend.id());
+		assertThat(got.path("mentionSpans").get(0).path("end").asInt()).isEqualTo("@Tester".length());
+		var u = userRepo.findById(friend.id()).orElseThrow();
+		u.syncName("새이름");
+		userRepo.save(u);
+		JsonNode last = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
+		last = last.get(last.size() - 2); // before the many-mention one
+		assertThat(last.path("text").asString()).isEqualTo("@새이름 hi x");
+		assertThat(last.path("mentionSpans").get(0).path("end").asInt()).isEqualTo("@새이름".length());
+		// A literal "@새이름" written before the rename stays text: only the kept mention is at a span.
+		assertThat(last.path("mentionSpans").size()).isEqualTo(1);
+
+		// Names one inside another: the longest whole name is the one mentioned.
+		TestUser third = signup();
+		var t = userRepo.findById(third.id()).orElseThrow();
+		t.syncName("새이름 둘");
+		userRepo.save(t);
+		befriend(host, third);
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"%s\"]}".formatted(third.id()));
+		accept(third, roomId).andExpect(status().isOk());
+		hostWs.send(event("chat:message", roomId, "{\"text\":\"@새이름 둘 hi\",\"mentions\":[\"%s\",\"%s\"]}".formatted(friend.id(), third.id())));
+		JsonNode both = friendWs.nextOfType("chat:message").path("payload");
+		while (!both.path("text").asString().endsWith(" 둘 hi")) {
+			both = friendWs.nextOfType("chat:message").path("payload");
+		}
+		assertThat(both.path("mentionSpans").size()).isEqualTo(1);
+		assertThat(both.path("mentionSpans").get(0).path("id").asString()).isEqualTo(third.id());
+		assertThat(both.path("mentionSpans").get(0).path("end").asInt()).isEqualTo("@새이름 둘".length());
+	}
+
 	@Test
 	void aRestartForgettingWhoIsInWritesNoSecondJoin() throws Exception {
 		TestUser host = signup();

@@ -56,7 +56,9 @@ class ReportService {
 			if (reports.existsByReporterIdAndMessageId(me, m.id())) {
 				return; // already reported
 			}
-			report = new Report(me, m.userId(), body.reason(), detail, m.id(), m.roomId(), m.text());
+			// As shown (decision 122): names now can make it longer than as stored; the column keeps 4000.
+			String shown = m.text().length() > 4000 ? m.text().substring(0, 4000) : m.text();
+			report = new Report(me, m.userId(), body.reason(), detail, m.id(), m.roomId(), shown);
 		} else {
 			String target = body.userId();
 			if (target.equals(me)) {

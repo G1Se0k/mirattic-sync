@@ -24,6 +24,8 @@ public class User {
 	private boolean friendCodeOnly;
 	/** 오프라인으로 표시 (decision 120): friends see them offline, whatever they do. */
 	private boolean appearOffline;
+	/** 방해 금지 (decision 121): their alerts held back; friends see it while they're online. */
+	private boolean doNotDisturb;
 	private long createdAt;
 
 	protected User() {
@@ -83,6 +85,8 @@ public class User {
 	public boolean isFriendCodeOnly() { return friendCodeOnly; }
 	public boolean isAppearOffline() { return appearOffline; }
 	public void setAppearOffline(boolean appearOffline) { this.appearOffline = appearOffline; }
+	public boolean isDoNotDisturb() { return doNotDisturb; }
+	public void setDoNotDisturb(boolean doNotDisturb) { this.doNotDisturb = doNotDisturb; }
 
 	/** Invalidates the old code, e.g. after it was shared too widely. */
 	public void regenerateFriendCode() {

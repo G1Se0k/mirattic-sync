@@ -82,7 +82,8 @@ public class PresenceService {
 			return v;
 		}
 		MediaPresence m = v.media();
-		return new PresenceView(v.status(), m, rooms.publicRoomOf(owner.getId(), m != null ? m.provider() : null, m != null ? m.contentId() : null, viewer));
+		return new PresenceView(v.status(), m, rooms.publicRoomOf(owner.getId(), m != null ? m.provider() : null, m != null ? m.contentId() : null, viewer),
+				owner.isDoNotDisturb() ? Boolean.TRUE : null);
 	}
 
 	/** Online as their friends see it: connected, and not 오프라인으로 표시 (decision 120). */

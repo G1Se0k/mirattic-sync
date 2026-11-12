@@ -27,12 +27,12 @@ public class UserController {
 	 * `friendCode` is only ever shown to its owner, who shares it to be added as a friend.
 	 */
 	public record Me(String id, String email, String displayName, String avatarUrl, String friendCode, Visibility presenceVisibility,
-			Visibility positionVisibility, boolean friendCodeOnly, boolean appearOffline) {
+			Visibility positionVisibility, boolean friendCodeOnly, boolean appearOffline, boolean doNotDisturb) {
 	}
 
 	/** Each setting left out is unchanged: a client sends only the one it changes (before 1.2.2: both visibilities). */
 	public record PrivacyRequest(Visibility presenceVisibility, Visibility positionVisibility, Boolean friendCodeOnly,
-			Boolean appearOffline) {
+			Boolean appearOffline, Boolean doNotDisturb) {
 	}
 
 	private final UserRepository users;
@@ -60,8 +60,21 @@ public class UserController {
 		if (req.friendCodeOnly() != null) {
 			me.setFriendCodeOnly(req.friendCodeOnly());
 		}
+		// One status at a time (decision 121): both asked on is a bad request; one turned on turns the other off.
+		if (Boolean.TRUE.equals(req.appearOffline()) && Boolean.TRUE.equals(req.doNotDisturb())) {
+			throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "one status at a time");
+		}
 		if (req.appearOffline() != null) {
 			me.setAppearOffline(req.appearOffline());
+			if (req.appearOffline()) {
+				me.setDoNotDisturb(false);
+			}
+		}
+		if (req.doNotDisturb() != null) {
+			me.setDoNotDisturb(req.doNotDisturb());
+			if (req.doNotDisturb()) {
+				me.setAppearOffline(false);
+			}
 		}
 		events.publishEvent(new RoomsChanged(List.of(me.getId()))); // friends see what the new setting shows, once saved
 		return me(me, jwt);
@@ -86,7 +99,8 @@ public class UserController {
 			}
 		}
 		return new Me(u.getId(), info == null ? null : info.email(), u.getDisplayName(), u.getAvatarUrl(), u.getFriendCode(),
-				u.getPresenceVisibility(), u.getPositionVisibility(), u.isFriendCodeOnly(), u.isAppearOffline());
+				u.getPresenceVisibility(), u.getPositionVisibility(), u.isFriendCodeOnly(), u.isAppearOffline(),
+				u.isDoNotDisturb());
 	}
 
 	private User load(String id) {

@@ -53,6 +53,17 @@ class FriendFlowTest extends IntegrationTest {
 				.andExpect(status().isConflict()); // nor into their public room
 		call(HttpMethod.PUT, "/api/me/privacy", a.accessToken(), "{\"appearOffline\":false}");
 		call(HttpMethod.GET, "/api/friends", b.accessToken(), null).andExpect(jsonPath("$[0].presence.status").value("ONLINE"));
+		// 방해 금지 (decision 121): online, marked so; not while appearing offline.
+		call(HttpMethod.PUT, "/api/me/privacy", a.accessToken(), "{\"doNotDisturb\":true}")
+				.andExpect(jsonPath("$.doNotDisturb").value(true));
+		call(HttpMethod.GET, "/api/friends", b.accessToken(), null).andExpect(jsonPath("$[0].presence.status").value("ONLINE"))
+				.andExpect(jsonPath("$[0].presence.doNotDisturb").value(true));
+		call(HttpMethod.PUT, "/api/me/privacy", a.accessToken(), "{\"appearOffline\":true,\"doNotDisturb\":true}")
+				.andExpect(status().isBadRequest()); // one status at a time
+		call(HttpMethod.PUT, "/api/me/privacy", a.accessToken(), "{\"appearOffline\":true}")
+				.andExpect(jsonPath("$.doNotDisturb").value(false)); // turned off by it
+		call(HttpMethod.GET, "/api/friends", b.accessToken(), null).andExpect(jsonPath("$[0].presence.status").value("OFFLINE"))
+				.andExpect(jsonPath("$[0].presence.doNotDisturb").doesNotExist());
 		aWs.session().close();
 	}
 

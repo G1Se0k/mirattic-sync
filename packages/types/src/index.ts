@@ -111,6 +111,8 @@ export type Me = UserSummary & {
   friendCodeOnly: boolean;
   /** 오프라인으로 표시 (decision 120): friends see me offline. Absent from a server before it. */
   appearOffline?: boolean;
+  /** 방해 금지 (decision 121), kept with the account: friends see it while I'm online. */
+  doNotDisturb?: boolean;
 };
 
 export type AuthTokens = { accessToken: string; refreshToken: string; user: UserSummary };
@@ -121,7 +123,8 @@ export type PresenceStatus = "OFFLINE" | "ONLINE" | "WATCHING";
  * A friend's presence as the server lets you see it. `media` is absent when hidden or not watching. `publicRoom`: the
  * public room they are in (decision 114; its name, else its video's title), absent when none or hidden.
  */
-export type PresenceView = { status: PresenceStatus; media?: MediaPresence; publicRoom?: { name?: string } };
+/** `doNotDisturb`: online with 방해 금지 on (decision 121). */
+export type PresenceView = { status: PresenceStatus; media?: MediaPresence; publicRoom?: { name?: string }; doNotDisturb?: boolean };
 
 export type FriendView = { user: UserSummary; presence: PresenceView };
 
@@ -153,6 +156,8 @@ export type ChatMessage = {
   /** Members it mentions with "@name" (decision 118); absent for none. */
   /** Mentioned members' IDs (decision 118); led by "everyone" for the host's @everyone (118a). */
   mentions?: string[] | null;
+  /** Where the text shows a mention kept by ID, as "@<their name now>" (decision 122): `start` / `end` in UTF-16 units. */
+  mentionSpans?: { id: string; start: number; end: number }[] | null;
   /** A message's author's name (decision 112), so one who left shows by name; absent on log lines and older servers. */
   userName?: string | null;
 };

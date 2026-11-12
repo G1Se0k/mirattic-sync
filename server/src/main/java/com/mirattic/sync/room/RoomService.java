@@ -789,11 +789,13 @@ public class RoomService {
 	/** "@everyone" (decision 118): the host's mention of every member. */
 	public static final String EVERYONE = "everyone";
 
+	/** "@name" as a word of its own: nothing word-like before the "@" (not "x@everyone.com") nor after the name. */
+	private static java.util.regex.Pattern mentionPattern(String name) {
+		return java.util.regex.Pattern.compile("(?<![\\p{L}\\p{N}_])@" + java.util.regex.Pattern.quote(name) + "(?![\\p{L}\\p{N}_])");
+	}
+
 	private static boolean names(String text, String name) {
-		return name != null && !name.isEmpty()
-				// A word of its own: nothing word-like before the "@" (not "x@everyone.com") nor after the name.
-				&& java.util.regex.Pattern.compile("(?<![\\p{L}\\p{N}_])@" + java.util.regex.Pattern.quote(name) + "(?![\\p{L}\\p{N}_])")
-						.matcher(text).find();
+		return name != null && !name.isEmpty() && mentionPattern(name).matcher(text).find();
 	}
 
 	/**
@@ -806,8 +808,10 @@ public class RoomService {
 		// Under the room lock, like a kick: a member kicked meanwhile can't post after it.
 		Room room = rooms.findForUpdate(roomId).orElseThrow(RoomService::notFound);
 		RoomMember self = requireMember(me, roomId);
-		String trimmed = text == null ? "" : text.strip();
-		if (trimmed.isEmpty() || trimmed.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)) {
+		String sent = text == null ? "" : text.strip();
+		// The ID mark is no one's to send (decision 122): dropped, after the length is checked on what was sent.
+		String trimmed = sent.replace(ChatMessage.MARK, "").strip();
+		if (trimmed.isEmpty() || sent.length() > MAX_CHAT_LENGTH || (mediaPositionMs != null && mediaPositionMs < 0)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid chat message");
 		}
 		boolean same = contentKey != null && contentKey.equals(room.contentKey());
@@ -819,8 +823,27 @@ public class RoomService {
 		List<String> named = everyone
 				? java.util.stream.Stream.concat(java.util.stream.Stream.of(EVERYONE), in.stream().filter(id -> !id.equals(me))).toList()
 				: mentions.stream().distinct().filter(id -> !id.equals(me) && in.contains(id) && names(trimmed, nameOf(id))).toList();
-		return messages.save(new ChatMessage(roomId, me, trimmed, mediaPositionMs, null, same ? room : null).mentioning(named))
-				.view().named(nameOf(me));
+		// Kept by ID (decision 122): each mentioned one's "@name" becomes their ID, shown with the name they have then —
+		// but a name two of them share stays as written (whose it is isn't known).
+		String stored = trimmed;
+		Map<String, String> theirNames = new java.util.HashMap<>();
+		for (String id : named) {
+			String name = id.equals(EVERYONE) ? null : nameOf(id);
+			// The host's "@everyone" stays everyone's, a member named "everyone" or not.
+			if (name != null && !(everyone && name.equals(EVERYONE))) {
+				theirNames.put(id, name);
+			}
+		}
+		// Longest names first: "@Ann Lee" is Ann Lee's, not "@Ann" and " Lee".
+		for (Map.Entry<String, String> e : theirNames.entrySet().stream()
+				.sorted(Map.Entry.<String, String>comparingByValue(java.util.Comparator.comparingInt(String::length)).reversed()).toList()) {
+			if (java.util.Collections.frequency(theirNames.values(), e.getValue()) == 1) {
+				stored = mentionPattern(e.getValue()).matcher(stored)
+						.replaceAll(java.util.regex.Matcher.quoteReplacement(ChatMessage.MARK + named.indexOf(e.getKey()) + ChatMessage.MARK));
+			}
+		}
+		return messages.save(new ChatMessage(roomId, me, stored, mediaPositionMs, null, same ? room : null).mentioning(named))
+				.view().named(nameOf(me)).shown(this::nameOf);
 	}
 
 	/**
@@ -996,7 +1019,7 @@ public class RoomService {
 	@Transactional(readOnly = true)
 	public ChatMessage.View reportable(String me, String messageId) {
 		ChatMessage.View m = messages.findById(messageId).filter(x -> !x.isDeleted() && !x.isLog()).map(ChatMessage::view)
-				.orElseThrow(RoomService::notFound);
+				.orElseThrow(RoomService::notFound).shown(this::nameOf); // reported as shown
 		requireMember(me, m.roomId());
 		if (m.userId().equals(me)) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "cannot report yourself");
@@ -1022,12 +1045,15 @@ public class RoomService {
 					.filter(m -> m.roomId().equals(roomId)).orElseThrow(RoomService::notFound);
 			page = messages.findBefore(roomId, cursor.createdAt(), cursor.id(), Limit.of(CHAT_HISTORY));
 		}
-		// Messages carry their author's name (decision 112): one who left the room still shows by it.
+		// Messages carry their author's name (decision 112): one who left the room still shows by it; and those they
+		// mention, theirs now (decision 122).
 		Map<String, String> names = users.findAllById(page.stream().filter(m -> m.view().kind() == null)
-				.map(m -> m.view().userId()).distinct().toList()).stream()
+				.flatMap(m -> java.util.stream.Stream.concat(java.util.stream.Stream.of(m.view().userId()),
+						m.view().mentions() == null ? java.util.stream.Stream.empty() : m.view().mentions().stream()))
+				.distinct().toList()).stream()
 				.collect(Collectors.toMap(User::getId, User::getDisplayName));
 		List<ChatMessage.View> views = new ArrayList<>(page.stream()
-				.map(m -> m.view().kind() == null ? m.view().named(names.get(m.view().userId())) : m.view()).toList());
+				.map(m -> m.view().kind() == null ? m.view().named(names.get(m.view().userId())).shown(names::get) : m.view()).toList());
 		Collections.reverse(views);
 		return views;
 	}

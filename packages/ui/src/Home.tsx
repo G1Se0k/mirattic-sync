@@ -563,11 +563,37 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   // The host changed the room's type (decision 93): confirm, or leave the room — told wherever the panel is.
   const prefs = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.preferences?.alerts?.() ?? ALERT_DEFAULTS);
   const quiet = prefs.quiet;
-  // My status (decision 120): 오프라인으로 표시 is the server's (friends see me offline), 방해 금지 this device's.
-  const myStatus: MyStatus = me.appearOffline ? "hidden" : quiet ? "quiet" : "online";
+  // My status (decisions 120, 121): both kept with the account. 방해 금지 also goes to this device's alert settings
+  // (what the background reads to hold toasts back), following the account's whenever it differs.
+  const [pendingMode, setPendingMode] = useState<MyStatus | null>(null);
+  const myStatus: MyStatus = pendingMode ?? (me.appearOffline ? "hidden" : me.doNotDisturb ? "quiet" : "online");
+  // A choice still saving counts already (alerts held back as the menu says), its failure puts the account's back.
+  useEffect(() => {
+    const dnd = pendingMode ? pendingMode === "quiet" : !!me.doNotDisturb;
+    if (dnd !== quiet) void platform.preferences?.setAlerts?.({ quiet: dnd });
+  }, [pendingMode, me.doNotDisturb, quiet]);
   const [statusOpen, setStatusOpen] = useState(false);
-  /** The 오프라인으로 표시 last asked for, while its save is out: a quick second choice compares with it, not `me`. */
-  const wantHidden = useRef<boolean | null>(null);
+  const codePop = useRef<HTMLDivElement>(null);
+  const codeButton = useRef<HTMLSpanElement>(null);
+  // The friend code's popover: closed by a click elsewhere or Escape (back to its button).
+  useEffect(() => {
+    if (!showCode) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (e.key !== "Escape") return;
+        codeButton.current?.querySelector("button")?.focus();
+      } else if (codePop.current?.contains(e.target as Node) || codeButton.current?.contains(e.target as Node)) return;
+      setShowCode(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [showCode]);
+  /** The last status asked for, while its save is out: only its own answer settles what shows. */
+  const wantMode = useRef(0); // the latest choice's number
   const statusMenu = useRef<HTMLUListElement>(null);
   const statusButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -590,23 +616,18 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   function chooseStatus(mode: MyStatus) {
     setStatusOpen(false);
     statusButton.current?.focus();
-    const wasQuiet = quiet;
-    if ((mode === "quiet") !== quiet) void platform.preferences?.setAlerts?.({ quiet: mode === "quiet" });
-    const hidden = mode === "hidden";
-    if (hidden !== (wantHidden.current ?? !!me.appearOffline)) {
-      wantHidden.current = hidden;
-      // Saved in order (usePrivacySave): the last answer holds the last choice.
-      savePrivacy({ appearOffline: hidden }).then((saved) => {
-        if (wantHidden.current === hidden) wantHidden.current = null;
-        onMeChange(saved);
-      }, () => {
-        if (wantHidden.current !== hidden) return; // a later choice stands
-        wantHidden.current = null;
-        // Not saved: 방해 금지 as it was before this choice (on or off), and said so.
-        if (wasQuiet !== (mode === "quiet")) void platform.preferences?.setAlerts?.({ quiet: wasQuiet });
-        void asker.tell("상태를 바꾸지 못했습니다", hidden ? "친구에게는 계속 온라인으로 보입니다. 다시 시도해 주세요." : "친구에게는 계속 오프라인으로 보입니다. 다시 시도해 주세요.");
-      });
-    }
+    if (mode === myStatus) return;
+    const mine = ++wantMode.current;
+    setPendingMode(mode);
+    // One save for both (never on together); in order (usePrivacySave): the last answer holds the last choice.
+    savePrivacy({ appearOffline: mode === "hidden", doNotDisturb: mode === "quiet" }).then((saved) => {
+      onMeChange(saved);
+      if (wantMode.current === mine) setPendingMode(null);
+    }, () => {
+      if (wantMode.current !== mine) return; // a later choice stands
+      setPendingMode(null);
+      void asker.tell("상태를 바꾸지 못했습니다", "이전 상태 그대로입니다. 다시 시도해 주세요.");
+    });
   }
   // Turned off while it shows: gone for good (turning them on again doesn't bring it back).
   const bannerAllowed = !mentioned || !prefs.quiet && mentionAlerts(prefs, !!mentioned.everyone);
@@ -817,10 +838,13 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           <ul className="list box">
             {sorted.map((f) => (
               <li key={f.user.id} className="item">
-                <Avatar name={f.user.displayName} src={f.user.avatarUrl} on={f.presence.status !== "OFFLINE"} />
+                <Avatar name={f.user.displayName} src={f.user.avatarUrl} on={f.presence.status !== "OFFLINE"}
+                  tone={f.presence.doNotDisturb ? "quiet" : undefined} />
                 <div className="grow">
                   <div className="name ellipsis">{f.user.displayName}</div>
-                  {(f.presence.publicRoom ? ["공개방 참여중", f.presence.publicRoom.name ?? "영상 없음"] : describe(f.presence))
+                  {(f.presence.publicRoom
+                    ? [f.presence.doNotDisturb ? "방해 금지 · 공개방 참여중" : "공개방 참여중", f.presence.publicRoom.name ?? "영상 없음"]
+                    : describe(f.presence))
                     .map((line, i) => <div key={i} className="muted ellipsis">{line || "\u00a0"}</div>)}
                 </div>
                 <span className="actions">
@@ -875,7 +899,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         )}
       </main>
       <footer className="me-bar">
-        {showCode && <MyFriendCode me={me} />}
+        {showCode && (
+          // Over the me bar, as the status menu (not growing it).
+          <div className="code-pop" role="dialog" aria-label="내 친구 코드" ref={codePop}>
+            <MyFriendCode me={me} />
+          </div>
+        )}
         {statusOpen && (
           <ul className="menu-items status-menu" role="menu" aria-label="내 상태" ref={statusMenu}>
             {MY_STATUSES.map((s) => (
@@ -904,7 +933,9 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
               {me.presenceVisibility === "OFF" && <span className="muted">친구에게 숨김</span>}
             </span>
           </button>
-          <IconButton icon="hash" label={showCode ? "친구 코드 닫기" : "내 친구 코드"} onClick={() => setShowCode((v) => !v)} />
+          <span ref={codeButton} className="code-toggle">
+            <IconButton icon="hash" label={showCode ? "친구 코드 닫기" : "내 친구 코드"} onClick={() => setShowCode((v) => !v)} />
+          </span>
         </div>
       </footer>
       {asker.dialog /* last: over the dialog it asks from (코드로 입장, 공개 방) */}
@@ -918,7 +949,7 @@ type MyStatus = "online" | "quiet" | "hidden";
 /** The me bar's status menu (decision 120). */
 const MY_STATUSES: { mode: MyStatus; label: string; about: string }[] = [
   { mode: "online", label: "온라인", about: "기본" },
-  { mode: "quiet", label: "방해 금지", about: "초대 · 합류 요청 · 멘션 알림을 띄우지 않음" },
+  { mode: "quiet", label: "방해 금지", about: "알림을 띄우지 않음 · 친구에게 방해 금지로 보임" },
   { mode: "hidden", label: "오프라인으로 표시", about: "친구에게 오프라인으로 보임" },
 ];
 
@@ -1063,8 +1094,13 @@ const noneClosed = () => NONE_CLOSED;
  * A friend's (or my own) status lines: YouTube "YouTube · channel" above the title; Netflix and Laftel put the episode ("3화") below it,
  * an empty line when it has none.
  */
-export function describe(p: { status: PresenceView["status"]; media?: WatchingInfo & { positionMs?: number; episodeTitle?: string } }): string[] {
+export function describe(p: { status: PresenceView["status"]; doNotDisturb?: boolean; media?: WatchingInfo & { positionMs?: number; episodeTitle?: string } }): string[] {
   if (p.status === "OFFLINE") return ["오프라인"];
+  // 방해 금지 (decision 121): said first, before what they watch.
+  if (p.doNotDisturb) {
+    const [first = "", ...rest] = describe({ ...p, doNotDisturb: false });
+    return [p.media ? `방해 금지 · ${first}` : "방해 금지", ...rest];
+  }
   if (!p.media) return ["온라인"];
   const m = p.media;
   // No playback position anywhere: where they are in it isn't shown.

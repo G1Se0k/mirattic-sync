@@ -19,19 +19,61 @@ public class ChatMessage {
 	 */
 	/**
 	 * `userName`: a message's author's name now (decision 112), so one who left still shows by name; else null.
-	 * `mentions`: the members it names with "@name" (decision 118), null for none.
+	 * `mentions`: the members it names with "@name" (decision 118), null for none. `mentionSpans`: where the text
+	 * shows a mention kept by ID, as "@<their name now>" (decision 122) — `start` / `end` in UTF-16 units; null for none.
 	 */
 	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, String kind,
-			long createdAt, boolean deleted, String contentKey, String userName, List<String> mentions) {
+			long createdAt, boolean deleted, String contentKey, String userName, List<String> mentions,
+			List<Span> mentionSpans) {
 		View named(String name) {
-			return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, name, mentions);
+			return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, name, mentions, mentionSpans);
+		}
+
+		/** As shown (decision 122): each "\uE000<id>\uE000" in the text as "@<their name now>", and those names. */
+		View shown(java.util.function.Function<String, String> nameOf) {
+			if (mentions == null) {
+				return this;
+			}
+			StringBuilder out = new StringBuilder();
+			List<Span> spans = new java.util.ArrayList<>();
+			// The mentioned one's place in `mentions` between two marks.
+			java.util.regex.Matcher m = java.util.regex.Pattern.compile(MARK + "([0-9]{1,3})" + MARK).matcher(text);
+			int from = 0;
+			while (m.find()) {
+				out.append(text, from, m.start());
+				int at = Integer.parseInt(m.group(1));
+				String who = at < mentions.size() ? mentions.get(at) : null;
+				String name = who == null || who.equals(RoomService.EVERYONE) ? null : nameOf.apply(who);
+				int start = out.length();
+				out.append('@').append(name != null ? name : UNKNOWN);
+				if (name != null) {
+					spans.add(new Span(who, start, out.length()));
+				}
+				from = m.end();
+			}
+			out.append(text, from, text.length());
+			return new View(id, roomId, userId, out.toString(), mediaPositionMs, kind, createdAt, deleted, contentKey, userName,
+					mentions, spans.isEmpty() ? null : spans);
 		}
 	}
+
+	/** A mention shown in a text: `id`'s, from `start` to `end` (the "@" included). */
+	public record Span(String id, int start, int end) {
+	}
+
+	/**
+	 * Around a mentioned one's place in `mentions` in a stored text (decision 122): a private-use character no one can
+	 * send. "@name" (2 characters or more) becomes at most 5 — `mentions` has far fewer than 1000 — so a text sent
+	 * within 1000 characters is stored within 2500.
+	 */
+	static final String MARK = "\uE000";
+	private static final String UNKNOWN = "알 수 없음";
 
 	@Id
 	private String id;
 	private String roomId;
 	private String userId;
+	@Column(length = 4000)
 	private String text;
 	private Long mediaPositionMs;
 	private String kind;
@@ -66,7 +108,7 @@ public class ChatMessage {
 
 	View view() {
 		return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, null,
-				mentions == null ? null : Arrays.asList(mentions.split(",")));
+				mentions == null ? null : Arrays.asList(mentions.split(",")), null);
 	}
 
 	/** Names these members (none: nothing). */

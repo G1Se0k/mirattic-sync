@@ -86,6 +86,7 @@ section { margin-top: 4px; }
 .me-bar > section { max-width: 640px; margin: 4px auto 14px; }
 .me-bar > section h2 { margin-top: 4px; }
 .me-bar .friend { max-width: 640px; margin: 0 auto; padding: 0; }
+.me-bar .friend:hover { background: none; } /* my status button and the friend code button each light up alone */
 .avatar { position: relative; width: 28px; height: 28px; border-radius: 50%; background: var(--hover); border: 1px solid var(--line);
   display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--text-scale)); font-weight: 600; flex-shrink: 0; color: var(--fg); }
 .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
@@ -131,7 +132,7 @@ input.code::placeholder { font-family: inherit; letter-spacing: normal; }
 @keyframes reveal { from { opacity: 0; transform: translateY(-6px); } }
 @media (prefers-reduced-motion: reduce) {
   .fold, .card-head > .icon { transition: none; }
-  .menu-items, .member-box, .reveal, .me-bar > section { animation: none; }
+  .menu-items, .member-box, .reveal, .me-bar > section, .code-pop { animation: none; }
 }
 /* Menus */
 .menu { position: relative; }
@@ -229,6 +230,11 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .me-bar .quiet { color: var(--quiet); font-weight: 600; }
 .me-bar .hidden-status { font-weight: 600; }
 .status-menu { left: 16px; right: auto; top: auto; bottom: calc(100% - 4px); min-width: 220px; list-style: none; margin: 0; }
+/* Not a menu (its copy button keeps its own size): the menus' look, over the me bar. */
+.code-pop { position: absolute; z-index: 5; right: 16px; bottom: calc(100% - 4px); min-width: 220px; padding: 10px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.12); animation: drop-in 0.12s ease-out; }
+.code-pop > section { margin: 0; }
+.code-pop > section h2 { margin-top: 0; }
 .status-menu .text { display: flex; flex-direction: column; flex: 1; min-width: 0; text-align: left; }
 .status-menu .text strong { font-weight: 600; }
 .status-menu .pip { width: 10px; height: 10px; border-radius: 50%; flex: none; }

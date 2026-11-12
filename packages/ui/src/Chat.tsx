@@ -42,6 +42,51 @@ const STAMP_WAIT_MS = 5000;
 export function Chat({ roomId, meId, members, isHost, socket, status, subscribe, position, onSeek, video, canStamp, videoMs, memberBox, mention }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const shownLines = useMemo(() => messages.filter(visible), [messages]);
+  /** A mention that opens `id`'s box (a member's, or one gone from the room: as theirs on a line). */
+  const mentionLink = (item: ChatMessage, id: string, shown: string, at: string) => (
+    <button key={at} type="button" className={`mention${isPicked(item.id, at) ? " on" : ""}`} aria-haspopup="dialog"
+      aria-expanded={isPicked(item.id, at)} data-anchor={at} onClick={() => openBox(item.id, id, at, shown)}>
+      @{shown}
+    </button>
+  );
+  /**
+   * A message's text with its mentions: those kept by ID where the server says they are (decision 122), each its
+   * own; an older message's (kept as written) by the members' names now, only one whose name is theirs alone.
+   */
+  const withMentionsOf = (item: ChatMessage): ReactNode => {
+    if (item.mentionSpans?.length) {
+      // The host's "@everyone" (server-marked) found in the whole text, as a word of its own there, outside the spans.
+      const spans = item.mentionSpans;
+      const everyone = item.mentions?.includes(EVERYONE)
+        ? [...item.text.matchAll(mentionRe([EVERYONE], "gu"))].map((m) => ({ id: null, start: m.index, end: m.index + m[0].length }))
+          .filter((e) => !spans.some((s) => e.start < s.end && s.start < e.end))
+        : [];
+      const out: ReactNode[] = [];
+      let from = 0;
+      [...spans, ...everyone].sort((a, b) => a.start - b.start).forEach((s, i) => {
+        out.push(item.text.slice(from, s.start));
+        const shown = item.text.slice(s.start + 1, s.end);
+        out.push(s.id ? mentionLink(item, s.id, shown, `m${i}`) : <strong key={`e${i}`} className="mention">@{shown}</strong>);
+        from = s.end;
+      });
+      out.push(item.text.slice(from));
+      return out;
+    }
+    const nameOf = (id: string) => members.find((x) => x.user.id === id)?.user.displayName;
+    return withMentions(item.text, [
+      ...(item.mentions ?? []).flatMap((id) => {
+        const n = id === EVERYONE ? undefined : nameOf(id);
+        return n ? [n] : [];
+      }),
+      ...(item.mentions?.includes(EVERYONE) ? [EVERYONE] : []),
+    ], (shown, i) => {
+      // Not the host's @everyone (a member named "everyone" mentioned otherwise is theirs); two of a name: neither.
+      const named = shown === EVERYONE && item.mentions?.includes(EVERYONE) ? []
+        : (item.mentions ?? []).filter((id) => id !== EVERYONE && nameOf(id) === shown);
+      const id = named.length === 1 ? named[0] : undefined;
+      return id ? mentionLink(item, id, shown, `m${i}`) : <strong key={i} className="mention">@{shown}</strong>;
+    });
+  };
   const [text, setText] = useState("");
   const input = useRef<HTMLInputElement>(null);
   /** Where the caret is (what "@…" is being typed before it), and the suggestion chosen; closed by Esc until it changes. */
@@ -390,29 +435,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
                 ) : (
                   <>
                     {timestamp(item.mediaPositionMs, item.contentKey)}
-                    <span className="message">{withMentions(item.text, [
-                      ...(item.mentions ?? []).flatMap((id) => {
-                        const m = members.find((x) => x.user.id === id);
-                        return m ? [m.user.displayName] : [];
-                      }),
-                      // The host's "@everyone" (anyone else's is just text).
-                      ...(item.mentions?.includes(EVERYONE) ? [EVERYONE] : []), // marked by the server, as sent
-                    ], (shown, i) => {
-                      // A mentioned member still here: their box, as from their name on a message — only if the name
-                      // is theirs alone among those it mentions (two of the same name: neither), and not the host's
-                      // @everyone (a member named "everyone" mentioned otherwise is still theirs).
-                      const named = shown === EVERYONE && item.mentions?.includes(EVERYONE) ? []
-                        : members.filter((x) => x.user.displayName === shown && item.mentions?.includes(x.user.id));
-                      const m = named.length === 1 ? named[0] : undefined;
-                      if (!m) return <strong key={i} className="mention">@{shown}</strong>;
-                      const at = `m${i}`;
-                      return (
-                        <button key={i} type="button" className={`mention${isPicked(item.id, at) ? " on" : ""}`} aria-haspopup="dialog"
-                          aria-expanded={isPicked(item.id, at)} data-anchor={at} onClick={() => openBox(item.id, m.user.id, at, m.user.displayName)}>
-                          @{shown}
-                        </button>
-                      );
-                    })}</span>
+                    <span className="message">{withMentionsOf(item)}</span>
                   </>
                 )}
               </span>

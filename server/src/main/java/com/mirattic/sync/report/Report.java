@@ -25,6 +25,7 @@ class Report {
 	private String detail;
 	private String messageId;
 	private String roomId;
+	@jakarta.persistence.Column(length = 4000)
 	private String messageText;
 	private long createdAt;
 
