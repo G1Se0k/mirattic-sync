@@ -1050,6 +1050,8 @@ V28 `users.avatar_url`, 로그인(ID 토큰 `picture`)과 `/api/me`(UserInfo `pi
 - 정리한 Known Issues: 백업은 서버를 옮기며 AWS에서 관리, 신고 처리는 Mirattic Auth 관리 기능, "항상 허용하기"는 이미 계정별 `storage.local`에 저장(결정 93), 호스트가 목록으로만 나가는 것은 `room:leave`가 아님(결정 69 이후 방 나가기 · 닫힘에서만)
 
 ## Next Task
+- 확장 1.4.0 (2026-11-12 사용자 요청): 1.3.1 이후의 결정 116–124(프로필 사진 · 멘션 · 내 상태 · 알림 설정 · 다국어). 패치 노트에 1.4.0 섹션 추가, `apps/extension/.output`에 빌드(chrome-mv3 · 스토어 업로드용 zip). 스토어 제출(zip 업로드 · 설명 · 스크린샷)은 사용자가 직접 한다.
+
 Phase 10 남은 일 (사용자 결정 필요)
 2. Chrome Web Store 제출 준비: 개발자 계정 등록 → 공개키로 manifest `key` 교체 · 운영 `ALLOWED_ORIGINS`에 스토어 확장 ID, 개인정보처리방침 `[ ]` 채우고 게시(예: `https://sync.mirattic.com/privacy`), 스토어 설명 · 스크린샷, YouTube · Netflix · Laftel 정책 재검토
 3. Desktop 서명 · 공증 (Apple Developer ID, Windows 코드 서명 인증서)
