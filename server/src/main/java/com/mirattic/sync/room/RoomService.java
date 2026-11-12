@@ -1046,14 +1046,16 @@ public class RoomService {
 			page = messages.findBefore(roomId, cursor.createdAt(), cursor.id(), Limit.of(CHAT_HISTORY));
 		}
 		// Messages carry their author's name (decision 112): one who left the room still shows by it; and those they
-		// mention, theirs now (decision 122).
-		Map<String, String> names = users.findAllById(page.stream().filter(m -> m.view().kind() == null)
+		// mention, theirs now (decision 122); a line naming a member, theirs now too (decision 123).
+		Map<String, String> names = users.findAllById(page.stream()
+				.filter(m -> m.view().kind() == null || ChatMessage.NAMING.contains(m.view().kind()))
 				.flatMap(m -> java.util.stream.Stream.concat(java.util.stream.Stream.of(m.view().userId()),
 						m.view().mentions() == null ? java.util.stream.Stream.empty() : m.view().mentions().stream()))
 				.distinct().toList()).stream()
 				.collect(Collectors.toMap(User::getId, User::getDisplayName));
 		List<ChatMessage.View> views = new ArrayList<>(page.stream()
-				.map(m -> m.view().kind() == null ? m.view().named(names.get(m.view().userId())).shown(names::get) : m.view()).toList());
+				.map(m -> m.view().kind() == null ? m.view().named(names.get(m.view().userId())).shown(names::get)
+						: m.view().namedNow(names.get(m.view().userId()))).toList());
 		Collections.reverse(views);
 		return views;
 	}

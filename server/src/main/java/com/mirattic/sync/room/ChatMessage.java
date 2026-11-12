@@ -25,6 +25,12 @@ public class ChatMessage {
 	public record View(String id, String roomId, String userId, String text, Long mediaPositionMs, String kind,
 			long createdAt, boolean deleted, String contentKey, String userName, List<String> mentions,
 			List<Span> mentionSpans) {
+		/** A line naming its member (join / leave / kick / host / stamp) with the name they have now (null: as written). */
+		View namedNow(String name) {
+			return name == null || !NAMING.contains(kind) ? this
+					: new View(id, roomId, userId, name, mediaPositionMs, kind, createdAt, deleted, contentKey, userName, mentions, mentionSpans);
+		}
+
 		View named(String name) {
 			return new View(id, roomId, userId, text, mediaPositionMs, kind, createdAt, deleted, contentKey, name, mentions, mentionSpans);
 		}
@@ -56,6 +62,9 @@ public class ChatMessage {
 					mentions, spans.isEmpty() ? null : spans);
 		}
 	}
+
+	/** The log lines whose text is their member's name (decision 123: shown with the name now). */
+	static final java.util.Set<String> NAMING = java.util.Set.of("join", "leave", "kick", "host", "stamp");
 
 	/** A mention shown in a text: `id`'s, from `start` to `end` (the "@" included). */
 	public record Span(String id, int start, int end) {

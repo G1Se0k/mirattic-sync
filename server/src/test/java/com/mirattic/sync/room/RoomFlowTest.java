@@ -657,6 +657,31 @@ class RoomFlowTest extends IntegrationTest {
 	com.mirattic.sync.user.UserRepository userRepo;
 
 	@Test
+	void logLinesShowTheirMembersNameNow() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		JsonNode live = friendWs.nextOfType("chat:log").path("payload"); // its join line
+		assertThat(live.path("kind").asString()).isEqualTo("join");
+		assertThat(live.path("userId").asString()).isEqualTo(friend.id());
+		var u = userRepo.findById(friend.id()).orElseThrow();
+		u.syncName("바뀐이름");
+		userRepo.save(u);
+		JsonNode history = body(call(HttpMethod.GET, "/api/rooms/" + roomId + "/messages", host.accessToken(), null));
+		JsonNode join = null;
+		for (JsonNode m : history) {
+			if ("join".equals(m.path("kind").asString()) && friend.id().equals(m.path("userId").asString())) {
+				join = m;
+			}
+		}
+		assertThat(join).isNotNull();
+		assertThat(join.path("text").asString()).isEqualTo("바뀐이름");
+	}
+
+	@Test
 	void aMentionIsKeptByIdAndShownWithTheNameNow() throws Exception {
 		TestUser host = signup();
 		TestUser friend = signup();
