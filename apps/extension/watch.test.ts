@@ -1703,3 +1703,14 @@ describe('watch: the panel detached into its own window', () => {
     expect(w.tabs!.followed()).toBe(7);
   });
 });
+
+describe('alert settings (decision 119)', () => {
+  it('keeps each stored boolean, else its default', async () => {
+    const { alertPrefs, mentionAlerts } = await import('@mirattic/types');
+    expect(alertPrefs(undefined)).toEqual({ quiet: false, mentions: true, everyone: true });
+    expect(alertPrefs({ quiet: true, mentions: 'no' })).toEqual({ quiet: true, mentions: true, everyone: true });
+    expect(mentionAlerts({ quiet: false, mentions: true, everyone: false }, true)).toBe(false);
+    expect(mentionAlerts({ quiet: false, mentions: true, everyone: false }, false)).toBe(true);
+    expect(mentionAlerts({ quiet: false, mentions: false, everyone: true }, false)).toBe(false);
+  });
+});

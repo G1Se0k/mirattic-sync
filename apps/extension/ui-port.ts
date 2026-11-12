@@ -1,6 +1,6 @@
 import type { SocketStatus } from '@mirattic/client';
 import type { RoomSyncState } from '@mirattic/sync-core';
-import type { ClientEvent, MediaProvider, RoomContent, ServerEvent, WatchingInfo } from '@mirattic/types';
+import type { AlertPrefs, ClientEvent, MediaProvider, RoomContent, ServerEvent, WatchingInfo } from '@mirattic/types';
 import type { VideoTab } from '@mirattic/ui';
 
 // Side panel ⇄ background (plan.md decision 69). The background owns the API client (the only one that
@@ -17,6 +17,7 @@ export const UI_PORT = 'mirattic-ui';
 export const experimentKey = (provider: 'netflix' | 'laftel') => `mirattic.experiment.${provider}`;
 /** Whether members are asked before following the host to another video. */
 export const ASK_ON_SWITCH_KEY = 'mirattic.askOnSwitch';
+export const ALERTS_KEY = 'mirattic.alerts';
 
 export const ROOM_ACTIONS = ['requestPause', 'dismissPauseRequest', 'pauseAll', 'seek', 'openSwitched', 'dismissSwitched',
   'reload'] as const;
@@ -56,6 +57,7 @@ export type Shared = {
   watchingInfo: WatchingInfo | null;
   offSite: { provider: MediaProvider; visit: number } | null;
   askOnSwitch: boolean;
+  alerts?: AlertPrefs;
   /** Video tabs that can be followed, the one followed, and whether it follows the active one. */
   tabs: VideoTab[];
   followedTab: number | null;
@@ -72,9 +74,9 @@ export type Shared = {
   /** Rooms of mine their host closed (decision 90), until a panel showed the notice (`closed:seen`). */
   closedRooms: { roomId: string; title: string; userId: string }[];
   /** A mention alerted before this panel opened (decision 118), sent with its first state only; else absent. */
-  mention?: { roomId: string; name: string; title?: string; userId: string; until: number } | null;
+  mention?: { roomId: string; name: string; title?: string; userId: string; until: number; everyone?: boolean } | null;
   /** A mention toast's 채팅 보기 answered as this panel opened: that room's screen (before any banner). */
-  mentionOpen?: { roomId: string; name: string; title?: string; userId: string; until: number; open: true } | null;
+  mentionOpen?: { roomId: string; name: string; title?: string; userId: string; until: number; open: true; everyone?: boolean } | null;
 };
 
 export type ToPanel =

@@ -1,5 +1,5 @@
 import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { Me, UserSummary } from "@mirattic/types";
+import { ALERT_DEFAULTS, type AlertPrefs, type Me, type UserSummary } from "@mirattic/types";
 import { DeleteAccount, FriendRequestsFrom, Privacy, type SavePrivacy } from "./Privacy";
 import { ExperimentalSettings } from "./Experimental";
 import { FeedbackSection } from "./Feedback";
@@ -43,6 +43,7 @@ export function Settings({ me, blocked, onMeChange, savePrivacy: save, onUnblock
           <Privacy me={me} save={save} onChange={onMeChange} />
           <AskOnSwitch />
         </Group>
+        {platform.preferences?.alerts && <Group title="알림"><Alerts /></Group>}
         {platform.textSize && <Group title="화면"><TextSize /></Group>}
         {platform.experimental && <Group title="실험 기능"><ExperimentalSettings /></Group>}
         <Group title="개인정보">
@@ -150,6 +151,32 @@ function AskOnSwitch() {
         <span aria-hidden="true" />
       </span>
     </label>
+  );
+}
+
+/** What alerts this device shows (decision 119), saved at once. */
+function Alerts() {
+  const prefs = platform.preferences;
+  const now = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => prefs?.alerts?.() ?? ALERT_DEFAULTS);
+  const set = (change: Partial<AlertPrefs>) => void prefs?.setAlerts?.(change);
+  const row = (key: keyof AlertPrefs, title: string, about?: string, sub?: boolean, disabled?: boolean) => (
+    <label className={`item${sub ? " sub" : ""}`}>
+      <span className="text">
+        {title}
+        {about && <span className="muted">{about}</span>}
+      </span>
+      <span className="switch">
+        <input type="checkbox" role="switch" checked={now[key]} disabled={disabled} onChange={(e) => set({ [key]: e.target.checked })} />
+        <span aria-hidden="true" />
+      </span>
+    </label>
+  );
+  return (
+    <>
+      {row("quiet", "방해 금지", "영상 위 토스트(초대 · 합류 요청 · 멘션)와 멘션 배너를 띄우지 않습니다. 툴바 배지는 그대로 세고, 열어 둔 패널의 초대 · 합류 요청 창은 그대로 뜹니다.")}
+      {row("mentions", "멘션 알림", "나를 언급하면 토스트 · 배지 · 배너로 알립니다. 꺼도 채팅의 노란 강조는 남습니다.")}
+      {row("everyone", "방장의 @everyone도 알림", undefined, true, !now.mentions)}
+    </>
   );
 }
 

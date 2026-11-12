@@ -105,6 +105,8 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   const deleted = useRef<ChatDeleted[]>([]);
   const list = useRef<HTMLUListElement>(null);
   const atBottom = useRef(true);
+  /** Messages mentioning me that came while I was scrolled up, oldest first: the "@ 새 멘션" button goes to each. */
+  const [unseenMentions, setUnseenMentions] = useState<string[]>([]);
   const shown = useRef<{ first?: string; last?: string; height: number }>({ height: 0 });
 
   // History on open and after every reconnect (messages sent meanwhile never reached us).
@@ -129,11 +131,15 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
         setMessages((list) => receive(list, deleted.current, event));
         if (event.type === "chat:message" || event.type === "chat:log") {
           const id = (event.payload as ChatMessage).id;
+          const msg = event.payload as ChatMessage;
+          if (event.type === "chat:message" && !atBottom.current && msg.userId !== meId && msg.mentions?.includes(meId)) {
+            setUnseenMentions((ids) => (ids.includes(id) ? ids : [...ids, id]));
+          }
           setFresh((ids) => new Set(ids).add(id));
           setTimeout(() => setFresh((ids) => new Set([...ids].filter((x) => x !== id))), FLASH_MS);
         }
       }),
-    [roomId, subscribe],
+    [roomId, subscribe, meId],
   );
   useEffect(() => () => clearTimeout(stampWait.current?.timer), []);
   // The video went away (no tab, no video, another one): the dialog closes; a stamp already sent counts as failed here
@@ -173,7 +179,18 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   function onScroll() {
     const el = list.current!;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-    if (atBottom.current) setUnseen(false);
+    if (atBottom.current) {
+      setUnseen(false);
+      setUnseenMentions([]);
+    }
+  }
+  /** To the oldest mention not yet gone to (one deleted or no longer loaded is skipped). */
+  function toMention() {
+    const ids = [...unseenMentions];
+    let line: HTMLElement | null | undefined = null;
+    while (ids.length && !line) line = list.current?.querySelector<HTMLElement>(`[data-line="${ids.shift()}"]`);
+    setUnseenMentions(ids);
+    line?.scrollIntoView({ block: "center" });
   }
 
   async function loadOlder() {
@@ -256,12 +273,16 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     onSeek?.(ms); // the host's click moves everyone there
   }
 
-  // A name's box (the message it was opened on): floats under the name, or over it without room below in view. It
-  // sits in the list, so it scrolls with its line; it closes as the members' does, and when that member leaves.
-  const [picked, setPicked] = useState<{ line: string; userId: string } | null>(null);
+  // A name's box (the message it was opened on, and the name there: its author or an "@name" in it): floats under the
+  // name, or over it without room below in view. It sits in the list, so it scrolls with its line; it closes as the
+  // members' does, and when that member leaves.
+  const [picked, setPicked] = useState<{ line: string; userId: string; at: string } | null>(null);
+  const openBox = (line: string, userId: string, at: string) =>
+    setPicked((p) => (p?.line === line && p.at === at ? null : { line, userId, at }));
+  const isPicked = (line: string, at: string) => picked?.line === line && picked.at === at;
   const box = useRef<HTMLLIElement>(null);
   const pickedMember = picked && members.find((m) => m.user.id === picked.userId);
-  const nameOf = () => list.current?.querySelector<HTMLElement>(`[data-line="${picked?.line}"] .author`);
+  const nameOf = () => list.current?.querySelector<HTMLElement>(`[data-line="${picked?.line}"] [data-anchor="${picked?.at}"]`);
   useLayoutEffect(() => {
     const nick = nameOf();
     const el = box.current;
@@ -280,7 +301,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     el.style.left = `${Math.max(0, Math.min(n.left - u.left - 6, ul.clientWidth - el.offsetWidth))}px`;
   });
   useEffect(() => {
-    if (picked && !pickedMember) setPicked(null); // they left
+    if (picked && (!pickedMember || !nameOf())) setPicked(null); // they left, or the name it opened from is gone (deleted)
   });
   useEffect(() => {
     if (!picked) return;
@@ -347,9 +368,8 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
               data-line={item.id}>
               <span className="grow">
                 {members.some((m) => m.user.id === item.userId) ? (
-                  <button type="button" className={`author${picked?.line === item.id ? " on" : ""}`} aria-haspopup="dialog"
-                    aria-expanded={picked?.line === item.id}
-                    onClick={() => setPicked((p) => (p?.line === item.id ? null : { line: item.id, userId: item.userId }))}>
+                  <button type="button" className={`author${isPicked(item.id, "author") ? " on" : ""}`} aria-haspopup="dialog"
+                    aria-expanded={isPicked(item.id, "author")} data-anchor="author" onClick={() => openBox(item.id, item.userId, "author")}>
                     {name(item.userId, item.userName)}
                   </button>
                 ) : <span className="author">{name(item.userId, item.userName)}</span>}
@@ -365,7 +385,22 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
                       }),
                       // The host's "@everyone" (anyone else's is just text).
                       ...(item.mentions?.includes(EVERYONE) ? [EVERYONE] : []), // marked by the server, as sent
-                    ])}</span>
+                    ], (shown, i) => {
+                      // A mentioned member still here: their box, as from their name on a message — only if the name
+                      // is theirs alone among those it mentions (two of the same name: neither), and not the host's
+                      // @everyone (a member named "everyone" mentioned otherwise is still theirs).
+                      const named = shown === EVERYONE && item.mentions?.includes(EVERYONE) ? []
+                        : members.filter((x) => x.user.displayName === shown && item.mentions?.includes(x.user.id));
+                      const m = named.length === 1 ? named[0] : undefined;
+                      if (!m) return <strong key={i} className="mention">@{shown}</strong>;
+                      const at = `m${i}`;
+                      return (
+                        <button key={i} type="button" className={`mention${isPicked(item.id, at) ? " on" : ""}`} aria-haspopup="dialog"
+                          aria-expanded={isPicked(item.id, at)} data-anchor={at} onClick={() => openBox(item.id, m.user.id, at)}>
+                          @{shown}
+                        </button>
+                      );
+                    })}</span>
                   </>
                 )}
               </span>
@@ -383,7 +418,9 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
           </li>
         )}
       </ul>
-      {unseen && (
+      {unseenMentions.length > 0 ? (
+        <button className="mention-jump" onClick={toMention}><b aria-hidden="true">@</b> 새 멘션 {unseenMentions.length}개</button>
+      ) : unseen && (
         <button className="link" onClick={() => list.current?.scrollTo({ top: list.current.scrollHeight })}>새 메시지 ↓</button>
       )}
       <div className="composer">
@@ -561,10 +598,11 @@ export function mentionChoices(query: string, members: RoomMemberView[], meId: s
   return [...all, ...people].slice(0, 6);
 }
 
-/** The text with each "@name" of these (the mentioned members') in bold. */
-export function withMentions(text: string, names: string[]): ReactNode {
+/** The text with each "@name" of these (the mentioned members') shown by `show` (its name, its index in the parts). */
+export function withMentions(text: string, names: string[],
+  show: (name: string, i: number) => ReactNode = (name, i) => <strong key={i} className="mention">@{name}</strong>): ReactNode {
   if (!names.length) return text;
   const parts = text.split(mentionRe([...names].sort((a, b) => b.length - a.length), "gu"));
   // split with one group: the names at odd places
-  return parts.map((part, i) => (i % 2 ? <strong key={i} className="mention">@{part}</strong> : part));
+  return parts.map((part, i) => (i % 2 ? show(part, i) : part));
 }

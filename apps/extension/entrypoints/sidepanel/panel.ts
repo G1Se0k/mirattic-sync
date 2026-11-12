@@ -3,6 +3,8 @@ import { ApiError, type ApiClient, type Socket, type SocketStatus } from '@mirat
 import { emptyRoomState, type RoomSyncState } from '@mirattic/sync-core';
 import { INCOMING_MS, type ChatMessage, type MediaProvider, type ServerEvent } from '@mirattic/types';
 import { textSizeOf, type Platform, type RoomHandle, type VideoTab } from '@mirattic/ui';
+import { ALERT_DEFAULTS } from '@mirattic/types';
+import { saveAlerts } from '../../alerts';
 import { ASK_ON_SWITCH_KEY, experimentKey, TEXT_SIZE_ITEM, UI_PORT, type FromPanel, type RoomAction, type Shared, type ToPanel } from '../../ui-port';
 import { INVITE_KEY, INVITE_TAKEN_KEY, INVITE_TTL_MS, pendingInvite, takenKey, type Invitation } from '../../invite';
 import { API_URL } from '../../server';
@@ -82,7 +84,7 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
   /** A mention alerted before this panel opened (decision 118): Home's banner as it first shows. */
   // Oldest first (the background's handoff, then messages before Home listens); the newest for the account wins.
   // ponytail: kept to the last 20, plenty for a panel's startup.
-  let firstMentions: { roomId: string; name: string; title?: string; until: number; open?: boolean; for: (userId: string) => boolean }[] = [];
+  let firstMentions: { roomId: string; name: string; title?: string; until: number; open?: boolean; everyone?: boolean; for: (userId: string) => boolean }[] = [];
   /** A mention toast's 채팅 보기 answered as this panel opened: taken before any mention above. */
   let openChoice: (typeof firstMentions)[number] | null = null;
   const keepMention = (m: (typeof firstMentions)[number]) => { firstMentions = [...firstMentions, m].slice(-20); };
@@ -214,7 +216,7 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
           const ids = msg.mentions ?? [];
           if (ids.length) {
             keepMention({
-              roomId: m.event.roomId, name: msg.userName ?? '친구', until: Date.now() + INCOMING_MS,
+              roomId: m.event.roomId, name: msg.userName ?? '친구', until: Date.now() + INCOMING_MS, everyone: ids.includes('everyone'),
               for: (id) => ids.includes(id) && msg.userId !== id,
             });
           }
@@ -288,6 +290,8 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       askOnSwitch: () => shared.askOnSwitch,
       // Written to storage.local here, not sent over the port: a background restarting meanwhile can't drop it.
       setAskOnSwitch: (ask) => browser.storage.local.set({ [ASK_ON_SWITCH_KEY]: ask }),
+      alerts: () => shared.alerts ?? ALERT_DEFAULTS,
+      setAlerts: (change) => saveAlerts(change),
     },
     tabs: {
       list: () => shared.tabs, // every window's video tabs
@@ -333,7 +337,7 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
       const m = (openChoice && ok(openChoice) ? openChoice : null) ?? firstMentions.findLast(ok);
       firstMentions = [];
       openChoice = null;
-      return m ? { roomId: m.roomId, name: m.name, title: m.title, open: m.open } : null;
+      return m ? { roomId: m.roomId, name: m.name, title: m.title, open: m.open, everyone: m.everyone } : null;
     },
     roomTypeNotice: () => shared.typeNotices[0] ?? null, // one at a time, the others after it's answered
     answerRoomType: (roomId, version, leave, always) => send({ op: 'type:answer', roomId, version, leave, always }),

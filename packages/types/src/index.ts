@@ -327,3 +327,16 @@ export function roomToInvite(rooms: RoomView[], meId: string, openRoom: string |
   const pick = (list: RoomView[]) => list.find((r) => r.members.length < memberLimitOf(r)) ?? list[0];
   return pick(fits) ?? pick(mine);
 }
+
+/** What alerts this device shows (decision 119). */
+export type AlertPrefs = { quiet: boolean; mentions: boolean; everyone: boolean };
+export const ALERT_DEFAULTS: AlertPrefs = { quiet: false, mentions: true, everyone: true };
+/** A mention's alert shows: mentions on, and for the host's @everyone that one too. */
+export const mentionAlerts = (prefs: AlertPrefs, everyone: boolean) => prefs.mentions && (!everyone || prefs.everyone);
+
+/** Stored alert settings, each one its default unless stored as a boolean (decision 119). */
+export function alertPrefs(stored: unknown): AlertPrefs {
+  const o = (stored && typeof stored === "object" ? stored : {}) as Partial<Record<keyof AlertPrefs, unknown>>;
+  const pick = (k: keyof AlertPrefs) => (typeof o[k] === "boolean" ? (o[k] as boolean) : ALERT_DEFAULTS[k]);
+  return { quiet: pick("quiet"), mentions: pick("mentions"), everyone: pick("everyone") };
+}

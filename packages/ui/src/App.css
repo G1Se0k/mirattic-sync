@@ -20,13 +20,14 @@
   --flash: #fff4c7;
   --mention-bg: #fff4c7; /* a message that mentions me (decision 118) */
   --mention-fg: #2563eb; /* an "@name" */
+  --quiet: #b4541a;
   color: var(--fg);
   background: var(--bg);
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --fg: #ececea; --bg: #171717; --surface: #202020; --muted: #a8a8a5; --line: #2e2e2d; --hover: #2a2a29;
-    --strong: #ececea; --on-strong: #171717; --accent: #8cc4a8; --accent-tint: rgba(140, 196, 168, 0.14); --danger: #e0786f; --on-danger: #1c1210; --on: #5cc389; --flash: #4a4125; --mention-bg: #4a4125; --mention-fg: #7aa7ff;
+    --strong: #ececea; --on-strong: #171717; --accent: #8cc4a8; --accent-tint: rgba(140, 196, 168, 0.14); --danger: #e0786f; --on-danger: #1c1210; --on: #5cc389; --flash: #4a4125; --mention-bg: #4a4125; --mention-fg: #7aa7ff; --quiet: #f0a36b;
   }
 }
 * { box-sizing: border-box; }
@@ -172,6 +173,7 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 .member-box { position: absolute; z-index: 5; max-width: calc(100% - 4px); display: flex; flex-direction: column; align-items: stretch;
   gap: 8px; min-width: 180px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
   font-size: calc(12px * var(--text-scale)); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
+.members-wrap .member-box { position: fixed; overflow-y: auto; } /* over the chat, not clipped by the room body */
 .member-box:focus { outline: none; }
 .member-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .member-box .who-card { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -211,6 +213,14 @@ main.room { width: 100%; max-width: none; padding: 0; flex: 1; min-height: 0; di
 /* Mentioning me (decision 118): an accent edge and tint; any "@name" it names in bold. */
 .chat li.mentioned { background: var(--mention-bg); border-radius: 0; }
 .chat .mention { color: var(--mention-fg); font-weight: 600; }
+.chat li.mentioned.fresh { animation: none; } /* already yellow: no flash fading out of it */
+/* Over the chat's bottom edge, as "새 메시지 ↓" sits: to the next mention of me that came while scrolled up. */
+.mention-jump { align-self: center; display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--mention-bg); color: var(--fg); font-weight: 600; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12); }
+.mention-jump b { color: var(--mention-fg); }
+.me-bar .quiet { color: var(--quiet); font-weight: 600; } /* 방해 금지 (decision 119) */
+.chat button.mention { padding: 0; border: none; background: none; font: inherit; font-weight: 600; cursor: pointer; }
+.chat button.mention:hover, .chat button.mention.on { text-decoration: underline; }
 /* "@" typed: the members to name, over the input. */
 .mention-suggest { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 5; list-style: none; margin: 0; padding: 4px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12); }
@@ -296,6 +306,8 @@ button.item:hover { background: var(--hover); }
 button.item > .icon { color: var(--muted); transition: transform 0.18s; flex-shrink: 0; }
 button.item[aria-expanded="true"] > .icon { transform: rotate(90deg); }
 label.item { cursor: pointer; }
+.item.sub { padding-left: 24px; }
+label.item:has(input:disabled) { cursor: default; opacity: 0.5; }
 .fold-body { margin: 0; padding: 12px 12px 14px; border-top: 1px solid var(--line); }
 ul.fold-body { display: flex; flex-direction: column; gap: 8px; }
 .risk { color: var(--muted); font-size: calc(12px * var(--text-scale)); }

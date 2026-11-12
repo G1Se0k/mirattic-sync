@@ -531,6 +531,8 @@ class RoomFlowTest extends IntegrationTest {
 
 	@Autowired
 	RoomLog roomLog;
+	@Autowired
+	com.mirattic.sync.ws.SocketHub hub;
 
 	@Test
 	void joinsLeavesAndVideoChangesAreLoggedInTheChatButNotPlayback() throws Exception {
@@ -678,6 +680,81 @@ class RoomFlowTest extends IntegrationTest {
 			Thread.sleep(20);
 		}
 		assertThat(loggedKinds(host, roomId)).containsExactly("join", "leave", "join");
+	}
+
+	@Test
+	void leavingTheRoomLogsItsLeaveAtOnce() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client hostWs = connect(host);
+		hostWs.send(event("room:join", roomId, "{}"));
+		hostWs.nextOfType("playback:update");
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		while (!hostWs.nextOfType("chat:log").path("payload").path("userId").asString().equals(friend.id())) {
+			// the host's own join, before it
+		}
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/me", friend.accessToken(), null).andExpect(status().isNoContent());
+		JsonNode line = hostWs.nextOfType("chat:log").path("payload"); // no sweep: not after the reconnect wait
+		assertThat(line.path("kind").asString()).isEqualTo("leave");
+		assertThat(line.path("userId").asString()).isEqualTo(friend.id());
+		roomLog.sweep();
+		assertThat(loggedKinds(host, roomId).stream().filter("leave"::equals).count()).isEqualTo(1);
+	}
+
+	@Test
+	void aMemberNotBackAfterARestartGetsTheirLeave() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("join");
+		roomLog.forget(roomId, friend.id()); // the server's memory of it gone, as after a restart
+		friendWs.session().close();
+		for (int i = 0; i < 100 && hub.presentIn(roomId).contains(friend.id()); i++) {
+			Thread.sleep(20);
+		}
+		roomLog.sweepUnseen();
+		assertThat(loggedKinds(host, roomId)).containsExactly("join", "leave");
+		roomLog.sweepUnseen(); // its leave the latest now: not again
+		assertThat(loggedKinds(host, roomId)).containsExactly("join", "leave");
+	}
+
+	@Test
+	void leavingBeforeTheRestartSweepStillLogsItsLeave() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("join");
+		roomLog.forget(roomId, friend.id()); // the server's memory of it gone, as after a restart
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/me", friend.accessToken(), null).andExpect(status().isNoContent());
+		assertThat(loggedKinds(host, roomId)).containsExactly("join", "leave");
+		roomLog.sweepUnseen();
+		assertThat(loggedKinds(host, roomId)).containsExactly("join", "leave");
+	}
+
+	@Test
+	void aMemberBackAfterAKickLeavingBeforeComingInLogsNoLeave() throws Exception {
+		TestUser host = signup();
+		TestUser friend = signup();
+		befriend(host, friend);
+		String roomId = body(createRoom(host, friend)).path("id").asString();
+		Client friendWs = connect(friend);
+		friendWs.send(event("room:join", roomId, "{}"));
+		assertThat(friendWs.nextOfType("chat:log").path("payload").path("kind").asString()).isEqualTo("join");
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/" + friend.id(), host.accessToken(), null).andExpect(status().is2xxSuccessful());
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invites", host.accessToken(), "{\"userIds\":[\"" + friend.id() + "\"]}")
+				.andExpect(status().is2xxSuccessful()); // asked back (unbans)
+		call(HttpMethod.POST, "/api/rooms/" + roomId + "/invitation", friend.accessToken(), null).andExpect(status().isOk());
+		call(HttpMethod.DELETE, "/api/rooms/" + roomId + "/members/me", friend.accessToken(), null).andExpect(status().isNoContent());
+		assertThat(loggedKinds(host, roomId)).doesNotContain("leave"); // this membership never came in
 	}
 
 	@Test

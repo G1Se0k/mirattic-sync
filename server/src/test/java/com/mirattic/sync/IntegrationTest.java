@@ -38,7 +38,8 @@ import tools.jackson.databind.json.JsonMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
 		"app.auth-rate-limit-per-minute=100000",
 		"app.auth.client-secret=" + AuthStub.CLIENT_SECRET, "app.auth.redirect-uri=https://sync.test/auth/callback",
-		"app.empty-room-sweep-ms=3600000", "app.room-log-sweep-ms=3600000", "app.room-log-grace-ms=0" }) // tests sweep by hand
+		"app.empty-room-sweep-ms=3600000", "app.room-log-sweep-ms=3600000", "app.room-log-grace-ms=0",
+		"app.room-log-restart-ms=3600000" }) // tests sweep by hand
 @AutoConfigureMockMvc
 public abstract class IntegrationTest {
 

@@ -13,8 +13,9 @@ import org.springframework.stereotype.Component;
  * Joins and leaves: a user joins with their first connection in the room; they leave once none of their
  * connections has been in it for the grace period, so a reconnect or the extension's worker restarting writes nothing.
  * The host's play / pause / seek write no line (decision 103); a video change writes its "content" line.
+ * Leaving the room (or joining another) writes the "leave" at once: no wait for a reconnect that can't come.
  * ponytail: in memory, single instance. After a restart, one reconnecting whose latest line is their "join" is followed
- * without a second one (RoomService.loggedIn); one who never reconnects gets no "leave" line.
+ * without a second one (RoomService.loggedIn); one who hasn't reconnected a minute after it gets their "leave" then.
  * Lines are written under one lock (a few per minute), so a leave can't land after a newer join.
  */
 @Component
@@ -30,10 +31,16 @@ public class RoomLog {
 	/** Room → the newest content change logged: one applied earlier but arriving here later is dropped. */
 	private final Map<String, Long> versions = new ConcurrentHashMap<>();
 
-	RoomLog(RoomService rooms, SocketHub hub, @Value("${app.room-log-grace-ms:10000}") long graceMs) {
+	private final long restartMs;
+	private final long startedAt = System.currentTimeMillis();
+	private volatile boolean restartChecked;
+
+	RoomLog(RoomService rooms, SocketHub hub, @Value("${app.room-log-grace-ms:10000}") long graceMs,
+			@Value("${app.room-log-restart-ms:60000}") long restartMs) {
 		this.rooms = rooms;
 		this.hub = hub;
 		this.graceMs = graceMs;
+		this.restartMs = restartMs;
 	}
 
 	/**
@@ -68,6 +75,37 @@ public class RoomLog {
 		}
 	}
 
+	/**
+	 * Left the room (no longer a member, not by a kick): their "leave" now, if they were logged as in it — known here,
+	 * or, not yet followed since a restart, `loggedIn` (this membership's latest line a "join", asked as it ended).
+	 */
+	public synchronized void left(String roomId, String userId, boolean loggedIn) {
+		if (rooms.isMemberOf(userId, roomId)) {
+			return; // back in already (a new membership, logged by its own join): this leave is past
+		}
+		// Not tracked: written from `loggedIn` only while their latest line is still that "join" — a sweep (under this
+		// lock) may have written the leave meanwhile.
+		if (inRoom.remove(roomId + "|" + userId) != null || loggedIn && rooms.lastLineIsJoin(roomId, userId)) {
+			post(roomId, rooms.logPresence(roomId, userId, "leave"));
+		}
+	}
+
+	/**
+	 * Once, a while after a restart: members logged as in their room before it (latest line their "join") who haven't
+	 * come back get their "leave".
+	 */
+	public synchronized void sweepUnseen() {
+		for (String[] m : rooms.memberships()) {
+			String roomId = m[0];
+			String userId = m[1];
+			if (!inRoom.containsKey(roomId + "|" + userId) && !hub.presentIn(roomId).contains(userId)
+					&& rooms.loggedIn(roomId, userId)) {
+				post(roomId, rooms.logPresence(roomId, userId, "leave"));
+			}
+		}
+		restartChecked = true; // only once all went through: a failure is tried again next sweep (written ones are skipped)
+	}
+
 	/** Kicked: their "kick" line says it, no "leave" line after it. */
 	public synchronized void forget(String roomId, String userId) {
 		inRoom.remove(roomId + "|" + userId);
@@ -76,6 +114,9 @@ public class RoomLog {
 	@Scheduled(fixedDelayString = "${app.room-log-sweep-ms:5000}")
 	public void sweep() {
 		long now = System.currentTimeMillis();
+		if (!restartChecked && now - startedAt >= restartMs) {
+			sweepUnseen();
+		}
 		for (Map.Entry<String, Long> e : inRoom.entrySet()) {
 			String key = e.getKey();
 			String roomId = key.substring(0, key.indexOf('|'));

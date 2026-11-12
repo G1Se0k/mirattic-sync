@@ -1,9 +1,10 @@
 import { browser, type Browser } from 'wxt/browser';
 import type { Socket } from '@mirattic/client';
 import type { Platform, VideoTab } from '@mirattic/ui';
-import { contentTitle, type MediaPresence, type MediaProvider, type RoomContent, type WatchingInfo } from '@mirattic/types';
+import { alertPrefs, contentTitle, type MediaPresence, type MediaProvider, type RoomContent, type WatchingInfo } from '@mirattic/types';
 import { pauseTab, RemoteAdapter } from './bridge';
-import { ASK_ON_SWITCH_KEY, experimentKey, followActiveSetting } from './ui-port';
+import { saveAlerts } from './alerts';
+import { ALERTS_KEY, ASK_ON_SWITCH_KEY, experimentKey, followActiveSetting } from './ui-port';
 import { describeMetadata, metadataInPage, type NetflixMetadata } from './providers/netflix';
 
 const YOUTUBE = 'https://www.youtube.com/';
@@ -77,9 +78,10 @@ export async function watch(opts: {
   const subscribers = new Set<() => void>();
   const changed = () => subscribers.forEach((s) => s());
   // ponytail: off after the update that made the sites' access permanent, even for who had it on (re-enable once).
-  const stored = await browser.storage.local.get([...EXPERIMENTS.map(experimentKey), ASK_ON_SWITCH_KEY, followActiveSetting]);
+  const stored = await browser.storage.local.get([...EXPERIMENTS.map(experimentKey), ASK_ON_SWITCH_KEY, followActiveSetting, ALERTS_KEY]);
   const on = new Set(EXPERIMENTS.filter((p) => stored[experimentKey(p)] === true));
   let askOnSwitch = stored[ASK_ON_SWITCH_KEY] !== false;
+  let alerts = alertPrefs(stored[ALERTS_KEY]);
   let followActive = stored[followActiveSetting] === true;
   /**
    * In a room (decision 95): the chosen tab is followed (fixed, unless "활성 탭 자동 따라가기"). Out of one, what I
@@ -433,6 +435,10 @@ export async function watch(opts: {
       askOnSwitch = ask.newValue !== false;
       changed();
     }
+    if (changes[ALERTS_KEY]) {
+      alerts = alertPrefs(changes[ALERTS_KEY].newValue);
+      changed();
+    }
   });
 
   /** Another window's active video tab while the active tab is what is followed: the panel can move there. */
@@ -720,6 +726,8 @@ export async function watch(opts: {
       setAskOnSwitch: async (ask) => {
         await browser.storage.local.set({ [ASK_ON_SWITCH_KEY]: ask }); // applied by storage.onChanged
       },
+      alerts: () => alerts,
+      setAlerts: (change) => saveAlerts(change),
     },
     subscribe: (onChange) => {
       subscribers.add(onChange);
@@ -762,3 +770,4 @@ export async function watch(opts: {
     },
   };
 }
+

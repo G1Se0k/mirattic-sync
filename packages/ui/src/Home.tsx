@@ -10,7 +10,7 @@ import type {
   ServerEvent,
   UserSummary,
 } from "@mirattic/types";
-import { contentKey, episodeLabel, INCOMING_MS, MAX_MEMBERS, memberLimitOf, roomTitle, roomToInvite, shownContent, type IncomingRequest, type RoomSettings, type WatchingInfo } from "@mirattic/types";
+import { ALERT_DEFAULTS, contentKey, episodeLabel, mentionAlerts, INCOMING_MS, MAX_MEMBERS, memberLimitOf, roomTitle, roomToInvite, shownContent, type IncomingRequest, type RoomSettings, type WatchingInfo } from "@mirattic/types";
 import { api, platform } from "./session";
 import { ReportDialog } from "./Report";
 import { Room } from "./Room";
@@ -138,7 +138,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   const current = useRef({ rooms, openRoom, asked, meId: me.id });
   current.current = { rooms, openRoom, asked, meId: me.id };
   /** Mentioned in a room whose screen isn't open (decision 118): a banner on Home until seen or dismissed. */
-  const [mentioned, setMentioned] = useState<{ roomId: string; name: string; title?: string } | null>(null);
+  const [mentioned, setMentioned] = useState<{ roomId: string; name: string; title?: string; everyone?: boolean } | null>(null);
   // Seen once that room's screen opens, however it was opened (the list, a link, 보기).
   useEffect(() => {
     if (mentioned && openRoom === mentioned.roomId) setMentioned(null);
@@ -250,9 +250,10 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
         if (event.type === "chat:message" && event.roomId) {
           const msg = event.payload as ChatMessage;
           const { meId, openRoom: shown, rooms: list } = current.current;
-          if (msg.mentions?.includes(meId) && msg.userId !== meId && shown !== event.roomId) {
+          if (msg.mentions?.includes(meId) && msg.userId !== meId && shown !== event.roomId && banners(msg.mentions.includes("everyone"))) {
             const room = list.find((r) => r.id === event.roomId);
-            setMentioned({ roomId: event.roomId, name: msg.userName ?? "친구", title: room ? roomTitle(room) : undefined });
+            setMentioned({ roomId: event.roomId, name: msg.userName ?? "친구", title: room ? roomTitle(room) : undefined,
+              everyone: msg.mentions.includes("everyone") });
           }
         }
         if (event.type === "presence:update" && event.userId) {
@@ -268,7 +269,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
     // taken once its handlers are in, so none falls between (later ones come as events).
     const early = platform.mention?.(me.id);
     if (early?.open) enter(early.roomId); // its toast's 채팅 보기: that room's screen
-    else if (early) setMentioned(early);
+    else if (early && banners(!!early.everyone)) setMentioned(early);
     return () => {
       clearTimeout(roomsSoon.current);
       socket.close();
@@ -560,6 +561,13 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   ) : null;
 
   // The host changed the room's type (decision 93): confirm, or leave the room — told wherever the panel is.
+  const prefs = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.preferences?.alerts?.() ?? ALERT_DEFAULTS);
+  const quiet = prefs.quiet;
+  // Turned off while it shows: gone for good (turning them on again doesn't bring it back).
+  const bannerAllowed = !mentioned || !prefs.quiet && mentionAlerts(prefs, !!mentioned.everyone);
+  useEffect(() => {
+    if (!bannerAllowed) setMentioned(null);
+  }, [bannerAllowed]);
   const typeNotice = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.roomTypeNotice?.() ?? null);
   const [typeAlways, setTypeAlways] = useState(false);
   useEffect(() => setTypeAlways(false), [typeNotice?.roomId, typeNotice?.version]); // each question starts unchecked
@@ -614,7 +622,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   }
 
   // On every screen but that room's (decision 118): Home, Settings, another room.
-  const mentionBanner = mentioned && mentioned.roomId !== openRoom && (
+  const mentionBanner = mentioned && mentioned.roomId !== openRoom && bannerAllowed && (
     <div className="card mention-banner" role="status">
       <Icon name="at" />
       <span className="grow">{mentioned.name}님이 {mentioned.title ? `'${mentioned.title}'에서 ` : ""}언급했습니다</span>
@@ -827,7 +835,11 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           <div className="grow">
             <div className="name ellipsis">{me.displayName} <span className="muted">(나)</span></div>
             {/* What I watch is the card on top; here only how I'm connected. */}
-            <div className="muted">{status === "open" ? "온라인" : "연결 중"}</div>
+            <div className="muted">
+              {status === "open" ? "온라인" : "연결 중"}
+              {/* Only here (decision 119): friends don't see it. */}
+              {quiet && <> · <button className="link quiet" onClick={() => setScreen("settings")}>방해 금지</button></>}
+            </div>
             {me.presenceVisibility === "OFF" && <div className="muted">친구에게 숨김</div>}
           </div>
           <IconButton icon="hash" label={showCode ? "친구 코드 닫기" : "내 친구 코드"} onClick={() => setShowCode((v) => !v)} />
@@ -839,6 +851,12 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 }
 
 type MenuItem = { label: string; icon: Parameters<typeof IconButton>[0]["icon"]; danger?: boolean; run: () => void };
+
+/** A mention's banner shows (decision 119): not under 방해 금지, nor with its alerts off. */
+function banners(everyone: boolean) {
+  const prefs = platform.preferences?.alerts?.() ?? ALERT_DEFAULTS;
+  return !prefs.quiet && mentionAlerts(prefs, everyone);
+}
 
 /** A "⋯" button with a small list of less common actions. */
 function Menu({ label, items }: { label: string; items: MenuItem[] }) {

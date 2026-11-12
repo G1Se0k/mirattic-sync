@@ -624,6 +624,7 @@ class RoomController {
 			return;
 		}
 		hub.removeFromRoom(id, jwt.getSubject());
+		roomLog.left(id, jwt.getSubject(), left.loggedIn());
 		rooms.announce(id, left.memberIds());
 	}
 
@@ -635,6 +636,7 @@ class RoomController {
 				rooms.announceClosed(d.roomId(), userId, d.left());
 			} else {
 				hub.removeFromRoom(d.roomId(), userId);
+				roomLog.left(d.roomId(), userId, d.left().loggedIn());
 				rooms.announce(d.roomId(), d.left().memberIds());
 			}
 		}

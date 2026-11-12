@@ -492,31 +492,33 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
     }
   }
 
-  // Over its chip (the list is the last thing above the chat), kept inside the list's width.
+  // Floats in the window (fixed, so the scrolling room body neither clips it nor grows under it): over its chip if it
+  // fits above in the window, else under it (over the chat), kept inside the list's width and the window.
   useLayoutEffect(() => {
     const chip = list.current?.querySelector<HTMLElement>(`[data-member="${picked}"]`);
     const el = box.current;
     if (!chip || !el || !list.current) return;
-    el.style.left = `${Math.max(0, Math.min(chip.offsetLeft, list.current.clientWidth - el.offsetWidth))}px`;
-    // Under the chip instead when the room body shows less above it than the box needs (near its top, scrolled or not).
-    const body = chip.closest(".room-body");
-    const above = body ? chip.getBoundingClientRect().top - body.getBoundingClientRect().top : Infinity;
-    el.style.top = above >= el.offsetHeight + 4
-      ? `${chip.offsetTop - el.offsetHeight - 4}px` : `${chip.offsetTop + chip.offsetHeight + 4}px`;
+    const c = chip.getBoundingClientRect();
+    const l = list.current.getBoundingClientRect();
+    el.style.maxHeight = `${window.innerHeight - 8}px`;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    el.style.left = `${Math.max(l.left, Math.min(c.left, l.right - w))}px`;
+    const top = c.top - 4 - h >= 4 ? c.top - 4 - h : c.bottom + 4;
+    el.style.top = `${Math.max(4, Math.min(top, window.innerHeight - 4 - h))}px`;
   }, [picked, members, ties]); // ties: 친구 추가 may appear and widen it
 
   // Opened: focus in it and in view (the panel may be short); closed by the keyboard or an action: back to its chip.
   useEffect(() => {
     if (!picked) return;
     box.current?.focus({ preventScroll: true });
-    box.current?.scrollIntoView({ block: "nearest" });
   }, [picked]);
   function closeBox() {
     list.current?.querySelector<HTMLElement>(`[data-member="${picked}"]`)?.focus();
     setPicked(null);
   }
 
-  // Closed by a click elsewhere, Escape, or a resize (the chips may wrap elsewhere).
+  // Closed by a click elsewhere, Escape, a resize (the chips may wrap elsewhere), or a scroll that moves its chip.
   useEffect(() => {
     if (!picked) return;
     const close = (e: Event) => {
@@ -527,8 +529,13 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
     document.addEventListener("pointerdown", close);
     document.addEventListener("keydown", close);
     const shut = () => setPicked(null);
+    const scrolled = (e: Event) => {
+      if (e.target instanceof Node && e.target.contains(list.current)) setPicked(null); // not the box's own scroll
+    };
     window.addEventListener("resize", shut);
+    document.addEventListener("scroll", scrolled, true);
     return () => {
+      document.removeEventListener("scroll", scrolled, true);
       window.removeEventListener("resize", shut);
       document.removeEventListener("pointerdown", close);
       document.removeEventListener("keydown", close);

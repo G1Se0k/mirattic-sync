@@ -89,7 +89,10 @@ public class RoomService {
 
 	/** Who to notify after a leave, and whether the room was closed (host left). */
 	/** `memberIds`: everyone to tell (members, and invitees if it closed). `ended`: a closed room's members and title. */
-	public record Left(List<String> memberIds, boolean closed, Ended ended) {
+	public record Left(List<String> memberIds, boolean closed, Ended ended, boolean loggedIn) {
+		public Left(List<String> memberIds, boolean closed, Ended ended) {
+			this(memberIds, closed, ended, false);
+		}
 	}
 
 	/** A room left by a deleted account. */
@@ -525,8 +528,9 @@ public class RoomService {
 			rooms.deleteById(roomId);
 			return new Left(withInvited(everyone, room), true, new Ended(everyone, titleOf(room)));
 		}
+		boolean logged = loggedIn(roomId, me); // asked before the membership (and its joinedAt) is gone
 		members.delete(self);
-		return new Left(everyone, false, null);
+		return new Left(everyone, false, null, logged);
 	}
 
 	/** The room's host, or null (no room). */
@@ -719,6 +723,22 @@ public class RoomService {
 				.isPresent();
 	}
 
+	/**
+	 * Every membership, as "room|user" pairs: after a restart, those whose "join" is their latest line are looked for.
+	 * ponytail: all rows once per restart; a query of only latest-"join" members if rooms grow to many thousands.
+	 */
+	@Transactional(readOnly = true)
+	public List<String[]> memberships() {
+		return members.findAll().stream().map(m -> new String[] { m.getRoomId(), m.getUserId() }).toList();
+	}
+
+	/** Their latest join / leave line in the room is a "join". */
+	@Transactional(readOnly = true)
+	public boolean lastLineIsJoin(String roomId, String userId) {
+		return messages.findFirstByRoomIdAndUserIdAndKindInOrderBySeqDesc(roomId, userId, List.of("join", "leave"))
+				.filter(line -> "join".equals(line.kind())).isPresent();
+	}
+
 	/** Members to tell, and the log line it made ("kick" / "host", text = that member's name). */
 	public record Logged(List<String> memberIds, ChatMessage.View log) {
 	}
@@ -753,7 +773,7 @@ public class RoomService {
 		return new Logged(memberIds(roomId), messages.save(new ChatMessage(roomId, userId, nameOf(userId), null, "host")).view());
 	}
 
-	private boolean isMemberOf(String userId, String roomId) {
+	public boolean isMemberOf(String userId, String roomId) {
 		return members.findByRoomIdAndUserId(roomId, userId).isPresent();
 	}
 

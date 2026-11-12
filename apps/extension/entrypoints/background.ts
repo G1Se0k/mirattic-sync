@@ -7,6 +7,7 @@ import {
 import { API_URL, SOCKET_URL, authorize, store } from '../session';
 import { hasConsent } from '../consent';
 import { SITE_HOME, watch, type Watch } from '../watch';
+import { ALERT_DEFAULTS, mentionAlerts } from '@mirattic/types';
 import {
   TOAST, TOAST_ANSWER, TOAST_CLEAR, TOAST_DISMISS, TOAST_OVER_VIDEO, TOAST_READY,
   type AlertKind, type ToastAnswer, type ToastClear, type ToastDismiss, type ToastMessage, type ToastOverVideo,
@@ -33,7 +34,9 @@ const OFF_FLAG = 'mirattic.off';
 const PROVIDER_ORIGINS = ['https://www.youtube.com/', 'https://www.netflix.com/', 'https://laftel.net/'];
 const PROVIDER_TABS = PROVIDER_ORIGINS.map((o) => `${o}*`);
 /** `until`: when it stops counting. */
-type Alert = { kind: AlertKind; target: string; title: string; toast: Omit<ToastMessage, 'seq'>; until: number };
+/** `quiet`: came under 방해 금지 (decision 119): counted on the badge, never drawn over a video. */
+type Alert = { kind: AlertKind; target: string; title: string; toast: Omit<ToastMessage, 'seq'>; until: number; quiet?: boolean;
+  /** A mention's: the host's @everyone. */ everyone?: boolean };
 
 /** storage.local (+ ".<userId>"): rooms whose type changes are confirmed without asking (decision 93, "이 방에서는 항상 허용하기"). */
 const TYPE_ALWAYS_ITEM = 'mirattic.typeAlways';
@@ -287,12 +290,14 @@ export default defineBackground(() => {
       // the panel just closed
     }
   };
+  const prefs = () => platform?.preferences?.alerts?.() ?? ALERT_DEFAULTS;
   const broadcast = (message: ToPanel) => ports.forEach((p) => post(p, message));
   const shared = (): Shared => ({
     watching: platform?.nowWatching?.() ?? null,
     watchingInfo: platform?.nowWatchingInfo?.() ?? null,
     offSite: platform?.offSite?.() ?? null,
     askOnSwitch: platform?.preferences?.askOnSwitch() ?? true,
+    alerts: prefs(),
     tabs: platform?.tabs?.list() ?? [],
     followedTab: platform?.tabs?.followed() ?? null,
     followActive: platform?.tabs?.auto() ?? false,
@@ -329,12 +334,15 @@ export default defineBackground(() => {
   /** `ms`: how long it counts (decision 87: 30 s): the toast shows that long, the badge counts it that long. */
   function alert(kind: AlertKind, target: string, ms: number, title: string, body = '', meta?: string) {
     if (!meId || ports.size) return; // signed out: nothing; a panel open: it shows it (recordEnd ran)
+    // 방해 금지 (decision 119): invitations, watch requests and mentions counted on the badge and kept for the panel,
+    // no toast over the video. The room's own (pause request, type change, answered request) still show.
+    const quiet = prefs().quiet && (kind === 'invite' || kind === 'request' || kind === 'mention');
     const toast = { type: TOAST, kind, target, ms, title, meta, body, panelOpen: false, alertId: ++alertIds } as const;
-    const entry: Alert = { kind, target, title, toast, until: Date.now() + ms };
+    const entry: Alert = { kind, target, title, toast, until: Date.now() + ms, quiet };
     for (const [key, until] of alertUntil) if (until <= Date.now()) alertUntil.delete(key);
     alertUntil.set(`${kind}:${target}`, entry.until);
     alerts = [entry, ...alerts.filter((a) => a.kind !== kind || a.target !== target)];
-    toastOverVideo(toast, entry);
+    if (!quiet) toastOverVideo(toast, entry);
     publishAlerts();
     setTimeout(() => dropAlerts((a) => a === entry), ms);
   }
@@ -391,13 +399,14 @@ export default defineBackground(() => {
    * The latest mention alerted while no panel was open, for the next panel to open (its Home shows the banner): the
    * toolbar icon's click opens a panel, which clears the alerts. Handed to one panel; gone once its alert is settled.
    */
-  let pendingMention: { roomId: string; name: string; title?: string; userId: string; alertId: number; until: number } | null = null;
+  let pendingMention: { roomId: string; name: string; title?: string; userId: string; alertId: number; until: number; everyone?: boolean } | null = null;
   /** A mention toast's 채팅 보기 (decision 118): that room's screen in the panel the click opens; kept apart (a newer
    * mention can't replace it), taken by that panel. */
   let pendingOpen: { roomId: string; name: string; title?: string; userId: string; until: number } | null = null;
   let mentionSeq = 0;
   async function alertMention(roomId: string, msg: ChatMessage) {
     if (ports.size || !meId) return; // a panel open: its chat or Home shows it
+    if (!mentionAlerts(prefs(), msg.mentions?.includes('everyone') === true)) return; // turned off: the chat's highlight only
     // Captured before the lookup: dropped if the account changed (signed out, another signed in) or a newer mention
     // arrived meanwhile (its lookup may finish first).
     const me = meId;
@@ -406,7 +415,8 @@ export default defineBackground(() => {
     const until = Date.now() + INCOMING_MS;
     const name = msg.userName ?? '친구';
     // Kept from now (no title yet): a panel opening during the lookup gets it (the chat event came before it).
-    const pm: NonNullable<typeof pendingMention> = { roomId, name, userId: me, alertId: -1, until };
+    const pm: NonNullable<typeof pendingMention> = { roomId, name, userId: me, alertId: -1, until,
+      everyone: msg.mentions?.includes('everyone') === true };
     pendingMention = pm;
     const view = await within(api.room(roomId).catch(() => null), null);
     const ms = until - Date.now();
@@ -418,10 +428,33 @@ export default defineBackground(() => {
     const title = view ? roomTitle(view) : undefined;
     // The host's "@everyone" (anyone else's is just text): told as such.
     const everyone = msg.mentions?.includes('everyone') === true; // marked by the server as sent
+    if (!mentionAlerts(prefs(), everyone)) { // turned off during the lookup
+      pendingMention = null;
+      return;
+    }
     alert('mention', roomId, ms, `${name}님이 ${everyone ? '모두를' : '나를'} 언급했습니다`, msg.text, title ? `방: ${title}` : undefined);
     const entry = alerts.find((a) => a.kind === 'mention' && a.target === roomId);
+    if (entry) entry.everyone = everyone;
     pm.title = title;
     if (entry) Object.assign(pm, { alertId: entry.toast.alertId, until: entry.until });
+  }
+
+  /**
+   * The alert settings changed (decision 119), applied to the alerts already out: mentions now off are settled (off
+   * the badge and the pages); under 방해 금지 the others it covers leave the pages, still counted.
+   */
+  let lastPrefs = prefs();
+  function alertPrefsChanged() {
+    const now = prefs();
+    if (now === lastPrefs) return;
+    lastPrefs = now;
+    dropAlerts((a) => a.kind === 'mention' && !mentionAlerts(now, a.everyone === true));
+    if (!now.quiet) return;
+    for (const a of alerts) {
+      if (a.quiet || (a.kind !== 'invite' && a.kind !== 'request' && a.kind !== 'mention')) continue;
+      a.quiet = true;
+      toTabs({ type: TOAST_DISMISS, kind: a.kind, target: a.target });
+    }
   }
 
   /** Settled (answered, cancelled, expired): no longer counted, and off every page, so it can't be answered. */
@@ -707,6 +740,7 @@ export default defineBackground(() => {
       .then((p) => {
       platform = p;
       p.subscribe?.(() => {
+        alertPrefsChanged();
         pushShared();
         room?.refreshPlayer();
         room?.watchingChanged();
@@ -1048,7 +1082,7 @@ export default defineBackground(() => {
    */
   const handOver = (tabId: number, doc: string | undefined, target: string, alertId: number, tries = 3) => {
     const a = alerts.find((x) => x.kind === 'request' && x.target === target && x.toast.alertId === alertId);
-    if (!a || !active('request', target, alertId)) return;
+    if (!a || a.quiet || !active('request', target, alertId)) return;
     const message = { ...a.toast, ms: a.until - Date.now(), leftBehind: true, seq: ++seq };
     // Taken: that page reports it back (kept with it until decided). No page of ours to take it yet: dismissed if the
     // tab settled on another site; still loading, or one of ours starting: kept for its READY or its load's end —
@@ -1147,7 +1181,7 @@ export default defineBackground(() => {
         if (!ok) return;
         const now = Date.now();
         for (const a of [...alerts].reverse()) { // oldest first: each goes on top, the newest last
-          if (a.until <= now) continue;
+          if (a.until <= now || a.quiet) continue;
           const behind = a.kind === 'request' && left.get(a.target) === a.toast.alertId;
           toTabs({ ...a.toast, ms: a.until - now, leftBehind: behind }, () => alerts.includes(a), tabId);
         }
@@ -1275,7 +1309,7 @@ export default defineBackground(() => {
             const valid = <T extends { userId: string; until: number }>(p: T | null) => (p && p.userId === meId && p.until > Date.now() ? p : null);
             const p = valid(pendingMention);
             const o = valid(pendingOpen);
-            const mention = p ? { roomId: p.roomId, name: p.name, title: p.title, userId: p.userId, until: p.until } : null;
+            const mention = p ? { roomId: p.roomId, name: p.name, title: p.title, userId: p.userId, until: p.until, everyone: p.everyone } : null;
             const mentionOpen = o ? { ...o, open: true as const } : null;
             if (!m.hold) pendingMention = pendingOpen = null;
             post(port, { kind: 'shared', shared: { ...shared(), mention, mentionOpen } });

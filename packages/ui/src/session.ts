@@ -1,3 +1,4 @@
+import type { AlertPrefs } from "@mirattic/types";
 import type { ApiClient, Socket, SocketStatus } from "@mirattic/client";
 import type { RoomSyncState } from "@mirattic/sync-core";
 import type { MediaProvider, MediaProviderAdapter, RoomContent, ServerEvent, WatchingInfo } from "@mirattic/types";
@@ -41,6 +42,10 @@ export type Platform = {
     /** Ask before following the host to another video (not of the same series). Off: follow without asking. */
     askOnSwitch(): boolean;
     setAskOnSwitch(ask: boolean): Promise<void>;
+    /** Alerts (on this device): `quiet` (방해 금지) shows no toast or banner; mentions' alerts, and the host's @everyone's. */
+    alerts?(): AlertPrefs;
+    /** One or more of them changed (the rest kept as stored). */
+    setAlerts?(change: Partial<AlertPrefs>): Promise<void>;
   };
   /**
    * Text size in percent (100 = default, within `TEXT_SIZE`), kept by the platform and applied to the page as the
@@ -97,7 +102,7 @@ export type Platform = {
    * A mention of `userId` alerted while no panel was open (decision 118), for Home's banner as it first shows; else
    * null. Taken once.
    */
-  mention?(userId: string): { roomId: string; name: string; title?: string; open?: boolean } | null;
+  mention?(userId: string): { roomId: string; name: string; title?: string; open?: boolean; everyone?: boolean } | null;
   /** Rooms of mine their host closed (decision 90), to tell about; the same array until it changes (`subscribe`). */
   closedRooms?(): { roomId: string; title: string }[];
   /** Its notice was shown: not again (in any panel). */
