@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.mirattic.sync.IntegrationTest;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
@@ -28,6 +29,31 @@ class FriendFlowTest extends IntegrationTest {
 
 		call(HttpMethod.DELETE, "/api/friends/" + b.id(), a.accessToken(), null).andExpect(status().isNoContent());
 		call(HttpMethod.GET, "/api/friends", b.accessToken(), null).andExpect(jsonPath("$.length()").value(0));
+	}
+
+	@Test
+	void appearingOfflineShowsOfflineToFriends() throws Exception {
+		TestUser a = signup();
+		TestUser b = signup();
+		befriend(a, b);
+		Client aWs = connect(a);
+		Client bWs = connect(b);
+		call(HttpMethod.GET, "/api/friends", b.accessToken(), null).andExpect(jsonPath("$[0].presence.status").value("ONLINE"));
+		call(HttpMethod.PUT, "/api/me/privacy", a.accessToken(), "{\"appearOffline\":true}")
+				.andExpect(jsonPath("$.appearOffline").value(true));
+		JsonNode seen = bWs.nextOfType("presence:update");
+		while (!seen.path("payload").path("status").asString().equals("OFFLINE")) {
+			seen = bWs.nextOfType("presence:update"); // its online one, before it
+		}
+		call(HttpMethod.GET, "/api/friends", b.accessToken(), null).andExpect(jsonPath("$[0].presence.status").value("OFFLINE"));
+		// Asked to watch as an offline friend would be.
+		call(HttpMethod.POST, "/api/rooms/requests", b.accessToken(), "{\"friendId\":\"%s\"}".formatted(a.id()))
+				.andExpect(status().isConflict());
+		call(HttpMethod.POST, "/api/rooms/requests", b.accessToken(), "{\"friendId\":\"%s\",\"joinPublic\":true}".formatted(a.id()))
+				.andExpect(status().isConflict()); // nor into their public room
+		call(HttpMethod.PUT, "/api/me/privacy", a.accessToken(), "{\"appearOffline\":false}");
+		call(HttpMethod.GET, "/api/friends", b.accessToken(), null).andExpect(jsonPath("$[0].presence.status").value("ONLINE"));
+		aWs.session().close();
 	}
 
 	@Test

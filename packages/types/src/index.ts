@@ -109,6 +109,8 @@ export type Me = UserSummary & {
   positionVisibility: Visibility;
   /** Friend requests by the code only, none from room members by name (decision 108). */
   friendCodeOnly: boolean;
+  /** 오프라인으로 표시 (decision 120): friends see me offline. Absent from a server before it. */
+  appearOffline?: boolean;
 };
 
 export type AuthTokens = { accessToken: string; refreshToken: string; user: UserSummary };

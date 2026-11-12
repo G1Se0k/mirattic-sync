@@ -140,9 +140,11 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
    * host it leaves (RoomService.separate), so a member blocking leaves it themselves; told before.
    */
   async function block(name: string, userId: string) {
-    const here = isHost ? `${name}님은 이 방에서 나가게 됩니다.` : "호스트가 아니므로 내가 이 방에서 나가게 됩니다.";
+    // Not in this room any more (decision 120): nobody leaves it.
+    const inRoom = room?.members.some((m) => m.user.id === userId) ?? false;
+    const here = !inRoom ? "" : isHost ? `${name}님은 이 방에서 나가게 됩니다. ` : "호스트가 아니므로 내가 이 방에서 나가게 됩니다. ";
     const yes = await asker.ask(`${name}님을 차단할까요?`, {
-      body: `차단하면 서로 친구·방에서 빠지고 다시 요청할 수 없습니다. ${here} 설정 > 차단한 사용자에서 풀 수 있습니다.`, ok: "차단", danger: true });
+      body: `차단하면 서로 친구·방에서 빠지고 다시 요청할 수 없습니다. ${here}설정 > 차단한 사용자에서 풀 수 있습니다.`, ok: "차단", danger: true });
     if (!yes) return;
     try {
       await api.block(userId);
@@ -226,7 +228,7 @@ export function Room({ roomId, me, handle, socket, status, subscribe, onClose, o
       <Chat roomId={roomId} meId={me.id} members={room.members} isHost={isHost} socket={socket} status={status}
         subscribe={subscribe} position={position} onSeek={isHost && showsRoomVideo(s, content) ? (ms) => handle.seek(ms) : undefined}
         canStamp={showsRoomVideo(s, content) && (isHost || s.hostVideo !== false)}
-        memberBox={(member, done) => <MemberActions member={member} meId={me.id} isHost={isHost} ties={ties}
+        memberBox={(member, done, gone) => <MemberActions member={member} gone={gone} meId={me.id} isHost={isHost} ties={ties}
           onBefriend={(id) => void befriend(id)} onReport={(id, name) => setReporting({ id, name })} onMention={mentionOf}
           onManage={(name, action, id) => void manage(name, action, id)} onDone={done} />}
         video={content ? contentKey(content) : undefined} videoMs={content?.durationMs} mention={mention} />
@@ -586,8 +588,10 @@ function Members({ members, meId, isHost, limit, ties, onBefriend, onReport, onM
  * the name says 친구 / 친구 요청 보냄 too. `onDone` closes the box
  * before an action that opens a dialog; 친구 추가 opens none and keeps it open, so the button is seen turning grey.
  */
-function MemberActions({ member, meId, isHost, ties, onBefriend, onReport, onMention, onManage, onDone }: {
+function MemberActions({ member, gone, meId, isHost, ties, onBefriend, onReport, onMention, onManage, onDone }: {
   member: RoomMemberView;
+  /** No longer in the room (decision 120): report and block only — the rest need them here. */
+  gone?: boolean;
   meId: string;
   isHost: boolean;
   ties: Ties | null;
@@ -601,23 +605,23 @@ function MemberActions({ member, meId, isHost, ties, onBefriend, onReport, onMen
   return (
     <>
       <span className="who-card">
-        <Avatar name={name} src={avatarUrl} on={member.present} />
+        <Avatar name={name} src={avatarUrl} on={gone ? undefined : member.present} />
         <span className="who-text">
           <span className="who">{name}{id === meId && " (나)"}</span>
-          <span className="muted">{[member.role === "HOST" && "호스트", member.present ? "참가 중" : "방 밖",
+          <span className="muted">{[!gone && member.role === "HOST" && "호스트", gone ? "방에 없음" : member.present ? "참가 중" : "방 밖",
             id !== meId && ties?.friends.includes(id) && "친구", id !== meId && ties?.sent.includes(id) && "친구 요청 보냄"]
             .filter(Boolean).join(" · ")}</span>
         </span>
       </span>
       {id !== meId && (
         <span className="row who-actions">
-          {ties && !ties.friends.includes(id) && (ties.sent.includes(id)
+          {!gone && ties && !ties.friends.includes(id) && (ties.sent.includes(id)
             ? <IconButton icon="userPlus" label="친구 요청을 보냈습니다" disabled />
             : <IconButton icon="userPlus" label="친구 추가" onClick={() => onBefriend(id)} />)}
-          <IconButton icon="at" label="언급" onClick={() => { onDone(); onMention(name); }} />
+          {!gone && <IconButton icon="at" label="언급" onClick={() => { onDone(); onMention(name); }} />}
           <IconButton icon="flag" label="신고" onClick={() => { onDone(); onReport(id, name); }} />
           <IconButton icon="ban" label="차단" onClick={() => { onDone(); onManage(name, "block", id); }} />
-          {isHost && (
+          {isHost && !gone && (
             <>
               <IconButton icon="crown" label="호스트 넘기기" onClick={() => { onDone(); onManage(name, "host", id); }} />
               <IconButton icon="userMinus" tone="danger" label="내보내기" onClick={() => { onDone(); onManage(name, "kick", id); }} />

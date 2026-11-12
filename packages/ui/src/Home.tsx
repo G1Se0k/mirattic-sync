@@ -563,6 +563,51 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
   // The host changed the room's type (decision 93): confirm, or leave the room — told wherever the panel is.
   const prefs = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => platform.preferences?.alerts?.() ?? ALERT_DEFAULTS);
   const quiet = prefs.quiet;
+  // My status (decision 120): 오프라인으로 표시 is the server's (friends see me offline), 방해 금지 this device's.
+  const myStatus: MyStatus = me.appearOffline ? "hidden" : quiet ? "quiet" : "online";
+  const [statusOpen, setStatusOpen] = useState(false);
+  /** The 오프라인으로 표시 last asked for, while its save is out: a quick second choice compares with it, not `me`. */
+  const wantHidden = useRef<boolean | null>(null);
+  const statusMenu = useRef<HTMLUListElement>(null);
+  const statusButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!statusOpen) return;
+    statusMenu.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (e.key !== "Escape") return;
+        statusButton.current?.focus();
+      } else if (statusMenu.current?.contains(e.target as Node) || statusButton.current?.contains(e.target as Node)) return;
+      setStatusOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [statusOpen]);
+  function chooseStatus(mode: MyStatus) {
+    setStatusOpen(false);
+    statusButton.current?.focus();
+    const wasQuiet = quiet;
+    if ((mode === "quiet") !== quiet) void platform.preferences?.setAlerts?.({ quiet: mode === "quiet" });
+    const hidden = mode === "hidden";
+    if (hidden !== (wantHidden.current ?? !!me.appearOffline)) {
+      wantHidden.current = hidden;
+      // Saved in order (usePrivacySave): the last answer holds the last choice.
+      savePrivacy({ appearOffline: hidden }).then((saved) => {
+        if (wantHidden.current === hidden) wantHidden.current = null;
+        onMeChange(saved);
+      }, () => {
+        if (wantHidden.current !== hidden) return; // a later choice stands
+        wantHidden.current = null;
+        // Not saved: 방해 금지 as it was before this choice (on or off), and said so.
+        if (wasQuiet !== (mode === "quiet")) void platform.preferences?.setAlerts?.({ quiet: wasQuiet });
+        void asker.tell("상태를 바꾸지 못했습니다", hidden ? "친구에게는 계속 온라인으로 보입니다. 다시 시도해 주세요." : "친구에게는 계속 오프라인으로 보입니다. 다시 시도해 주세요.");
+      });
+    }
+  }
   // Turned off while it shows: gone for good (turning them on again doesn't bring it back).
   const bannerAllowed = !mentioned || !prefs.quiet && mentionAlerts(prefs, !!mentioned.everyone);
   useEffect(() => {
@@ -656,6 +701,7 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
           onSignedOut={onSignedOut} onClose={() => setScreen("home")} banner={mentionBanner} />
         {endedNotice /* a closure is told wherever the panel is */}
         {typeChanged}
+        {asker.dialog /* a status that failed to save, told here too */}
       </>
     );
   }
@@ -830,18 +876,34 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
       </main>
       <footer className="me-bar">
         {showCode && <MyFriendCode me={me} />}
+        {statusOpen && (
+          <ul className="menu-items status-menu" role="menu" aria-label="내 상태" ref={statusMenu}>
+            {MY_STATUSES.map((s) => (
+              <li key={s.mode} role="none">
+                <button type="button" role="menuitemradio" aria-checked={myStatus === s.mode} onClick={() => chooseStatus(s.mode)}>
+                  <span className={`pip ${s.mode}`} aria-hidden="true" />
+                  <span className="text"><strong>{s.label}</strong><span className="muted">{s.about}</span></span>
+                  {myStatus === s.mode && <Icon name="check" />}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="friend">
-          <Avatar name={me.displayName} src={me.avatarUrl} on={status === "open"} />
-          <div className="grow">
-            <div className="name ellipsis">{me.displayName} <span className="muted">(나)</span></div>
-            {/* What I watch is the card on top; here only how I'm connected. */}
-            <div className="muted">
-              {status === "open" ? "온라인" : "연결 중"}
-              {/* Only here (decision 119): friends don't see it. */}
-              {quiet && <> · <button className="link quiet" onClick={() => setScreen("settings")}>방해 금지</button></>}
-            </div>
-            {me.presenceVisibility === "OFF" && <div className="muted">친구에게 숨김</div>}
-          </div>
+          {/* What I watch is the card on top; here how I'm connected and my status (decision 120), which this opens. */}
+          <button type="button" className="me-status" aria-haspopup="menu" aria-expanded={statusOpen} ref={statusButton}
+            onClick={() => setStatusOpen((v) => !v)}>
+            <Avatar name={me.displayName} src={me.avatarUrl} on={status === "open"}
+              tone={myStatus === "hidden" ? "hidden" : myStatus === "quiet" ? "quiet" : undefined} />
+            <span className="grow">
+              <span className="name ellipsis">{me.displayName} <span className="muted">(나)</span></span>
+              <span className="muted">
+                {status !== "open" ? "연결 중" : myStatus === "quiet" ? <span className="quiet">방해 금지</span>
+                  : myStatus === "hidden" ? <><span className="hidden-status">오프라인으로 표시</span> · 친구에게 오프라인</> : "온라인"}
+              </span>
+              {me.presenceVisibility === "OFF" && <span className="muted">친구에게 숨김</span>}
+            </span>
+          </button>
           <IconButton icon="hash" label={showCode ? "친구 코드 닫기" : "내 친구 코드"} onClick={() => setShowCode((v) => !v)} />
         </div>
       </footer>
@@ -851,6 +913,14 @@ export function Home({ me, onMeChange, onSignedOut }: Props) {
 }
 
 type MenuItem = { label: string; icon: Parameters<typeof IconButton>[0]["icon"]; danger?: boolean; run: () => void };
+
+type MyStatus = "online" | "quiet" | "hidden";
+/** The me bar's status menu (decision 120). */
+const MY_STATUSES: { mode: MyStatus; label: string; about: string }[] = [
+  { mode: "online", label: "온라인", about: "기본" },
+  { mode: "quiet", label: "방해 금지", about: "초대 · 합류 요청 · 멘션 알림을 띄우지 않음" },
+  { mode: "hidden", label: "오프라인으로 표시", about: "친구에게 오프라인으로 보임" },
+];
 
 /** A mention's banner shows (decision 119): not under 방해 금지, nor with its alerts off. */
 function banners(everyone: boolean) {

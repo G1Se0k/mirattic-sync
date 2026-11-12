@@ -22,6 +22,8 @@ public class User {
 	private Visibility positionVisibility;
 	/** Friend requests by the code only, none from room members by name (decision 108). */
 	private boolean friendCodeOnly;
+	/** 오프라인으로 표시 (decision 120): friends see them offline, whatever they do. */
+	private boolean appearOffline;
 	private long createdAt;
 
 	protected User() {
@@ -79,6 +81,8 @@ public class User {
 	public Visibility getPresenceVisibility() { return presenceVisibility; }
 	public Visibility getPositionVisibility() { return positionVisibility; }
 	public boolean isFriendCodeOnly() { return friendCodeOnly; }
+	public boolean isAppearOffline() { return appearOffline; }
+	public void setAppearOffline(boolean appearOffline) { this.appearOffline = appearOffline; }
 
 	/** Invalidates the old code, e.g. after it was shared too widely. */
 	public void regenerateFriendCode() {

@@ -85,8 +85,14 @@ public class PresenceService {
 		return new PresenceView(v.status(), m, rooms.publicRoomOf(owner.getId(), m != null ? m.provider() : null, m != null ? m.contentId() : null, viewer));
 	}
 
+	/** Online as their friends see it: connected, and not 오프라인으로 표시 (decision 120). */
+	public boolean seenOnline(String userId) {
+		return hub.isOnline(userId) && users.findById(userId).map(u -> !u.isAppearOffline()).orElse(false);
+	}
+
 	static PresenceView view(User owner, boolean online, MediaPresence current) {
-		if (!online) {
+		// 오프라인으로 표시: offline to friends, nothing of what they watch or which public room they're in.
+		if (!online || owner.isAppearOffline()) {
 			return new PresenceView(PresenceView.Status.OFFLINE, null);
 		}
 		// OFF and ROOM_ONLY both hide activity from the friend list; ROOM_ONLY is honoured inside rooms (Phase 2).

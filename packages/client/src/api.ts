@@ -185,7 +185,7 @@ export function createApi(opts: { baseUrl: string; store: RefreshTokenStore; fet
 
     me: () => authed<Me>("GET", "/api/me", undefined, false),
     /** Only the settings given change (one at a time: two quick changes don't undo each other). */
-    updatePrivacy: (changes: Partial<Pick<Me, "presenceVisibility" | "positionVisibility" | "friendCodeOnly">>) =>
+    updatePrivacy: (changes: Partial<Pick<Me, "presenceVisibility" | "positionVisibility" | "friendCodeOnly" | "appearOffline">>) =>
       authed<Me>("PUT", "/api/me/privacy", changes),
     /**
      * Deletes my Sync profile and all its data after the Mirattic password is typed again (a re-auth window).

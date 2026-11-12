@@ -27,11 +27,12 @@ public class UserController {
 	 * `friendCode` is only ever shown to its owner, who shares it to be added as a friend.
 	 */
 	public record Me(String id, String email, String displayName, String avatarUrl, String friendCode, Visibility presenceVisibility,
-			Visibility positionVisibility, boolean friendCodeOnly) {
+			Visibility positionVisibility, boolean friendCodeOnly, boolean appearOffline) {
 	}
 
 	/** Each setting left out is unchanged: a client sends only the one it changes (before 1.2.2: both visibilities). */
-	public record PrivacyRequest(Visibility presenceVisibility, Visibility positionVisibility, Boolean friendCodeOnly) {
+	public record PrivacyRequest(Visibility presenceVisibility, Visibility positionVisibility, Boolean friendCodeOnly,
+			Boolean appearOffline) {
 	}
 
 	private final UserRepository users;
@@ -59,6 +60,9 @@ public class UserController {
 		if (req.friendCodeOnly() != null) {
 			me.setFriendCodeOnly(req.friendCodeOnly());
 		}
+		if (req.appearOffline() != null) {
+			me.setAppearOffline(req.appearOffline());
+		}
 		events.publishEvent(new RoomsChanged(List.of(me.getId()))); // friends see what the new setting shows, once saved
 		return me(me, jwt);
 	}
@@ -82,7 +86,7 @@ public class UserController {
 			}
 		}
 		return new Me(u.getId(), info == null ? null : info.email(), u.getDisplayName(), u.getAvatarUrl(), u.getFriendCode(),
-				u.getPresenceVisibility(), u.getPositionVisibility(), u.isFriendCodeOnly());
+				u.getPresenceVisibility(), u.getPositionVisibility(), u.isFriendCodeOnly(), u.isAppearOffline());
 	}
 
 	private User load(String id) {

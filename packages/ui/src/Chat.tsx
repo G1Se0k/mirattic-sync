@@ -25,8 +25,11 @@ type Props = {
   canStamp: boolean;
   /** Its length, where known: a stamp past it isn't sent. */
   videoMs?: number;
-  /** A member's box, opened from their name on a message; `done` closes it. */
-  memberBox: (member: RoomMemberView, done: () => void) => ReactNode;
+  /**
+   * A member's box, opened from their name on a message or log line; `done` closes it. `gone`: no longer in the room
+   * (left, kicked) — only what it knows of them from that line.
+   */
+  memberBox: (member: RoomMemberView, done: () => void, gone: boolean) => ReactNode;
   /** "@ 언급" pressed (a new `n` each time): `@name ` added to what is being written, the input focused. */
   mention?: { name: string; n: number };
 };
@@ -276,12 +279,15 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   // A name's box (the message it was opened on, and the name there: its author or an "@name" in it): floats under the
   // name, or over it without room below in view. It sits in the list, so it scrolls with its line; it closes as the
   // members' does, and when that member leaves.
-  const [picked, setPicked] = useState<{ line: string; userId: string; at: string } | null>(null);
-  const openBox = (line: string, userId: string, at: string) =>
-    setPicked((p) => (p?.line === line && p.at === at ? null : { line, userId, at }));
+  const [picked, setPicked] = useState<{ line: string; userId: string; at: string; name: string } | null>(null);
+  const openBox = (line: string, userId: string, at: string, name: string) =>
+    setPicked((p) => (p?.line === line && p.at === at ? null : { line, userId, at, name }));
   const isPicked = (line: string, at: string) => picked?.line === line && picked.at === at;
   const box = useRef<HTMLLIElement>(null);
-  const pickedMember = picked && members.find((m) => m.user.id === picked.userId);
+  const inRoom = picked && members.find((m) => m.user.id === picked.userId);
+  // One no longer in the room: the name the line has (decision 120).
+  const pickedMember: RoomMemberView | null = inRoom
+    ?? (picked && { user: { id: picked.userId, displayName: picked.name }, role: "MEMBER", present: false });
   const nameOf = () => list.current?.querySelector<HTMLElement>(`[data-line="${picked?.line}"] [data-anchor="${picked?.at}"]`);
   useLayoutEffect(() => {
     const nick = nameOf();
@@ -301,7 +307,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     el.style.left = `${Math.max(0, Math.min(n.left - u.left - 6, ul.clientWidth - el.offsetWidth))}px`;
   });
   useEffect(() => {
-    if (picked && (!pickedMember || !nameOf())) setPicked(null); // they left, or the name it opened from is gone (deleted)
+    if (picked && !nameOf()) setPicked(null); // the name it opened from is gone (deleted, or no longer loaded)
   });
   useEffect(() => {
     if (!picked) return;
@@ -356,23 +362,29 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
         {shownLines.length === 0 && !hasOlder && <li className="muted">아직 메시지가 없습니다.</li>}
         {shownLines.map((item) =>
           item.kind ? (
-            <li key={item.id} className={`log${fresh.has(item.id) ? " fresh" : ""}`}>
-              {item.kind === "stamp" && item.mediaPositionMs !== undefined ? (
-                <>{item.text}님이 {timestamp(item.mediaPositionMs, item.contentKey)}에 스탬프를 찍었습니다</>
-              ) : (
-                logText(item)
+            <li key={item.id} className={`log${fresh.has(item.id) ? " fresh" : ""}`} data-line={item.id}>
+              {item.kind === "content" ? logText(item) : (
+                // The name on it (join, leave, kick, host, stamp: the line's userId is theirs) opens their box.
+                <>
+                  <button type="button" className={`author${isPicked(item.id, "log") ? " on" : ""}`} aria-haspopup="dialog"
+                    aria-expanded={isPicked(item.id, "log")} data-anchor="log" onClick={() => openBox(item.id, item.userId, "log", item.text)}>
+                    {item.text}
+                  </button>
+                  {item.kind === "stamp" && item.mediaPositionMs !== undefined
+                    ? <>님이 {timestamp(item.mediaPositionMs, item.contentKey)}에 스탬프를 찍었습니다</>
+                    : logText(item).slice(item.text.length)}
+                </>
               )}
             </li>
           ) : (
             <li key={item.id} className={`row${fresh.has(item.id) ? " fresh" : ""}${item.mentions?.includes(meId) ? " mentioned" : ""}`}
               data-line={item.id}>
               <span className="grow">
-                {members.some((m) => m.user.id === item.userId) ? (
-                  <button type="button" className={`author${isPicked(item.id, "author") ? " on" : ""}`} aria-haspopup="dialog"
-                    aria-expanded={isPicked(item.id, "author")} data-anchor="author" onClick={() => openBox(item.id, item.userId, "author")}>
-                    {name(item.userId, item.userName)}
-                  </button>
-                ) : <span className="author">{name(item.userId, item.userName)}</span>}
+                <button type="button" className={`author${isPicked(item.id, "author") ? " on" : ""}`} aria-haspopup="dialog"
+                  aria-expanded={isPicked(item.id, "author")} data-anchor="author"
+                  onClick={() => openBox(item.id, item.userId, "author", name(item.userId, item.userName))}>
+                  {name(item.userId, item.userName)}
+                </button>
                 {item.deleted ? (
                   <span className="deleted">삭제된 메시지입니다</span>
                 ) : (
@@ -396,7 +408,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
                       const at = `m${i}`;
                       return (
                         <button key={i} type="button" className={`mention${isPicked(item.id, at) ? " on" : ""}`} aria-haspopup="dialog"
-                          aria-expanded={isPicked(item.id, at)} data-anchor={at} onClick={() => openBox(item.id, m.user.id, at)}>
+                          aria-expanded={isPicked(item.id, at)} data-anchor={at} onClick={() => openBox(item.id, m.user.id, at, m.user.displayName)}>
                           @{shown}
                         </button>
                       );
@@ -414,7 +426,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
         )}
         {pickedMember && (
           <li className="member-box" ref={box} tabIndex={-1} role="dialog" aria-label={`${pickedMember.user.displayName} 메뉴`}>
-            {memberBox(pickedMember, closeBox)}
+            {memberBox(pickedMember, closeBox, !inRoom)}
           </li>
         )}
       </ul>

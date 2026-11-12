@@ -133,7 +133,8 @@ export function ProviderIcon({ provider }: { provider: MediaProvider }) {
 }
 
 /** Initials in a circle: a face for a name without pictures. */
-export function Avatar({ name, src, on }: { name: string; src?: string; on?: boolean }) {
+/** `tone`: my own status's dot (decision 120) — 방해 금지, or 오프라인으로 표시 (a ring). */
+export function Avatar({ name, src, on, tone }: { name: string; src?: string; on?: boolean; tone?: "quiet" | "hidden" }) {
   const [failed, setFailed] = useState<string>(); // the URL that failed: a new photo gets its own try
   return (
     <span className="avatar" aria-hidden="true">
@@ -142,7 +143,7 @@ export function Avatar({ name, src, on }: { name: string; src?: string; on?: boo
       ) : (
         ([...name.trim()][0]?.toUpperCase() ?? "?")
       )}
-      {on !== undefined && <span className={`presence ${on ? "on" : ""}`} />}
+      {on !== undefined && <span className={`presence${on ? " on" : ""}${on && tone ? ` ${tone}` : ""}`} />}
     </span>
   );
 }

@@ -154,7 +154,7 @@ function AskOnSwitch() {
   );
 }
 
-/** What alerts this device shows (decision 119), saved at once. */
+/** What alerts this device shows (decision 119), saved at once; 방해 금지 is the me bar's status (decision 120). */
 function Alerts() {
   const prefs = platform.preferences;
   const now = useSyncExternalStore(platform.subscribe ?? noSubscribe, () => prefs?.alerts?.() ?? ALERT_DEFAULTS);
@@ -173,7 +173,6 @@ function Alerts() {
   );
   return (
     <>
-      {row("quiet", "방해 금지", "영상 위 토스트(초대 · 합류 요청 · 멘션)와 멘션 배너를 띄우지 않습니다. 툴바 배지는 그대로 세고, 열어 둔 패널의 초대 · 합류 요청 창은 그대로 뜹니다.")}
       {row("mentions", "멘션 알림", "나를 언급하면 토스트 · 배지 · 배너로 알립니다. 꺼도 채팅의 노란 강조는 남습니다.")}
       {row("everyone", "방장의 @everyone도 알림", undefined, true, !now.mentions)}
     </>

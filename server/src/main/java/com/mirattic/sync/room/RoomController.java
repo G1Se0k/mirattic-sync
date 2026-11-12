@@ -286,6 +286,10 @@ class RoomController {
 		// In a public room (decision 111): in at once, as from the public list (full: 409, said so). Kicked from it or a
 		// block with a member there (404): asked as before, for the friend to answer.
 		// Only for one who shows friends their activity (decision 114: their friends see that room in the list anyway).
+		// Offline as I see them (오프라인으로 표시 too, decision 120): neither asked nor followed into their public room.
+		if (!presence.seenOnline(body.friendId())) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "friend is offline");
+		}
 		MediaPresence theirs = presence.watching(body.friendId());
 		String open = Boolean.TRUE.equals(body.joinPublic())
 				? rooms.publicRoomWith(body.friendId(), theirs != null ? theirs.provider() : null, theirs != null ? theirs.contentId() : null,
@@ -322,9 +326,6 @@ class RoomController {
 					throw e;
 				}
 			}
-		}
-		if (!hub.isOnline(body.friendId())) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "friend is offline");
 		}
 		long now = System.currentTimeMillis();
 		boolean[] allowed = {false};
