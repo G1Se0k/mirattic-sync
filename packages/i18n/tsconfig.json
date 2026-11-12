@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "resolveJsonModule": true },
+  "include": ["src"],
+  // The key test reads the sources with Node (vitest runs it); no Node types here.
+  "exclude": ["src/**/*.test.ts"]
+}

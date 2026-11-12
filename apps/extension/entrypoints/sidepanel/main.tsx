@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import { lang, subscribeLang } from '@mirattic/i18n';
+import { followLang } from '../../lang';
 import ReactDOM from 'react-dom/client';
 import { App, configure } from '@mirattic/ui';
 import { Consent, hasConsent } from './Consent';
@@ -11,8 +13,16 @@ let connected: ReturnType<typeof connectPanel> | undefined;
 const openedAt = performance.timeOrigin + performance.now(); // finer than a millisecond: two windows' panels told apart
 const held = holdWindow(openedAt); // which window has the side panel is decided even before consent
 
+/** The language kept on this device, read before anything is drawn (decision 124). */
+const langRead = followLang();
+// The panel's own page says which language it's in (not a site's page: content scripts follow the choice too).
+const markLang = () => void (document.documentElement.lang = lang());
+void langRead.then(markLang);
+subscribeLang(markLang);
+
 function SidePanel() {
   const [state, setState] = useState<'loading' | 'consent' | 'ready'>('loading');
+  useSyncExternalStore(subscribeLang, lang); // a language chosen: every screen drawn again in it
 
   const start = async () => {
     connected ??= connectPanel(openedAt); // once, despite StrictMode; tabs are looked at only after consent
@@ -23,7 +33,7 @@ function SidePanel() {
   };
 
   useEffect(() => {
-    hasConsent().then((ok) => (ok ? start() : setState('consent')));
+    void langRead.then(() => hasConsent()).then((ok) => (ok ? start() : setState('consent')));
   }, []);
 
   if (state === 'consent') return <Consent onAccept={start} />;

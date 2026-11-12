@@ -1,3 +1,4 @@
+import { t } from "@mirattic/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Me } from "@mirattic/types";
 import { api } from "./session";
@@ -47,7 +48,7 @@ function App() {
     <>
       <OffSitePrompt />
       {me === "loading" ? (
-        <main className="container">불러오는 중…</main>
+        <main className="container">{t("불러오는 중…")}</main>
       ) : !me ? (
         <Login onSignedIn={loadMe} />
       ) : (

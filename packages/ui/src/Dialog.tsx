@@ -1,3 +1,4 @@
+import { t } from "@mirattic/i18n";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 /**
@@ -48,7 +49,7 @@ export function TimeBar({ until, total, inline, danger }: {
   const [left] = useState(() => Math.max(0, Math.min(total, until - Date.now())));
   const style = { animationDuration: `${left}ms`, "--from": `${(left / total) * 100}%` } as CSSProperties;
   return (
-    <div className={`timebar${inline ? " inline" : ""}${danger ? " danger" : ""}`} role="progressbar" aria-label="남은 시간"
+    <div className={`timebar${inline ? " inline" : ""}${danger ? " danger" : ""}`} role="progressbar" aria-label={t("남은 시간")}
       aria-valuemin={0} aria-valuemax={total}>
       <i style={style} />
     </div>
@@ -70,14 +71,14 @@ export function useAsk() {
     setQ(null);
   };
   const ask = (title: string, opts: { body?: string; ok?: string; danger?: boolean } = {}) =>
-    new Promise<boolean>((resolve) => setQ({ title, body: opts.body, ok: opts.ok ?? "확인", danger: opts.danger, cancel: true, resolve }));
+    new Promise<boolean>((resolve) => setQ({ title, body: opts.body, ok: opts.ok ?? t("확인"), danger: opts.danger, cancel: true, resolve }));
   const tell = (title: string, body?: string) =>
-    new Promise<void>((resolve) => setQ({ title, body, ok: "확인", cancel: false, resolve: () => resolve() }));
+    new Promise<void>((resolve) => setQ({ title, body, ok: t("확인"), cancel: false, resolve: () => resolve() }));
   const dialog = q && (
     <Dialog title={q.title} onClose={() => answer(false)}>
       {q.body && <p className="muted">{q.body}</p>}
       <Actions>
-        {q.cancel && <button className="link" onClick={() => answer(false)}>취소</button>}
+        {q.cancel && <button className="link" onClick={() => answer(false)}>{t("취소")}</button>}
         <button className={q.danger ? "danger" : undefined} autoFocus onClick={() => answer(true)}>{q.ok}</button>
       </Actions>
     </Dialog>

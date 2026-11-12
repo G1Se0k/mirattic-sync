@@ -153,7 +153,7 @@ export function splitPlayerTitle(line: string): { title: string; season?: number
 
 /** The tab title if it names the title ("Title - Netflix"); the watch page is often just "Netflix". */
 export function title(raw = document.title) {
-  return raw.replace(/\s*[-|]\s*Netflix$/, '').trim().slice(0, 300).replace(/^Netflix$/, '') || 'Netflix 콘텐츠';
+  return raw.replace(/\s*[-|]\s*Netflix$/, '').trim().slice(0, 300).replace(/^Netflix$/, '') || "Netflix 콘텐츠"; // the room's shared title: not the host's language
 }
 
 export type NetflixMetadata = {

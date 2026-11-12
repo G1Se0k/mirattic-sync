@@ -1,3 +1,5 @@
+import { t } from "@mirattic/i18n";
+import { tn, useOnLangChange } from "./T";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { Socket, SocketStatus } from "@mirattic/client";
 import type { ChatDeleted, ChatMessage, RoomMemberView, ServerEvent } from "@mirattic/types";
@@ -143,6 +145,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   /** This dialog's attempt: a retry of the same time is the same request (posted once, answered again). */
   const stampAttempt = useRef("");
   const [stampError, setStampError] = useState<string | null>(null);
+  useOnLangChange(() => { setFailed(null); setStampError(null); });
   /**
    * The stamp sent (its `reqId`), until the server answers it — `chat:stamp` (posted: the dialog closes) or an `error`
    * — or STAMP_WAIT_MS pass. Only this attempt's answer counts: one for an earlier, given-up attempt doesn't.
@@ -196,7 +199,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     if (canStamp || stamping === null) return;
     const sent = !!stampWait.current;
     closeStamp();
-    if (sent) setFailed("타임스탬프를 찍지 못했습니다: 인식 중인 영상이 없어졌습니다.");
+    if (sent) setFailed(t("타임스탬프를 찍지 못했습니다: 인식 중인 영상이 없어졌습니다."));
   }, [canStamp, stamping]);
 
   // Older messages keep the view where it was; new ones (and a line grown in place) follow the bottom only if the
@@ -287,20 +290,20 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
     clearTimeout(stampWait.current?.timer);
     stampWait.current = undefined;
     setStampSending(false);
-    setStampError("타임스탬프를 찍지 못했습니다. 시간을 확인하고 다시 시도해 주세요.");
+    setStampError(t("타임스탬프를 찍지 못했습니다. 시간을 확인하고 다시 시도해 주세요."));
   }
 
   function stamp(e: FormEvent) {
     e.preventDefault();
     if (stampWait.current) return;
     // The room moved on to another video meanwhile: the time shown was the previous one's.
-    if (stampVideo.current !== video) return setStampError("방 영상이 바뀌었습니다. 창을 닫고 다시 열어 주세요.");
+    if (stampVideo.current !== video) return setStampError(t("방 영상이 바뀌었습니다. 창을 닫고 다시 열어 주세요."));
     const ms = parseClock(stamping ?? "");
-    if (ms === null) return setStampError("시간을 3:28이나 1:02:03처럼 입력해 주세요.");
-    if (videoMs !== undefined && ms > videoMs) return setStampError(`영상 길이(${clock(videoMs)}) 안의 시간을 입력해 주세요.`);
+    if (ms === null) return setStampError(t("시간을 3:28이나 1:02:03처럼 입력해 주세요."));
+    if (videoMs !== undefined && ms > videoMs) return setStampError(t("영상 길이({v}) 안의 시간을 입력해 주세요.", { v: clock(videoMs) }));
     const reqId = `${stampAttempt.current}-${ms}`;
     const on = stampVideo.current; // the video the time is on (checked above to be the room's now)
-    if (!socket.send({ type: "chat:stamp", reqId, roomId, payload: { mediaPositionMs: ms, contentKey: on } })) return setStampError("연결되면 다시 시도해 주세요.");
+    if (!socket.send({ type: "chat:stamp", reqId, roomId, payload: { mediaPositionMs: ms, contentKey: on } })) return setStampError(t("연결되면 다시 시도해 주세요."));
     // Open until the server answers: it may still refuse it (the room's video changed meanwhile).
     setStampError(null);
     setStampSending(true);
@@ -309,12 +312,12 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
 
   async function remove(m: ChatMessage) {
     const yes = m.userId === meId
-      ? await asker.ask("이 메시지를 삭제할까요?", { body: "모두에게 \"삭제된 메시지입니다\"로 보입니다.", ok: "삭제", danger: true })
-      : await asker.ask("호스트 권한으로 이 메시지를 삭제할까요?", { ok: "삭제", danger: true });
+      ? await asker.ask(t("이 메시지를 삭제할까요?"), { body: t("모두에게 \"삭제된 메시지입니다\"로 보입니다."), ok: t("삭제"), danger: true })
+      : await asker.ask(t("호스트 권한으로 이 메시지를 삭제할까요?"), { ok: t("삭제"), danger: true });
     if (!yes) return;
     setFailed(null);
     // The server's chat:delete removes it here too (and on every other screen).
-    await api.deleteMessage(roomId, m.id).catch(() => setFailed("메시지를 삭제하지 못했습니다."));
+    await api.deleteMessage(roomId, m.id).catch(() => setFailed(t("메시지를 삭제하지 못했습니다.")));
   }
 
   function jump(ms: number) {
@@ -383,14 +386,14 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
   // A member's name now; one who left: the name the message came with (decision 112), "나간 사용자" without one.
   const name = (id: string, sent?: string | null) => {
     const member = members.find((m) => m.user.id === id)?.user.displayName;
-    if (id === meId) return `${member ?? sent ?? "나"}(나)`;
-    return member ?? sent ?? "나간 사용자";
+    if (id === meId) return t("{v}(나)", { v: member ?? sent ?? t("나") });
+    return member ?? sent ?? t("나간 사용자");
   };
   // Moves playback only on the video it was taken on (a line from before the room's video changed: just a time).
   const timestamp = (ms: number | undefined, key: string | undefined) =>
     ms === undefined ? null
       : onSeek && key !== undefined && key === video
-        ? <button className="link stamp code" title="이 위치로 이동" onClick={() => jump(ms)}>{clock(ms)}</button>
+        ? <button className="link stamp code" title={t("이 위치로 이동")} onClick={() => jump(ms)}>{clock(ms)}</button>
         : <span className="stamp code">{clock(ms)}</span>;
 
   return (
@@ -400,25 +403,26 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
         {hasOlder && (
           <li>
             <button className="link" disabled={loadingOlder} onClick={() => void loadOlder()}>
-              {loadingOlder ? "불러오는 중…" : "이전 메시지"}
+              {loadingOlder ? t("불러오는 중…") : t("이전 메시지")}
             </button>
           </li>
         )}
-        {shownLines.length === 0 && !hasOlder && <li className="muted">아직 메시지가 없습니다.</li>}
+        {shownLines.length === 0 && !hasOlder && <li className="muted">{t("아직 메시지가 없습니다.")}</li>}
         {shownLines.map((item) =>
           item.kind ? (
             <li key={item.id} className={`log${fresh.has(item.id) ? " fresh" : ""}`} data-line={item.id}>
               {item.kind === "content" ? logText(item) : (
                 // The name on it (join, leave, kick, host, stamp: the line's userId is theirs) opens their box.
-                <>
-                  <button type="button" className={`author${isPicked(item.id, "log") ? " on" : ""}`} aria-haspopup="dialog"
-                    aria-expanded={isPicked(item.id, "log")} data-anchor="log" onClick={() => openBox(item.id, item.userId, "log", item.text)}>
-                    {item.text}
-                  </button>
-                  {item.kind === "stamp" && item.mediaPositionMs !== undefined
-                    ? <>님이 {timestamp(item.mediaPositionMs, item.contentKey)}에 스탬프를 찍었습니다</>
-                    : logText(item).slice(item.text.length)}
-                </>
+                // In the language's own order: the name a button, a stamp's time its link.
+                tn(logKey(item), {
+                  text: (
+                    <button type="button" className={`author${isPicked(item.id, "log") ? " on" : ""}`} aria-haspopup="dialog"
+                      aria-expanded={isPicked(item.id, "log")} data-anchor="log" onClick={() => openBox(item.id, item.userId, "log", item.text)}>
+                      {item.text}
+                    </button>
+                  ),
+                  v: item.kind === "stamp" && item.mediaPositionMs !== undefined ? timestamp(item.mediaPositionMs, item.contentKey) : clock(item.mediaPositionMs ?? 0),
+                })
               )}
             </li>
           ) : (
@@ -431,7 +435,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
                   {name(item.userId, item.userName)}
                 </button>
                 {item.deleted ? (
-                  <span className="deleted">삭제된 메시지입니다</span>
+                  <span className="deleted">{t("삭제된 메시지입니다")}</span>
                 ) : (
                   <>
                     {timestamp(item.mediaPositionMs, item.contentKey)}
@@ -441,28 +445,28 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
               </span>
               {!item.deleted && (item.userId === meId || isHost) && (
                 <span className="tools">
-                  <IconButton icon="trash" label="삭제" onClick={() => void remove(item)} />
+                  <IconButton icon="trash" label={t("삭제")} onClick={() => void remove(item)} />
                 </span>
               )}
             </li>
           ),
         )}
         {pickedMember && (
-          <li className="member-box" ref={box} tabIndex={-1} role="dialog" aria-label={`${pickedMember.user.displayName} 메뉴`}>
+          <li className="member-box" ref={box} tabIndex={-1} role="dialog" aria-label={t("{displayName} 메뉴", { displayName: pickedMember.user.displayName })}>
             {memberBox(pickedMember, closeBox, !inRoom)}
           </li>
         )}
       </ul>
       {unseenMentions.length > 0 ? (
-        <button className="mention-jump" onClick={toMention}><b aria-hidden="true">@</b> 새 멘션 {unseenMentions.length}개</button>
+        <button className="mention-jump" onClick={toMention}><b aria-hidden="true">@</b> {t("새 멘션 {n}개", { n: unseenMentions.length })}</button>
       ) : unseen && (
-        <button className="link" onClick={() => list.current?.scrollTo({ top: list.current.scrollHeight })}>새 메시지 ↓</button>
+        <button className="link" onClick={() => list.current?.scrollTo({ top: list.current.scrollHeight })}>{t("새 메시지 ↓")}</button>
       )}
       <div className="composer">
         {failed && <p className="error" role="alert">{failed}</p>}
         <form onSubmit={send}>
           {choices.length > 0 && (
-            <ul id={suggestId} className="mention-suggest" role="listbox" aria-label="언급할 사람">
+            <ul id={suggestId} className="mention-suggest" role="listbox" aria-label={t("언급할 사람")}>
               {choices.map((c, i) => (
                 <li key={c.id} id={`${suggestId}-${i}`} role="option" aria-selected={i === chosen} className={i === chosen ? "on" : undefined}
                   onMouseDown={(e) => { e.preventDefault(); complete(c.name); }} onMouseEnter={() => setPick(i)}>
@@ -473,26 +477,26 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
               ))}
             </ul>
           )}
-          <input ref={input} placeholder="메시지" maxLength={1000} value={text} role="combobox" aria-expanded={choices.length > 0}
+          <input ref={input} placeholder={t("메시지")} maxLength={1000} value={text} role="combobox" aria-expanded={choices.length > 0}
             aria-autocomplete="list" aria-controls={choices.length ? suggestId : undefined}
             aria-activedescendant={choices.length ? `${suggestId}-${chosen}` : undefined} onKeyDown={onMentionKey}
             onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); setPick(0); }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)} onBlur={() => setClosedAt(`${caret}:${text}`)}
             onFocus={() => setClosedAt(null)} />
-          <IconButton icon="clock" label="타임스탬프 찍기" disabled={status !== "open" || !video || !canStamp} onClick={() => void openStamp()} />
-          <IconButton icon="send" label="보내기" type="submit" tone="primary" disabled={status !== "open"} />
+          <IconButton icon="clock" label={t("타임스탬프 찍기")} disabled={status !== "open" || !video || !canStamp} onClick={() => void openStamp()} />
+          <IconButton icon="send" label={t("보내기")} type="submit" tone="primary" disabled={status !== "open"} />
         </form>
       </div>
       {stamping !== null && (
-        <Dialog title="타임스탬프 찍기" onClose={closeStamp}>
+        <Dialog title={t("타임스탬프 찍기")} onClose={closeStamp}>
           <form className="stack" onSubmit={stamp}>
-            <p className="muted">채팅에 모두에게 남습니다. 지금 위치를 그대로 찍거나 시간을 고쳐서 찍을 수 있습니다.</p>
-            <input id="stamp-time" aria-label="시간" placeholder="0:00" inputMode="numeric" autoFocus value={stamping}
+            <p className="muted">{t("채팅에 모두에게 남습니다. 지금 위치를 그대로 찍거나 시간을 고쳐서 찍을 수 있습니다.")}</p>
+            <input id="stamp-time" aria-label={t("시간")} placeholder="0:00" inputMode="numeric" autoFocus value={stamping}
               onChange={(e) => setStamping(e.target.value)} />
             {stampError && <p className="error" role="alert">{stampError}</p>}
             <Actions>
-              <button type="button" className="link" onClick={closeStamp}>취소</button>
-              <button type="submit" disabled={status !== "open" || stampSending}>{stampSending ? "찍는 중…" : "찍기"}</button>
+              <button type="button" className="link" onClick={closeStamp}>{t("취소")}</button>
+              <button type="submit" disabled={status !== "open" || stampSending}>{stampSending ? t("찍는 중…") : t("찍기")}</button>
             </Actions>
           </form>
         </Dialog>
@@ -576,16 +580,22 @@ export function scrollFor(prev: Shown, next: Shown, atBottom: boolean, mine: boo
 }
 
 /** A room log line as shown (decision 78). */
-export function logText(m: ChatMessage) {
+/** A log line's text (its Korean, the key) with `{text}` (the name, or the title) and a stamp's `{v}` (decision 124). */
+function logKey(m: ChatMessage): string {
   switch (m.kind) {
-    case "join": return `${m.text}님이 들어왔습니다`;
-    case "leave": return `${m.text}님이 나갔습니다`;
-    case "content": return `호스트가 영상을 바꿨습니다: ${m.text}`;
-    case "kick": return `${m.text}님이 내보내졌습니다`;
-    case "host": return `${m.text}님이 호스트가 되었습니다`;
-    case "stamp": return `${m.text}님이 ${clock(m.mediaPositionMs ?? 0)}에 스탬프를 찍었습니다`;
+    case "join": return "{text}님이 들어왔습니다";
+    case "leave": return "{text}님이 나갔습니다";
+    case "content": return "호스트가 영상을 바꿨습니다: {text}";
+    case "kick": return "{text}님이 내보내졌습니다";
+    case "host": return "{text}님이 호스트가 되었습니다";
+    case "stamp": return "{text}님이 {v}에 스탬프를 찍었습니다";
     default: return "";
   }
+}
+
+export function logText(m: ChatMessage) {
+  const key = logKey(m);
+  return key && t(key, { text: m.text, v: clock(m.mediaPositionMs ?? 0) });
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -627,9 +637,9 @@ export function mentionChoices(query: string, members: RoomMemberView[], meId: s
   const people = members
     .filter((m) => m.user.id !== meId && m.user.displayName.toLocaleLowerCase().includes(q))
     .sort((a, b) => Number(!a.user.displayName.toLocaleLowerCase().startsWith(q)) - Number(!b.user.displayName.toLocaleLowerCase().startsWith(q)))
-    .map((m) => ({ id: m.user.id, name: m.user.displayName, avatarUrl: m.user.avatarUrl, sub: m.role === "HOST" ? "호스트" : undefined }));
+    .map((m) => ({ id: m.user.id, name: m.user.displayName, avatarUrl: m.user.avatarUrl, sub: m.role === "HOST" ? t("호스트") : undefined }));
   const all = isHost && EVERYONE.startsWith(q) && members.some((m) => m.user.id !== meId)
-    ? [{ id: EVERYONE, name: EVERYONE, avatarUrl: undefined, sub: "방 멤버 모두" }] : [];
+    ? [{ id: EVERYONE, name: EVERYONE, avatarUrl: undefined, sub: t("방 멤버 모두") }] : [];
   return [...all, ...people].slice(0, 6);
 }
 

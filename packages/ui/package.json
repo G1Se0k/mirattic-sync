@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@mirattic/client": "workspace:*",
+    "@mirattic/i18n": "workspace:*",
     "@mirattic/sync-core": "workspace:*",
     "@mirattic/types": "workspace:*"
   },

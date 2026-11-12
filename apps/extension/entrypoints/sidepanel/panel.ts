@@ -1,3 +1,5 @@
+import { t } from '@mirattic/i18n';
+import { langSetting, saveLang } from '../../lang';
 import { browser, type Browser } from 'wxt/browser';
 import { ApiError, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { emptyRoomState, type RoomSyncState } from '@mirattic/sync-core';
@@ -216,7 +218,7 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
           const ids = msg.mentions ?? [];
           if (ids.length) {
             keepMention({
-              roomId: m.event.roomId, name: msg.userName ?? '친구', until: Date.now() + INCOMING_MS, everyone: ids.includes('everyone'),
+              roomId: m.event.roomId, name: msg.userName ?? t("친구"), until: Date.now() + INCOMING_MS, everyone: ids.includes('everyone'),
               for: (id) => ids.includes(id) && msg.userId !== id,
             });
           }
@@ -446,6 +448,7 @@ export async function connectPanel(openedAt: number): Promise<{ api: ApiClient; 
         }
       },
     },
+    language: { get: langSetting, set: saveLang },
     textSize: {
       get: () => textSize,
       set: (percent) => {

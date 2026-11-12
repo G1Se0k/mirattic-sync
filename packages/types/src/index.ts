@@ -1,3 +1,4 @@
+import { fill, t } from "@mirattic/i18n";
 // Provider-agnostic types shared by the extension's parts and (by contract) the server.
 // All timestamps are UTC epoch milliseconds.
 
@@ -310,13 +311,15 @@ export type ServerEvent<T = unknown> = {
 
 /** "Title 시즌 2 3화 · Name": a presence's full title, as a room's content title. */
 export function contentTitle(p: Pick<MediaPresence, "title" | "season" | "episode" | "episodeTitle">) {
-  return `${p.title}${episodeLabel(p) ? ` ${episodeLabel(p)}` : ""}${p.episodeTitle ? ` · ${p.episodeTitle}` : ""}`.slice(0, 300);
+  // Shared with the room (stored, shown to everyone): its episode in Korean as before, not the host's language.
+  const ep = episodeLabel(p, fill);
+  return `${p.title}${ep ? ` ${ep}` : ""}${p.episodeTitle ? ` · ${p.episodeTitle}` : ""}`.slice(0, 300);
 }
 
 /** "3화", or "시즌 2 3화" past the first season; "" without an episode number. */
-export function episodeLabel(p: Pick<MediaPresence, "season" | "episode">) {
+export function episodeLabel(p: Pick<MediaPresence, "season" | "episode">, words: typeof t = t) {
   if (p.episode === undefined) return "";
-  return p.season !== undefined && p.season > 1 ? `시즌 ${p.season} ${p.episode}화` : `${p.episode}화`;
+  return p.season !== undefined && p.season > 1 ? words("시즌 {season} {episode}화", { season: p.season, episode: p.episode }) : words("{episode}화", { episode: p.episode });
 }
 
 /**

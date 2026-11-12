@@ -1,3 +1,5 @@
+import { t } from "@mirattic/i18n";
+import { useOnLangChange } from "./T";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "@mirattic/client";
 import { MAX_MEMBERS, MAX_ROOM_NAME, MIN_MEMBERS, type PublicRoom, type RoomSettings } from "@mirattic/types";
@@ -25,6 +27,7 @@ export function RoomSettingsDialog({ title, ok, initial, placeholder, min = 1, o
   const [isPublic, setPublic] = useState(initial.isPublic);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useOnLangChange(() => setError(null));
   const lowest = Math.max(MIN_MEMBERS, min);
 
   async function submit(e: FormEvent) {
@@ -35,7 +38,7 @@ export function RoomSettingsDialog({ title, ok, initial, placeholder, min = 1, o
       await onSave({ name: name.trim(), memberLimit: limit, isPublic });
     } catch (err) {
       setError(err instanceof ApiError && err.message === "limit below members"
-        ? "지금 들어와 있는 인원보다 적게 줄일 수 없습니다." : "실패했습니다. 다시 시도해 주세요.");
+        ? t("지금 들어와 있는 인원보다 적게 줄일 수 없습니다.") : t("실패했습니다. 다시 시도해 주세요."));
     } finally {
       setBusy(false);
     }
@@ -46,35 +49,35 @@ export function RoomSettingsDialog({ title, ok, initial, placeholder, min = 1, o
     <Dialog title={title} onClose={busy ? undefined : onClose}>
       <form className="stack room-settings" onSubmit={submit}>
         <label className="stack field">
-          <span>방 제목</span>
+          <span>{t("방 제목")}</span>
           <input value={name} maxLength={MAX_ROOM_NAME} placeholder={placeholder} autoFocus
             onChange={(e) => setName(e.target.value)} />
         </label>
         <div className="row field">
           <span className="grow">
-            최대 인원
-            <span className="muted">호스트 포함 {MIN_MEMBERS}~{MAX_MEMBERS}명{min > MIN_MEMBERS && ` · 지금 ${min}명`}</span>
+            {t("최대 인원")}
+            <span className="muted">{t("호스트 포함 {min}~{max}명", { min: MIN_MEMBERS, max: MAX_MEMBERS })}{min > MIN_MEMBERS && t(" · 지금 {min}명", { min })}</span>
           </span>
           <span className="stepper">
-            <button type="button" aria-label="인원 줄이기" disabled={limit <= lowest} onClick={() => setLimit(limit - 1)}>−</button>
-            <output aria-live="polite">{limit}명</output>
-            <button type="button" aria-label="인원 늘리기" disabled={limit >= MAX_MEMBERS} onClick={() => setLimit(limit + 1)}>+</button>
+            <button type="button" aria-label={t("인원 줄이기")} disabled={limit <= lowest} onClick={() => setLimit(limit - 1)}>−</button>
+            <output aria-live="polite">{t("{n}명", { n: limit })}</output>
+            <button type="button" aria-label={t("인원 늘리기")} disabled={limit >= MAX_MEMBERS} onClick={() => setLimit(limit + 1)}>+</button>
           </span>
         </div>
-        <div className="stack field" role="radiogroup" aria-label="공개 설정">
-          <span>공개 설정</span>
+        <div className="stack field" role="radiogroup" aria-label={t("공개 설정")}>
+          <span>{t("공개 설정")}</span>
           <label className="option">
             <input type="radio" name="room-public" checked={!isPublic} onChange={() => setPublic(false)} />
-            <span>비공개<span className="muted">초대받은 친구와 방 코드를 아는 사람만 들어옵니다.</span></span>
+            <span>{t("비공개")}<span className="muted">{t("초대받은 친구와 방 코드를 아는 사람만 들어옵니다.")}</span></span>
           </label>
           <label className="option">
             <input type="radio" name="room-public" checked={isPublic} onChange={() => setPublic(true)} />
-            <span>공개<span className="muted">공개 방 목록에 보여 누구나 들어올 수 있습니다. 방 제목 · 영상 제목 · 호스트 이름 · 인원이 모든 사용자에게 보입니다.</span></span>
+            <span>{t("공개")}<span className="muted">{t("공개 방 목록에 보여 누구나 들어올 수 있습니다. 방 제목 · 영상 제목 · 호스트 이름 · 인원이 모든 사용자에게 보입니다.")}</span></span>
           </label>
         </div>
         {error && <p className="error" role="alert">{error}</p>}
         <Actions>
-          <button type="button" className="link" disabled={busy} onClick={onClose}>취소</button>
+          <button type="button" className="link" disabled={busy} onClick={onClose}>{t("취소")}</button>
           <button type="submit" disabled={busy}>{ok}</button>
         </Actions>
       </form>
@@ -103,6 +106,7 @@ export function PublicRoomsDialog({ inRoom, oneRoom, onJoined, onClose }: {
   const [next, setNext] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useOnLangChange(() => setError(null));
   const latest = useRef(0);
   const opened = useRef(false);
   /** One join at a time: two clicks would make me a member of both and open whichever answered last. */
@@ -116,7 +120,7 @@ export function PublicRoomsDialog({ inRoom, oneRoom, onJoined, onClose }: {
       if (mine !== latest.current) return;
       setRooms((shown) => (before ? [...(shown ?? []), ...page.rooms.filter((r) => !shown?.some((s) => s.id === r.id))] : page.rooms));
       setNext(page.next ?? null);
-    }, () => mine === latest.current && setError("공개 방을 불러오지 못했습니다.")).finally(() => mine === latest.current && setLoading(false));
+    }, () => mine === latest.current && setError(t("공개 방을 불러오지 못했습니다."))).finally(() => mine === latest.current && setLoading(false));
   }
 
   // On open, and 300 ms after typing stops. A changed search drops what was shown and any answer still coming (for
@@ -146,36 +150,36 @@ export function PublicRoomsDialog({ inRoom, oneRoom, onJoined, onClose }: {
       // What it said, shown in the list at once (no reload, which would clear the message): full, or gone from it.
       if (status === 409) setRooms((shown) => shown?.map((r) => (r.id === room.id ? { ...r, members: r.memberLimit } : r)) ?? null);
       if (status === 404) setRooms((shown) => shown?.filter((r) => r.id !== room.id) ?? null);
-      setError(status === 409 ? "방이 가득 찼습니다." : status === 404 ? "더 이상 공개되지 않은 방입니다." : "들어가지 못했습니다.");
+      setError(status === 409 ? t("방이 가득 찼습니다.") : status === 404 ? t("더 이상 공개되지 않은 방입니다.") : t("들어가지 못했습니다."));
     }
   }
 
   return (
     <Dialog title={
       <span className="row">
-        <span className="grow">공개 방</span>
-        <IconButton icon="refresh" label="새로고침" disabled={loading} onClick={() => load(query)} />
+        <span className="grow">{t("공개 방")}</span>
+        <IconButton icon="refresh" label={t("새로고침")} disabled={loading} onClick={() => load(query)} />
       </span>
     } onClose={onClose}>
-      <input type="search" placeholder="방 제목 · 영상 제목 검색" value={query} maxLength={100} autoFocus
-        aria-label="공개 방 검색" onChange={(e) => setQuery(e.target.value)} />
+      <input type="search" placeholder={t("방 제목 · 영상 제목 검색")} value={query} maxLength={100} autoFocus
+        aria-label={t("공개 방 검색")} onChange={(e) => setQuery(e.target.value)} />
       <div className="public-rooms">
-        {rooms === null && loading && <p className="muted">불러오는 중…</p>}
-        {rooms?.length === 0 && !loading && <p className="muted">{query.trim() ? "찾는 방이 없습니다." : "지금 열린 공개 방이 없습니다."}</p>}
+        {rooms === null && loading && <p className="muted">{t("불러오는 중…")}</p>}
+        {rooms?.length === 0 && !loading && <p className="muted">{query.trim() ? t("찾는 방이 없습니다.") : t("지금 열린 공개 방이 없습니다.")}</p>}
         {rooms && rooms.length > 0 && (
           <ul className="list box">
             {rooms.map((r) => {
               const full = r.members >= r.memberLimit && !inRoom(r.id);
               return (
                 <li key={r.id} className="item">
-                  {r.provider ? <ProviderIcon provider={r.provider} /> : <span className="provider none" title="영상 없음">·</span>}
+                  {r.provider ? <ProviderIcon provider={r.provider} /> : <span className="provider none" title={t("영상 없음")}>·</span>}
                   <div className="grow">
-                    <div className="name ellipsis">{r.name || r.title || "영상 없음"}</div>
-                    {r.name && <div className="muted ellipsis">{r.title ?? "영상 없음"}</div>}
-                    <div className="muted ellipsis">{r.hostName}님의 방 · {r.members}/{r.memberLimit}명</div>
+                    <div className="name ellipsis">{r.name || r.title || t("영상 없음")}</div>
+                    {r.name && <div className="muted ellipsis">{r.title ?? t("영상 없음")}</div>}
+                    <div className="muted ellipsis">{t("{displayName}님의 방", { displayName: r.hostName })} · {t("{n}/{max}명", { n: r.members, max: r.memberLimit })}</div>
                   </div>
                   <button className="small" disabled={full || joiningId !== null} onClick={() => void join(r)}>
-                    {joiningId === r.id ? "참가 중…" : inRoom(r.id) ? "입장" : full ? "가득 참" : "참가"}
+                    {joiningId === r.id ? t("참가 중…") : inRoom(r.id) ? t("입장") : full ? t("가득 참") : t("참가")}
                   </button>
                 </li>
               );
@@ -183,13 +187,13 @@ export function PublicRoomsDialog({ inRoom, oneRoom, onJoined, onClose }: {
           </ul>
         )}
         {next !== null && (
-          <button className="link" disabled={loading} onClick={() => load(query, next)}>{loading ? "불러오는 중…" : "더 보기"}</button>
+          <button className="link" disabled={loading} onClick={() => load(query, next)}>{loading ? t("불러오는 중…") : t("더 보기")}</button>
         )}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
-      <p className="muted">공개 방에서는 모르는 사람과 함께 봅니다. 불편한 사용자는 신고하거나 차단할 수 있습니다.</p>
+      <p className="muted">{t("공개 방에서는 모르는 사람과 함께 봅니다. 불편한 사용자는 신고하거나 차단할 수 있습니다.")}</p>
       <Actions>
-        <button type="button" className="link" onClick={onClose}>닫기</button>
+        <button type="button" className="link" onClick={onClose}>{t("닫기")}</button>
       </Actions>
     </Dialog>
   );

@@ -25,3 +25,4 @@ graphify-out/
 
 # Local design notes, not committed
 docs/design/
+.vitest/

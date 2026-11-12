@@ -1,3 +1,5 @@
+import { t } from '@mirattic/i18n';
+import { followLang } from '../lang';
 import { browser, type Browser } from 'wxt/browser';
 import { ApiError, connectSocket, createApi, HOST_MUST_SWITCH, type ApiClient, type Socket, type SocketStatus } from '@mirattic/client';
 import { PAUSE_REQUEST_SHOWN_MS, RoomSync } from '@mirattic/sync-core';
@@ -46,6 +48,17 @@ const PANEL_OFFER_MS = 10_000; // "패널 열기" over another window's video (d
 const TYPE_RETRY_MS = 60_000; // a failed confirmation: asked instead, automatic again after this
 
 export default defineBackground(() => {
+  // Alerts written in the language chosen (decision 124). A panel's offer can show while that panel's Settings change
+  // it: drawn again in the new one (the other alerts show only with no panel open, where it can't change).
+  const langRead = followLang(() => {
+    // Redrawn as a new toast with the time it had left (not a fresh one's).
+    for (const [tabId, o] of [...panelOffers]) {
+      toTabs({ type: TOAST_DISMISS, kind: 'panel', target: o.toast.target }, () => true, tabId);
+      const toast = { ...o.toast, alertId: ++alertIds };
+      panelOffers.set(tabId, { toast, until: o.until });
+      sendOffer(tabId, toast.alertId);
+    }
+  });
   // Toolbar icon opens the side panel (outside the page, never over the player).
   void browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
@@ -216,7 +229,7 @@ export default defineBackground(() => {
     if (!hosting() || detachedPanel() || ![...panelWindows.values()].some((p) => p.windowId !== windowId)) return;
     const toast = {
       type: TOAST, kind: 'panel', target: String(windowId), panelOpen: false, alertId: ++alertIds, total: PANEL_OFFER_MS,
-      title: '이 창에서 보시나요?', body: 'Mirattic 패널을 이 창으로 옮기면 이 탭의 영상을 인식합니다.',
+      title: t("이 창에서 보시나요?"), body: t("Mirattic 패널을 이 창으로 옮기면 이 탭의 영상을 인식합니다."),
     } as const;
     panelOffers.set(tabId, { toast, until: Date.now() + PANEL_OFFER_MS });
     sendOffer(tabId, toast.alertId);
@@ -233,12 +246,13 @@ export default defineBackground(() => {
         // followed, no panel in another window, a detached panel.
         const current = async () => {
           const o = panelOffers.get(tabId);
-          const t = await browser.tabs.get(tabId).catch(() => null);
+          const tab = await browser.tabs.get(tabId).catch(() => null);
           const now = Date.now();
-          if (o?.toast.alertId !== alertId || o.until <= now || !t?.active || !onYouTube(t.url)) return null;
-          const elsewhere = [...panelWindows.values()].some((p) => p.windowId !== t.windowId);
+          if (o?.toast.alertId !== alertId || o.until <= now || !tab?.active || !onYouTube(tab.url)) return null;
+          const elsewhere = [...panelWindows.values()].some((p) => p.windowId !== tab.windowId);
           if (!meId || !hosting() || detachedPanel() || !(platform?.followsActive() ?? !room) || !elsewhere) return null;
-          return { ...o.toast, ms: o.until - now, seq: ++seq };
+          // Its words as sent, in the language shown now (decision 124).
+          return { ...o.toast, title: t("이 창에서 보시나요?"), body: t("Mirattic 패널을 이 창으로 옮기면 이 탭의 영상을 인식합니다."), ms: o.until - now, seq: ++seq };
         };
         let offer = await current();
         if (!offer) return;
@@ -392,7 +406,7 @@ export default defineBackground(() => {
     const shown = view ? shownContent(view) : null; // none while the host's browser shows none (decision 115)
     const meta = view ? await whereToWatch(shown, host?.id ?? friendId ?? '') : undefined;
     const ms = until - Date.now();
-    if (ms > 0) alert('answered', roomId, ms, `${host?.displayName ?? '친구'}님이 합류 요청을 수락했습니다`, shown?.title ?? '', meta);
+    if (ms > 0) alert('answered', roomId, ms, t("{v}님이 합류 요청을 수락했습니다", { v: host?.displayName ?? t("친구") }), shown?.title ?? '', meta);
   }
 
   /**
@@ -413,7 +427,7 @@ export default defineBackground(() => {
     const mine = session;
     const seq = ++mentionSeq;
     const until = Date.now() + INCOMING_MS;
-    const name = msg.userName ?? '친구';
+    const name = msg.userName ?? t("친구");
     // Kept from now (no title yet): a panel opening during the lookup gets it (the chat event came before it).
     const pm: NonNullable<typeof pendingMention> = { roomId, name, userId: me, alertId: -1, until,
       everyone: msg.mentions?.includes('everyone') === true };
@@ -432,7 +446,7 @@ export default defineBackground(() => {
       pendingMention = null;
       return;
     }
-    alert('mention', roomId, ms, `${name}님이 ${everyone ? '모두를' : '나를'} 언급했습니다`, msg.text, title ? `방: ${title}` : undefined);
+    alert('mention', roomId, ms, everyone ? t("{name}님이 모두를 언급했습니다", { name }) : t("{name}님이 나를 언급했습니다", { name }), msg.text, title ? t("방: {title}", { title }) : undefined);
     const entry = alerts.find((a) => a.kind === 'mention' && a.target === roomId);
     if (entry) entry.everyone = everyone;
     pm.title = title;
@@ -547,7 +561,7 @@ export default defineBackground(() => {
         // 채팅 보기: that room's screen in the panel the click opens — even the room I'm in already (Home shows the
         // room it enters, not one it was in), told to it as it connects.
         if (accept && meId) {
-          const name = mentioned?.name ?? '친구';
+          const name = mentioned?.name ?? t("친구");
           pendingOpen = { roomId: target, name, title: mentioned?.title, userId: meId, until: Date.now() + INCOMING_MS };
           if (room?.state.roomId !== target) openRoom(target, true);
         }
@@ -634,8 +648,8 @@ export default defineBackground(() => {
   /** Over the videos while no panel is open (a panel open asks itself; closed unanswered, it toasts again). */
   function toastType(n: Shared['typeNotices'][number]) {
     const off = (n.type === 'netflix' || n.type === 'laftel') && !platform?.experimental?.enabled(n.type);
-    alert('type', n.roomId, INCOMING_MS, `방장이 방을 ${PROVIDER_NAMES[n.type]} 방으로 바꿨습니다`,
-      off ? `${PROVIDER_NAMES[n.type]} 제어(실험)가 꺼져 있습니다. 패널에서 켜거나 방을 나가세요.` : '');
+    alert('type', n.roomId, INCOMING_MS, t("방장이 방을 {v} 방으로 바꿨습니다", { v: PROVIDER_NAMES[n.type] }),
+      off ? t("{v} 제어(실험)가 꺼져 있습니다. 패널에서 켜거나 방을 나가세요.", { v: PROVIDER_NAMES[n.type] }) : '');
   }
   async function keepTypeAlways(userId: string, roomId: string) {
     const set = await typeAlways(userId);
@@ -813,7 +827,7 @@ export default defineBackground(() => {
       // Counted from now (the server's time left), not from when the channel lookup ends; not shown if it was
       // settled meanwhile (`pendingInvites`).
       const until = Date.now() + (view.expiresInMs ?? INCOMING_MS);
-      const title = `${host?.user.displayName ?? '친구'}님의 같이 보기 초대`;
+      const title = t("{v}님의 같이 보기 초대", { v: host?.user.displayName ?? t("친구") });
       const lookup = {};
       pendingInvites.set(view.id, lookup);
       if (view.code) inviteCodes.set(view.id, view.code); // to hand to the panel if accepting needs asking (decision 115)
@@ -822,7 +836,7 @@ export default defineBackground(() => {
         if (pendingInvites.get(view.id) !== lookup) return; // settled, or invited again since
         pendingInvites.delete(view.id);
         const ms = until - Date.now();
-        if (ms > 0) alert('invite', view.id, ms, title, roomTitle(view) ?? (view.content ? '영상 없음' : '아직 고른 영상이 없습니다'), meta);
+        if (ms > 0) alert('invite', view.id, ms, title, roomTitle(view) ?? (view.content ? t("영상 없음") : t("아직 고른 영상이 없습니다")), meta);
       });
     }
     // Answered by me elsewhere (`room:update` to me), or the room closed: the invitation is settled.
@@ -839,12 +853,12 @@ export default defineBackground(() => {
     if (event.type === 'watch:answer' && event.roomId && !ports.size) void enterAnswered(event.roomId, event.userId);
     if (event.type === 'watch:request') {
       const from = event.payload as IncomingRequest;
-      alert('request', from.id, from.expiresInMs ?? INCOMING_MS, `${from.displayName}님이 같이 보자고 합니다`);
+      alert('request', from.id, from.expiresInMs ?? INCOMING_MS, t("{displayName}님이 같이 보자고 합니다", { displayName: from.displayName }));
     }
     if (event.type === 'watch:cancel') dropAlerts((a) => a.kind === 'request' && a.target === event.userId);
     const asked = room?.state.pauseRequest;
     if (event.type === 'pause:request' && asked && asked.userId === event.userId) {
-      alert('pause', room!.state.roomId, PAUSE_REQUEST_SHOWN_MS, `${asked.name}님이 일시정지를 요청했습니다`, asked.reason);
+      alert('pause', room!.state.roomId, PAUSE_REQUEST_SHOWN_MS, t("{name}님이 일시정지를 요청했습니다", { name: asked.name }), asked.reason);
     }
   }
 
@@ -965,6 +979,7 @@ export default defineBackground(() => {
    * browser restart), read before deciding — until the user takes over again.
    */
   async function connect() {
+    await langRead; // every alert comes over the socket: none written before the language is known
     await replacedLoaded;
     if (!meId || off) return; // turned off (also while a sign-in was finishing): no socket until turned on
     if (!replaced()) return startSocket();

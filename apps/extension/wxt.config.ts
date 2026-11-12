@@ -8,7 +8,9 @@ export default defineConfig({
   // mode: `wxt build` (production, .env.production's server) or `wxt` (development, a local server).
   manifest: ({ mode }) => ({
     name: 'Mirattic Sync',
-    description: 'Watch together with friends. Syncs playback state only — never media.',
+    // In the browser's language (public/_locales, decision 124); English elsewhere.
+    description: '__MSG_description__',
+    default_locale: 'en',
     // storage: the refresh token (storage.local, extension pages only), the consent flag and settings. Site access:
     // YouTube (the content script's match; host_permissions repeats it so the side panel can see which tab is
     // YouTube). Netflix and Laftel (plan.md decision 81): granted at install so the extension sees that a tab is on

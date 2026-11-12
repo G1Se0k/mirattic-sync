@@ -1,3 +1,4 @@
+import type { LangChoice } from "@mirattic/i18n";
 import type { AlertPrefs } from "@mirattic/types";
 import type { ApiClient, Socket, SocketStatus } from "@mirattic/client";
 import type { RoomSyncState } from "@mirattic/sync-core";
@@ -46,6 +47,11 @@ export type Platform = {
     alerts?(): AlertPrefs;
     /** One or more of them changed (the rest kept as stored). */
     setAlerts?(change: Partial<AlertPrefs>): Promise<void>;
+  };
+  /** The language on this device (decision 124): a choice, or "auto" (the browser's). Shown at once and saved. */
+  language?: {
+    get(): LangChoice;
+    set(choice: LangChoice): Promise<void>;
   };
   /**
    * Text size in percent (100 = default, within `TEXT_SIZE`), kept by the platform and applied to the page as the

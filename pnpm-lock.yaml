@@ -171,6 +171,9 @@ importers:
       '@mirattic/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@mirattic/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@mirattic/sync-core':
         specifier: workspace:*
         version: link:../../packages/sync-core
@@ -219,6 +222,15 @@ importers:
         specifier: ^5.0.2
         version: 5.0.2(vite@8.3.1)
 
+  packages/i18n:
+    devDependencies:
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(vite@8.3.1)
+
   packages/sync-core:
     dependencies:
       '@mirattic/types':
@@ -233,6 +245,10 @@ importers:
         version: 5.0.2(vite@8.3.1)
 
   packages/types:
+    dependencies:
+      '@mirattic/i18n':
+        specifier: workspace:*
+        version: link:../i18n
     devDependencies:
       typescript:
         specifier: ~6.0.3
@@ -243,6 +259,9 @@ importers:
       '@mirattic/client':
         specifier: workspace:*
         version: link:../client
+      '@mirattic/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@mirattic/sync-core':
         specifier: workspace:*
         version: link:../sync-core

@@ -46,5 +46,5 @@ export function splitEpisode(full: string): { title: string; episode?: number } 
 export function title(raw = document.title) {
   return raw.replace(/\s*[-|]\s*(라프텔|laftel).*$/i, '').replace(/\s*다시\s*보기\s*/g, ' ')
     .replace(/^[\s|-]+|[\s|-]+$/g, '').slice(0, 300)
-    .replace(/^(라프텔|laftel)$/i, '') || 'Laftel 콘텐츠';
+    .replace(/^(라프텔|laftel)$/i, '') || "Laftel 콘텐츠"; // the room's shared title: not the host's language
 }

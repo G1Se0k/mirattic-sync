@@ -1,3 +1,4 @@
+import { t } from '@mirattic/i18n';
 import { browser } from 'wxt/browser';
 
 // Alerts drawn over the video (plan.md decision 87): the background sends every alert to the provider tabs; a
@@ -47,15 +48,16 @@ export type ToastDismiss = { type: typeof TOAST_DISMISS; kind: AlertKind; target
 export type ToastAnswer = { type: typeof TOAST_ANSWER; kind: AlertKind; target: string; accept: boolean; alertId?: number; always?: boolean };
 
 /** Button labels: [yes, no], in that order left to right. Yes opens the panel too, except on a pause. */
-const ANSWERS: Record<AlertKind, [string, string]> = {
-  invite: ['입장', '거절'],
-  request: ['같이 보기', '무시'],
-  pause: ['모두 일시정지', '닫기'],
-  answered: ['패널 열기', '닫기'],
-  type: ['확인', '방 나가기'],
-  panel: ['패널 열기', '닫기'],
-  mention: ['채팅 보기', '닫기'],
-};
+/** In the language shown: read when drawn (decision 124). */
+const ANSWERS = (): Record<AlertKind, [string, string]> => ({
+  invite: [t("입장"), t("거절")],
+  request: [t("같이 보기"), t("무시")],
+  pause: [t("모두 일시정지"), t("닫기")],
+  answered: [t("패널 열기"), t("닫기")],
+  type: [t("확인"), t("방 나가기")],
+  panel: [t("패널 열기"), t("닫기")],
+  mention: [t("채팅 보기"), t("닫기")],
+});
 const FADE_MS = 200;
 const READY_DELAY_MS = 2_000;
 const RECHECK_MS = 1_000;
@@ -151,7 +153,7 @@ const STYLE = `
 
 const keyOf = (m: { kind: AlertKind; target: string }) => `${m.kind}:${m.target}`;
 
-export function serveToast() {
+export function serveToast(langRead: Promise<void>) {
   // ponytail: asked once, a moment after load (the player's <video> comes late); a later one misses it.
   setTimeout(() => void browser.runtime.sendMessage({ type: TOAST_READY }).catch(() => {}), READY_DELAY_MS);
   /**
@@ -340,7 +342,8 @@ export function serveToast() {
     box.dataset.key = key;
     box.setAttribute('role', 'alertdialog');
     box.innerHTML = `<div class="text"><b></b><span class="meta"></span><span class="body"></span></div>
-      <div class="actions"></div><div class="bar" role="progressbar" aria-label="자동으로 닫힘"><i></i></div>`;
+      <div class="actions"></div><div class="bar" role="progressbar"><i></i></div>`;
+    box.querySelector('.bar')!.setAttribute('aria-label', t("자동으로 닫힘"));
     box.querySelector('b')!.textContent = m.title;
     box.querySelector('.meta')!.textContent = m.meta ?? '';
     box.querySelector('.body')!.textContent = m.body;
@@ -354,10 +357,10 @@ export function serveToast() {
       label.className = 'always';
       always = document.createElement('input');
       always.type = 'checkbox';
-      label.append(always, document.createTextNode('이 방에서는 항상 허용하기'));
+      label.append(always, document.createTextNode(t("이 방에서는 항상 허용하기")));
       box.querySelector('.text')!.after(label);
     }
-    ANSWERS[m.kind].forEach((label, i) => {
+    ANSWERS()[m.kind].forEach((label, i) => {
       const button = document.createElement('button');
       button.textContent = label;
       if (i === 1) button.className = 'no';
@@ -381,7 +384,7 @@ export function serveToast() {
   let clearedAt = 0;
   const dismissedAt = new Map<string, number>();
 
-  browser.runtime.onMessage.addListener((m: ToastMessage | ToastDismiss | ToastClear, sender) => {
+  const handle = (m: ToastMessage | ToastDismiss | ToastClear, sender: { id?: string }) => {
     if (sender.id !== browser.runtime.id || typeof m?.seq !== 'number') return;
     if (m.type === TOAST_CLEAR) {
       clearedAt = Math.max(clearedAt, m.seq);
@@ -393,7 +396,7 @@ export function serveToast() {
       dismissedAt.set(keyOf(m), Math.max(dismissedAt.get(keyOf(m)) ?? 0, m.seq));
       return void remove(keyOf(m)); // settled elsewhere: no longer answerable
     }
-    if (m.type !== TOAST || !(m.kind in ANSWERS)) return;
+    if (m.type !== TOAST || !(m.kind in ANSWERS())) return;
     if (m.seq < clearedAt || m.seq < (dismissedAt.get(keyOf(m)) ?? 0)) return; // overtaken by its clear or dismissal
     // A newer alert for the same one (a new request from that friend): not the one left behind on another page.
     latest.set(keyOf(m), m.alertId);
@@ -404,6 +407,8 @@ export function serveToast() {
     // (leaving before that, the next page decides).
     if (overAVideo || (m.leftBehind && m.kind === 'request')) reportOverVideo(keyOf(m), m.alertId);
     if (m.leftBehind && m.kind === 'request') scheduleDecline(new Map([[keyOf(m), m.alertId]]));
-  });
+  };
+  // In the language chosen (decision 124): nothing is drawn before it is read (each in its order, as sent).
+  browser.runtime.onMessage.addListener((m: ToastMessage | ToastDismiss | ToastClear, sender) => void langRead.then(() => handle(m, sender)));
 }
 

@@ -1,3 +1,4 @@
+import { t } from "@mirattic/i18n";
 import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import type { MediaProvider } from "@mirattic/types";
 import { PROVIDER_NAMES } from "./format";
@@ -121,8 +122,8 @@ export function PanelWindowButton() {
   const w = platform.panelWindow;
   if (!w) return null;
   return w.detached
-    ? <IconButton icon="dock" label="사이드 패널로 돌아가기" onClick={() => w.toggle()} />
-    : <IconButton icon="external" label="창으로 분리" onClick={() => w.toggle()} />;
+    ? <IconButton icon="dock" label={t("사이드 패널로 돌아가기")} onClick={() => w.toggle()} />
+    : <IconButton icon="external" label={t("창으로 분리")} onClick={() => w.toggle()} />;
 }
 
 /** A streaming site's logo (square, transparent). */
