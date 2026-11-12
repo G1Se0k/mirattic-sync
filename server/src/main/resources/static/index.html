@@ -88,6 +88,7 @@
   footer { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 13px; color: var(--muted); }
   footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 20px; }
   footer .fine { flex-basis: 100%; }
+  footer a[aria-current] { color: var(--fg); font-weight: 600; }
 
   @media (max-width: 860px) {
     .hero, .steps, .privacy { grid-template-columns: 1fr; gap: 40px; }
@@ -349,9 +350,169 @@
     <a href="/patch-notes.html">패치 노트</a>
     <a href="/privacy.html">개인정보처리방침</a>
     <a href="mailto:jangisuk94@gmail.com">문의</a>
+    <span class="langs"><a data-set-lang="ko">한국어</a> · <a data-set-lang="en">English</a> · <a data-set-lang="ja">日本語</a></span>
+    <span class="fine" data-lang="en" hidden>English text translated with AI; the Korean version is the original.</span>
+    <span class="fine" data-lang="ja" hidden>日本語の文章は AI 翻訳を利用しています。原文は韓国語版です。</span>
     <span class="fine">YouTube, Netflix, 라프텔은 각 회사의 상표이며, Mirattic Sync는 이들과 제휴하거나 승인받은 서비스가 아닙니다.</span>
   </div>
 </footer>
+<script type="application/json" id="page-text">
+{
+ "en": {
+  "친구와 같은 영상을 같은 순간에. 재생·일시정지·넘기기를 방 안 모두에게 맞춰 주는 Chrome 확장프로그램.": "The same video as your friends, at the same moment. A Chrome extension that keeps play, pause and seeking in step for everyone in the room.",
+  "친구와 같은 영상을 같은 순간에 보는 Chrome 확장프로그램.": "A Chrome extension for watching the same video with friends at the same moment.",
+  "설치하기": "Install",
+  "친구랑 같은 영상을": "Watch the same video with friends,",
+  "같은 초에 보세요.": "to the same second.",
+  "방장이 재생하면 모두 재생되고, 멈추면 모두 멈춥니다. 영상은 각자 브라우저에서 그대로 보고, 대화는 옆 패널에서 나눕니다.": "When the host plays, everyone plays; when they pause, everyone pauses. Each of you watches in your own browser, and you talk in the side panel.",
+  "Chrome 웹 스토어에서 설치": "Install from the Chrome Web Store",
+  "무료 · Chrome 확장프로그램": "Free · Chrome extension",
+  "(실험)": "(experimental)",
+  "라프텔": "Laftel",
+  "방장 지우가 일시정지하고 2:40으로 넘기자 민준의 화면도 똑같이 멈추고 넘어가며, 그 장면에 스탬프를 찍고 채팅하는 모습": "When Jiwoo, the host, pauses and skips to 2:40, Minjun's screen pauses and skips the same way, and they stamp that scene and chat",
+  "지": "J",
+  "지우": "Jiwoo",
+  "방장": "Host",
+  "민": "M",
+  "민준": "Minjun",
+  "같이 보는 중": "Watching together",
+  "민준님이 들어왔습니다": "Minjun joined",
+  "쓰는 법": "How it works",
+  "설치하고, 방 만들고, 누르면 끝.": "Install, make a room, press play. Done.",
+  "확장프로그램 설치": "Install the extension",
+  "툴바 아이콘을 누르면 사이드 패널이 열립니다. Mirattic 계정으로 로그인하세요.": "Press the toolbar icon to open the side panel, and sign in with your Mirattic account.",
+  "영상 열고 방 만들기": "Open a video and make a room",
+  "보고 싶은 영상을 연 채로 방을 만들고, 친구를 초대하거나 방 코드를 보내세요.": "With the video you want open, make a room, then invite friends or send them the room code.",
+  "같이 보기": "Watch together",
+  "방장이 재생·일시정지·넘기기를 하면 모두의 화면이 따라갑니다. 장면에 스탬프를 남기고 그 시각으로 이야기할 수 있습니다.": "When the host plays, pauses or skips, everyone's screen follows. Stamp a scene and talk about that moment.",
+  "Mirattic Sync 패널: 지금 보는 영상, 방 목록, 친구가 지금 보는 영상과 합류 요청 버튼": "The Mirattic Sync panel: the video you're watching, your rooms, what friends are watching and a button to ask to join",
+  "지금 보는 영상 · YouTube": "Now watching · YouTube",
+  "느린여행": "Slow Travel",
+  "제주 한 바퀴, 3박 4일 여행 브이로그": "Around Jeju: a 4-day travel vlog",
+  "방": "Rooms",
+  "내가 만든 방 · 2/8명": "Your room · 2/8",
+  "친구": "Friends",
+  "서": "S",
+  "서연": "Seoyeon",
+  "밤산책라디오": "Night Walk Radio",
+  "YouTube · 비 오는 날 듣는 재즈 · 24:10": "YouTube · Jazz for a rainy day · 24:10",
+  "온라인": "Online",
+  "하": "H",
+  "하린": "Harin",
+  "오프라인": "Offline",
+  "친구가 지금 뭘 보는지 보이고, 바로 합류를 요청할 수 있어요.": "See what friends are watching now, and ask to join right away.",
+  "방 화면: 재생 상태, 멤버, 친구 초대와 방 코드": "The room: playback state, members, inviting friends and the room code",
+  "재생 중": "Playing",
+  "인식할 탭": "Tab to follow",
+  "활성 탭 자동 따라가기": "Follow the active tab",
+  "멤버": "Members",
+  "들어왔어! 화질 진짜 좋다": "I'm in! The picture looks great",
+  "지우님이": "Jiwoo stamped",
+  "에 스탬프를 찍었습니다": "",
+  "서연이도 부를게": "I'll get Seoyeon too",
+  "메시지": "Message",
+  "방에 초대하기": "Invite to the room",
+  "초대": "Invite",
+  "방에 있음": "In the room",
+  "또는 방 코드로 초대": "Or invite with the room code",
+  "닫기": "Close",
+  "초대장을 보내거나, 방 코드를 알려주세요.": "Send an invitation, or share the room code.",
+  "개인정보": "Privacy",
+  "영상은 보내지 않습니다.": "The video is never sent.",
+  "영상과 소리 자체는 녹화하거나 중계하지 않습니다. 같이 보기 위해 서버로 보내는 건 재생 상태(재생 중인지, 몇 초인지), 보고 있는 영상의 제목과 주소, 방 채팅과 기록입니다.": "The video and sound themselves are never recorded or relayed. To watch together, the server gets the playback state (playing or not, and at what second), the title and address of the video you're watching, and the room's chat and log.",
+  "YouTube·Netflix·라프텔 비밀번호와 쿠키는 읽지 않습니다. 영상은 각자 자기 계정으로 봅니다.": "Your YouTube, Netflix and Laftel passwords and cookies are never read. Everyone watches on their own account.",
+  "친구에게 무엇을 보는지 보여줄지는 직접 정합니다. 계정·친구 목록·신고처럼 서버가 다루는 다른 정보까지 모두": "You decide whether friends see what you watch. Everything else the server handles, like your account, friends list and reports, is in the",
+  "개인정보처리방침": "Privacy Policy",
+  "에 적어 두었습니다.": ".",
+  "오늘 볼 영상, 같이 보세요.": "Tonight's video, watch it together.",
+  "설치는 1분이면 됩니다.": "It takes a minute to install.",
+  "패치 노트": "Patch notes (Korean)",
+  "문의": "Contact",
+  "YouTube, Netflix, 라프텔은 각 회사의 상표이며, Mirattic Sync는 이들과 제휴하거나 승인받은 서비스가 아닙니다.": "YouTube, Netflix and Laftel are trademarks of their companies. Mirattic Sync is not affiliated with or endorsed by them.",
+  "한국어": "한국어",
+  "{name}님이 {time}에 스탬프를 찍었습니다": "{name} stamped {time}",
+  "여기 바다 색 봐": "Look at the color of the sea here",
+  "{name}님이 들어왔습니다": "{name} joined"
+ },
+ "ja": {
+  "친구와 같은 영상을 같은 순간에. 재생·일시정지·넘기기를 방 안 모두에게 맞춰 주는 Chrome 확장프로그램.": "友だちと同じ動画を同じ瞬間に。再生・一時停止・シークをルームの全員にそろえる Chrome 拡張機能。",
+  "친구와 같은 영상을 같은 순간에 보는 Chrome 확장프로그램.": "友だちと同じ動画を同じ瞬間に見る Chrome 拡張機能。",
+  "설치하기": "インストール",
+  "친구랑 같은 영상을": "友だちと同じ動画を、",
+  "같은 초에 보세요.": "同じ秒で。",
+  "방장이 재생하면 모두 재생되고, 멈추면 모두 멈춥니다. 영상은 각자 브라우저에서 그대로 보고, 대화는 옆 패널에서 나눕니다.": "ホストが再生すればみんな再生され、止めればみんな止まります。動画はそれぞれのブラウザでそのまま見て、会話は横のパネルで。",
+  "Chrome 웹 스토어에서 설치": "Chrome ウェブストアからインストール",
+  "무료 · Chrome 확장프로그램": "無料 · Chrome 拡張機能",
+  "(실험)": "（実験）",
+  "라프텔": "ラフテル",
+  "방장 지우가 일시정지하고 2:40으로 넘기자 민준의 화면도 똑같이 멈추고 넘어가며, 그 장면에 스탬프를 찍고 채팅하는 모습": "ホストのジウが一時停止して 2:40 に移ると、ミンジュンの画面も同じように止まって移り、そのシーンにスタンプを付けてチャットする様子",
+  "지": "ジ",
+  "지우": "ジウ",
+  "방장": "ホスト",
+  "민": "ミ",
+  "민준": "ミンジュン",
+  "같이 보는 중": "一緒に視聴中",
+  "민준님이 들어왔습니다": "ミンジュンさんが入室しました",
+  "쓰는 법": "使い方",
+  "설치하고, 방 만들고, 누르면 끝.": "インストールして、ルームを作って、押すだけ。",
+  "확장프로그램 설치": "拡張機能をインストール",
+  "툴바 아이콘을 누르면 사이드 패널이 열립니다. Mirattic 계정으로 로그인하세요.": "ツールバーのアイコンを押すとサイドパネルが開きます。Mirattic アカウントでログインしてください。",
+  "영상 열고 방 만들기": "動画を開いてルームを作る",
+  "보고 싶은 영상을 연 채로 방을 만들고, 친구를 초대하거나 방 코드를 보내세요.": "見たい動画を開いたままルームを作り、友だちを招待するかルームコードを送りましょう。",
+  "같이 보기": "一緒に見る",
+  "방장이 재생·일시정지·넘기기를 하면 모두의 화면이 따라갑니다. 장면에 스탬프를 남기고 그 시각으로 이야기할 수 있습니다.": "ホストが再生・一時停止・シークすると、みんなの画面がついてきます。シーンにスタンプを残して、その時刻について話せます。",
+  "Mirattic Sync 패널: 지금 보는 영상, 방 목록, 친구가 지금 보는 영상과 합류 요청 버튼": "Mirattic Sync パネル：今見ている動画、ルーム一覧、友だちが今見ている動画と参加リクエストのボタン",
+  "지금 보는 영상 · YouTube": "今見ている動画 · YouTube",
+  "느린여행": "スロートラベル",
+  "제주 한 바퀴, 3박 4일 여행 브이로그": "済州一周、3泊4日の旅行ブイログ",
+  "방": "ルーム",
+  "내가 만든 방 · 2/8명": "自分が作ったルーム · 2/8人",
+  "친구": "友だち",
+  "서": "ソ",
+  "서연": "ソヨン",
+  "밤산책라디오": "夜散歩ラジオ",
+  "YouTube · 비 오는 날 듣는 재즈 · 24:10": "YouTube · 雨の日に聴くジャズ · 24:10",
+  "온라인": "オンライン",
+  "하": "ハ",
+  "하린": "ハリン",
+  "오프라인": "オフライン",
+  "친구가 지금 뭘 보는지 보이고, 바로 합류를 요청할 수 있어요.": "友だちが今何を見ているかがわかり、すぐに参加をリクエストできます。",
+  "방 화면: 재생 상태, 멤버, 친구 초대와 방 코드": "ルーム画面：再生状態、メンバー、友だちの招待とルームコード",
+  "재생 중": "再生中",
+  "인식할 탭": "認識するタブ",
+  "활성 탭 자동 따라가기": "アクティブなタブに自動で合わせる",
+  "멤버": "メンバー",
+  "들어왔어! 화질 진짜 좋다": "入ったよ！画質めっちゃいい",
+  "지우님이": "ジウさんが",
+  "에 스탬프를 찍었습니다": "にスタンプを付けました",
+  "서연이도 부를게": "ソヨンも呼ぶね",
+  "메시지": "メッセージ",
+  "방에 초대하기": "ルームに招待",
+  "초대": "招待",
+  "방에 있음": "ルームにいます",
+  "또는 방 코드로 초대": "またはルームコードで招待",
+  "닫기": "閉じる",
+  "초대장을 보내거나, 방 코드를 알려주세요.": "招待を送るか、ルームコードを伝えましょう。",
+  "개인정보": "プライバシー",
+  "영상은 보내지 않습니다.": "動画は送りません。",
+  "영상과 소리 자체는 녹화하거나 중계하지 않습니다. 같이 보기 위해 서버로 보내는 건 재생 상태(재생 중인지, 몇 초인지), 보고 있는 영상의 제목과 주소, 방 채팅과 기록입니다.": "動画や音声そのものは録画も中継もしません。一緒に見るためにサーバーに送るのは、再生状態（再生中かどうか、何秒か）、見ている動画のタイトルとアドレス、ルームのチャットと記録です。",
+  "YouTube·Netflix·라프텔 비밀번호와 쿠키는 읽지 않습니다. 영상은 각자 자기 계정으로 봅니다.": "YouTube・Netflix・ラフテルのパスワードや Cookie は読み取りません。動画はそれぞれ自分のアカウントで見ます。",
+  "친구에게 무엇을 보는지 보여줄지는 직접 정합니다. 계정·친구 목록·신고처럼 서버가 다루는 다른 정보까지 모두": "友だちに何を見ているかを見せるかは自分で決めます。アカウント・友だちリスト・報告など、サーバーが扱うほかの情報もすべて",
+  "개인정보처리방침": "プライバシーポリシー",
+  "에 적어 두었습니다.": "に記載しています。",
+  "오늘 볼 영상, 같이 보세요.": "今日見る動画、一緒に見よう。",
+  "설치는 1분이면 됩니다.": "インストールは1分で終わります。",
+  "패치 노트": "パッチノート（韓国語）",
+  "문의": "お問い合わせ",
+  "YouTube, Netflix, 라프텔은 각 회사의 상표이며, Mirattic Sync는 이들과 제휴하거나 승인받은 서비스가 아닙니다.": "YouTube、Netflix、ラフテルは各社の商標です。Mirattic Sync はこれらの会社と提携しておらず、承認も受けていません。",
+  "한국어": "한국어",
+  "{name}님이 {time}에 스탬프를 찍었습니다": "{name}さんが{time}にスタンプを付けました",
+  "여기 바다 색 봐": "ここの海の色見て",
+  "{name}님이 들어왔습니다": "{name}さんが入室しました"
+ }
+}
+</script>
+<script src="/landing/page-lang.js"></script>
 <script>
   // The hero scene's loop (see .scene). One clock drives both windows, so their clouds and bars move as one; the
   // friend applies each host action a moment later, as over the network.
@@ -389,15 +550,15 @@
     const still = () => {
       wins.forEach((w) => { w.pos = 160; w.playing = false; draw(w); });
       log.replaceChildren();
-      say('지우님이 <span class="chip">1:16</span>에 스탬프를 찍었습니다');
-      say('여기 바다 색 봐', '민준', '2:40');
+      say(t('{name}님이 {time}에 스탬프를 찍었습니다', { name: t('지우'), time: '<span class="chip">1:16</span>' }));
+      say(t('여기 바다 색 봐'), t('민준'), '2:40');
     };
     const script = [
       // Paused at 1:16 exactly (not wherever the frames got to), so the stamp reads as in the still frame.
-      [4000, () => { act((w) => { w.playing = false; w.pos = 76; }); say('지우님이 <span class="chip">1:16</span>에 스탬프를 찍었습니다'); }],
+      [4000, () => { act((w) => { w.playing = false; w.pos = 76; }); say(t('{name}님이 {time}에 스탬프를 찍었습니다', { name: t('지우'), time: '<span class="chip">1:16</span>' })); }],
       [6500, () => { act((w) => { w.pos = 160; }); }],
-      [8500, () => { act((w) => { w.playing = true; }); say('여기 바다 색 봐', '민준', '2:40'); }],
-      [13000, () => { wins.forEach((w) => { w.pos = 72; w.playing = true; }); log.replaceChildren(); say('민준님이 들어왔습니다'); }],
+      [8500, () => { act((w) => { w.playing = true; }); say(t('여기 바다 색 봐'), t('민준'), '2:40'); }],
+      [13000, () => { wins.forEach((w) => { w.pos = 72; w.playing = true; }); log.replaceChildren(); say(t('{name}님이 들어왔습니다', { name: t('민준') })); }],
     ];
     let start, last, step, frame = 0, pending = 0;
     const tick = (now) => {
@@ -411,7 +572,7 @@
     const run = () => {
       wins.forEach((w) => { w.pos = 72; w.playing = true; });
       log.replaceChildren();
-      say('민준님이 들어왔습니다');
+      say(t('{name}님이 들어왔습니다', { name: t('민준') }));
       start = last = performance.now();
       step = 0;
       frame = requestAnimationFrame(tick);

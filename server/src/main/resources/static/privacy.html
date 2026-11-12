@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mirattic Sync 개인정보처리방침</title>
-<!-- Published copy of docs/legal/privacy-policy.md: change both together. -->
+<!-- Published copy of docs/legal/privacy-policy.md: change both together, and the English and Japanese
+     translations below (decision 124; the Korean one prevails). -->
 <style>
   :root { --bg: #ffffff; --fg: #191f28; --muted: #4e5968; --line: #e5e8eb; --card: #fff; --link: #2563eb; color-scheme: light; }
   @media (prefers-color-scheme: dark) { :root { --bg: #101318; --fg: #f2f4f6; --muted: #b0b8c1; --line: #2c323b; --card: #1a1e25; --link: #6ea0ff; color-scheme: dark; } }
@@ -19,12 +20,17 @@
   th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
   th { white-space: nowrap; }
   a { color: var(--link); }
+  .langs { font-size: 13px; margin-bottom: 20px; color: var(--muted); }
+  .langs a[aria-current] { color: var(--fg); font-weight: 600; text-decoration: none; }
+  .note { font-size: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
   .table { border-radius: 12px; border: 1px solid var(--line); }
   table { border-style: hidden; }
 </style>
 </head>
 <body>
 <main>
+<nav class="langs"><a data-set-lang="ko">한국어</a> · <a data-set-lang="en">English</a> · <a data-set-lang="ja">日本語</a></nav>
+<div data-lang="ko">
 <h1>Mirattic Sync 개인정보처리방침</h1>
 <p class="muted">시행일: 2026년 9월 29일</p>
 
@@ -98,6 +104,163 @@
 
 <h2>9. 방침의 변경</h2>
 <p>수집하는 항목이 바뀌면 이 방침을 고치고 시행일을 갱신하며, 확장프로그램은 동의 화면을 다시 보여 드립니다.</p>
+</div>
+<div data-lang="en" hidden>
+<h1>Mirattic Sync Privacy Policy</h1>
+<p class="muted">Effective: September 29, 2026</p>
+<p class="note">This English version was translated from the Korean original with AI. If they differ, the <a href="?lang=ko">Korean version</a> prevails.</p>
+
+<p>Mirattic Sync (the "Service") is a Chrome extension and its server that keep playback in step so friends can watch the same online video at the same moment. This policy explains what personal information the Service collects and why, how long it keeps it, and what you can do.</p>
+
+<h2>1. Operator and contact</h2>
+<ul>
+  <li>Operator: 장기석 (individual)</li>
+  <li>Privacy officer and contact: 장기석, <a href="mailto:jangisuk94@gmail.com">jangisuk94@gmail.com</a></li>
+</ul>
+
+<h2>2. Information collected, purposes and retention</h2>
+<div class="table">
+<table>
+  <tr><th>Item</th><th>When collected</th><th>Purpose</th><th>Retention</th></tr>
+  <tr><td>Display name, Mirattic account ID</td><td>When you first sign in with your Mirattic account (the name is later kept in line with your Mirattic account's name when you sign in or view your account info)</td><td>Showing your name to friends and room members</td><td>Until the account is deleted. Your email and password are kept by the Mirattic account service (auth.mirattic.com); the Service fetches them only when showing them on the "My info" screen.</td></tr>
+  <tr><td>Friend code; friend, friend-request and block relationships</td><td>While using the Service</td><td>Friend features, blocking</td><td>Until the account is deleted (a relationship is also deleted when the other person deletes their account)</td></tr>
+  <tr><td>Visibility settings</td><td>While using the Service</td><td>Keeping your settings</td><td>Until the account is deleted</td></tr>
+  <tr><td><strong>Watching info</strong>: the service of the video you're watching (YouTube, and Netflix or Laftel only when their control is on), content ID, title (including the YouTube channel name, the Netflix season, episode and episode title, and the Laftel episode number), playback position and state</td><td>After you agree in the extension, in tabs of supported sites</td><td>Showing "watching" to friends (per your visibility setting; friends never see the position), syncing watch-together rooms</td><td>Info for friends is kept only in server memory and deleted when you disconnect. A room's current content and position are kept until the room closes.</td></tr>
+  <tr><td>Watch-together rooms: members, content</td><td>Creating, joining or being invited to a room</td><td>Room features</td><td>Until the room closes or you leave</td></tr>
+  <tr><td>Chat messages (including when sent, the video position at that moment, and the site and video ID of the room's video that position belongs to)</td><td>When you send one in a room</td><td>Showing them to room members</td><td>Until the room closes, the sender or the host deletes it, or the sender deletes their account</td></tr>
+  <tr><td>Room log (join and leave times and the name at that time, the host's video changes with channel names and titles, removals and host handovers, timestamps members stamp, the room video's site and video ID for log lines with a position and for video changes), the list of people removed from the room</td><td>When you join or leave a room, when the host changes the video or manages members, when a member stamps a timestamp</td><td>Showing them to room members in the chat</td><td>Until the room closes or the line's owner deletes their account</td></tr>
+  <tr><td>Reports: reporter, reported user, reason, details, a copy of the reported message</td><td>When you report</td><td>Dealing with abuse</td><td>Until the reporter or the reported user deletes their account</td></tr>
+  <tr><td>Feedback and bug reports: sender, kind, content</td><td>When you send them from Settings</td><td>Improving the Service, fixing bugs</td><td>Until the account is deleted</td></tr>
+  <tr><td>Sign-in token</td><td>When you sign in</td><td>Using the Service without signing in again</td><td>Kept on your device (the extension's storage); it stops working when you sign out or after 30 days. The server doesn't store tokens; it only passes them to the Mirattic account service.</td></tr>
+  <tr><td>IP address</td><td>On sign-in, staying signed in, sign-out and account-deletion requests</td><td>Limiting request counts to prevent brute-force attacks</td><td>Counted in server memory per minute only, never written to files or a database.</td></tr>
+</table>
+</div>
+
+<h2>3. Information not collected</h2>
+<ul>
+  <li>Passwords, cookies, session tokens or sign-in info of video services such as YouTube, Netflix and Laftel</li>
+  <li>The video and audio themselves (never relayed, recorded, downloaded or stored; everyone plays them on the original site with their own account)</li>
+  <li>Your history outside the supported video pages. While Netflix or Laftel control is off, whether the current tab is that site is checked only on your device and never sent to the server.</li>
+  <li>Advertising identifiers, analytics or tracking info</li>
+</ul>
+
+<h2>4. Use and disclosure to third parties</h2>
+<ul>
+  <li>Collected information is used only for the purposes above. It is never sold, used for advertising or credit scoring, or given to third parties. The Service follows the Chrome Web Store User Data Policy, including the Limited Use requirements.</li>
+  <li>What other users see: friends see your display name and, per your visibility setting, your watching info; members of the same room see your display name, whether you're in the room, the room's playback state (including whether the host is watching the room's video), and the chat and room log. If the host makes the room public, the room name, the service and title of the room's video, the host's display name and the member count are visible to all users in the public room list (default: private). If your visibility is "friends", the name of a public room you're in is visible to friends in their friend list. Anyone with the room's invitation link (which contains the room code) can see the same info (room name, the service and title of the room's video, the host's display name, member count) and whether it's public on the invitation page without signing in. If you post an invitation link to a messenger or community, the preview that service makes shows the room name, the service and title of the room's video and the host's display name, and that service may keep the preview.</li>
+</ul>
+
+<h2>5. Processors and transfers abroad</h2>
+<ul>
+  <li>The server and database run on a server in the Republic of Korea managed directly by the operator, and database backups are kept only on that same server.</li>
+  <li>All of the Service's traffic passes through the network of <strong>Cloudflare, Inc.</strong> (USA) for security and delivery. What is transferred is the traffic exchanged while using the Service and your IP address; it is transmitted over the network at the time of use and handled under Cloudflare's policies. If you don't want this, you can stop using the Service and delete your account.</li>
+  <li>Sign-in is handled by the Mirattic account service (auth.mirattic.com), run by the same operator.</li>
+</ul>
+
+<h2>6. Your rights</h2>
+<ul>
+  <li><strong>Friend requests</strong>: in the app's Settings you can choose whether members of the same room can send you friend requests without a friend code (default: anyone) or only by friend code.</li>
+  <li><strong>Visibility</strong>: in the app's "Visibility" you can choose whether friends see what you're watching (default: friends). Friends never see the playback position; only members of the same room see it as the room's playback state.</li>
+  <li><strong>Deleting messages</strong>: you can delete chat messages you sent at any time. The content is deleted on the server too, leaving only "This message was deleted". The room's host can also delete the room's messages.</li>
+  <li><strong>Deleting your account</strong>: entering your Mirattic account password once more in the app's "Delete account" deletes it at once. Your Service account, friend, request and block relationships, room memberships, all chat messages you sent, reports you made or received and feedback you sent are deleted with it, and rooms you host are closed. It remains in the daily database backups for up to 8 days after deletion and is then deleted with them. The Mirattic account itself (email, password) is managed separately at auth.mirattic.com.</li>
+  <li><strong>Requests to access, correct, delete or stop processing</strong>: you can check and change your visibility in the app, and change your display name in your Mirattic account (auth.mirattic.com). Send any other request to the email above and it will be handled without delay.</li>
+  <li><strong>Blocking and reporting</strong>: you can block or report friends and room members.</li>
+</ul>
+
+<h2>7. Security measures</h2>
+<ul>
+  <li>All traffic is encrypted with HTTPS and WSS.</li>
+  <li>Passwords and sign-in tokens are stored only as hashes by the Mirattic account service. The Service's server stores no passwords or tokens.</li>
+  <li>The device's sign-in token is kept in storage only the extension's pages can read, and deleted when you sign out. The token changes every time it's used, and if reuse is detected, that whole sign-in is ended.</li>
+  <li>Server logs never contain passwords, tokens, playback info, or the content of messages and reports.</li>
+</ul>
+
+<h2>8. Children's information</h2>
+<p>The Service is not intended for children under 14, and children under 14 may not use it. If we learn that information of a child under 14 has been collected, it is deleted at once.</p>
+
+<h2>9. Changes to this policy</h2>
+<p>When the items collected change, this policy is updated with a new effective date, and the extension shows the consent screen again.</p>
+</div>
+<div data-lang="ja" hidden>
+<h1>Mirattic Sync プライバシーポリシー</h1>
+<p class="muted">施行日：2026年9月29日</p>
+<p class="note">この日本語版は韓国語の原文を AI で翻訳したものです。内容が異なる場合は<a href="?lang=ko">韓国語版</a>が優先します。</p>
+
+<p>Mirattic Sync（以下「本サービス」）は、友だちと同じオンライン動画を同じ瞬間に一緒に見られるよう再生状態をそろえる Chrome 拡張機能とそのサーバーです。このポリシーでは、本サービスがどのような個人情報をなぜ収集し、どのくらい保管し、利用者が何をできるかを説明します。</p>
+
+<h2>1. 運営者と連絡先</h2>
+<ul>
+  <li>運営者：장기석（個人）</li>
+  <li>個人情報保護責任者・お問い合わせ：장기석、<a href="mailto:jangisuk94@gmail.com">jangisuk94@gmail.com</a></li>
+</ul>
+
+<h2>2. 収集する情報と目的、保管期間</h2>
+<div class="table">
+<table>
+  <tr><th>項目</th><th>収集の時点</th><th>目的</th><th>保管期間</th></tr>
+  <tr><td>表示名、Mirattic アカウント ID</td><td>Mirattic アカウントで初めてログインしたとき（名前はその後、ログインしたときやアカウント情報を見たときに Mirattic アカウントの名前に合わせます）</td><td>友だちとルームのメンバーへの名前の表示</td><td>アカウント削除まで。メールアドレスとパスワードは Mirattic アカウント（auth.mirattic.com）が保管し、本サービスは「アカウント情報」画面に表示するときだけその都度受け取ります。</td></tr>
+  <tr><td>フレンドコード、友だち・友だちリクエスト・ブロックの関係</td><td>利用中</td><td>友だち機能、ブロック</td><td>アカウント削除まで（相手がアカウントを削除するとその関係も削除）</td></tr>
+  <tr><td>公開範囲の設定</td><td>利用中</td><td>設定の保持</td><td>アカウント削除まで</td></tr>
+  <tr><td><strong>視聴情報</strong>：見ている動画のサービス（YouTube、および制御をオンにした場合のみ Netflix・Laftel）、コンテンツ ID、タイトル（YouTube のチャンネル名、Netflix のシーズン・話・話のタイトル、Laftel の話数を含む）、再生位置と状態</td><td>拡張機能で同意した後、対応サイトのタブで</td><td>友だちへの「視聴中」の表示（公開範囲の設定に従い、再生位置は友だちには見えません）、一緒に見るルームの同期</td><td>友だち向けの情報はサーバーのメモリにのみ置き、接続が切れると削除します。一緒に見るルームの現在のコンテンツと再生位置はルームが閉じられるまで保管します。</td></tr>
+  <tr><td>一緒に見るルーム：メンバー、コンテンツ</td><td>ルームの作成・参加・招待</td><td>ルーム機能</td><td>ルームが閉じられるか、自分が退出するまで</td></tr>
+  <tr><td>チャットメッセージ（送信時刻、送った瞬間の動画の位置と、その位置が属するルームの動画のサイト・動画 ID を含む）</td><td>ルームで送ったとき</td><td>ルームのメンバーへの表示</td><td>ルームが閉じられるか、送信者またはホストが削除するか、送信者がアカウントを削除するまで</td></tr>
+  <tr><td>ルームの記録（入室・退出の時刻とそのときの名前、ホストによる動画の変更とチャンネル名・タイトル、退出させる操作・ホストの引き継ぎ、メンバーが付けたタイムスタンプ、位置のある記録と動画変更の記録のルーム動画のサイト・動画 ID）、ルームから退出させた人のリスト</td><td>ルームへの入室・退出時、ホストが動画を変えたりメンバーを管理したりしたとき、メンバーがタイムスタンプを付けたとき</td><td>ルームのメンバーへのチャット内での表示</td><td>ルームが閉じられるか、その記録の主がアカウントを削除するまで</td></tr>
+  <tr><td>報告：報告者、対象ユーザー、理由、詳しい内容、報告されたメッセージのコピー</td><td>報告したとき</td><td>不正利用への対応</td><td>報告者または対象者がアカウントを削除するまで</td></tr>
+  <tr><td>フィードバック・バグ報告：送信者、種類、内容</td><td>設定から送ったとき</td><td>サービスの改善、不具合の修正</td><td>アカウントを削除するまで</td></tr>
+  <tr><td>ログイン維持用のトークン</td><td>ログインしたとき</td><td>再ログインせずに利用するため</td><td>デバイス（拡張機能のストレージ）に保管し、ログアウトするか30日が過ぎると無効になります。サーバーはトークンを保存せず、Mirattic アカウントに渡すだけです。</td></tr>
+  <tr><td>接続 IP アドレス</td><td>ログイン・ログイン維持・ログアウト・アカウント削除のリクエスト時</td><td>総当たり攻撃を防ぐためのリクエスト数の制限</td><td>サーバーのメモリで1分単位で数えるだけで、ファイルやデータベースには保存しません。</td></tr>
+</table>
+</div>
+
+<h2>3. 収集しない情報</h2>
+<ul>
+  <li>YouTube、Netflix、Laftel など動画サービスのパスワード、Cookie、セッショントークン、ログイン情報</li>
+  <li>動画や音声そのもの（中継・録画・ダウンロード・保存はせず、それぞれ自分のアカウントで元のサイトで再生します）</li>
+  <li>対応する動画ページ以外の閲覧履歴。Netflix・Laftel の制御がオフのときは、今のタブがそのサイトかどうかをデバイス内でのみ確認し、サーバーには送りません。</li>
+  <li>広告識別子、分析・トラッキング情報</li>
+</ul>
+
+<h2>4. 利用と第三者への提供</h2>
+<ul>
+  <li>収集した情報は上記の目的にのみ使います。販売、広告、信用評価には使わず、第三者に提供しません。Chrome ウェブストアのユーザーデータに関するポリシー（使用制限の要件を含む）に従います。</li>
+  <li>ほかの利用者に見える範囲：友だちには表示名と公開範囲の設定に応じた視聴情報が、同じルームのメンバーには表示名、ルームへの参加状況、ルームの再生状態（ホストがルームの動画を見ているかどうかを含む）、チャットとルームの記録が見えます。ホストがルームを公開に設定すると、ルーム名、ルームの動画のサービスとタイトル、ホストの表示名、人数が公開ルームの一覧ですべての利用者に見えます（初期値：非公開）。公開範囲が「友だち」の場合、自分が参加している公開ルームの名前が友だちリストで友だちに見えます。ルームの招待リンク（ルームコードを含む）を持っている人には、ログインしなくても同じ情報（ルーム名、ルームの動画のサービスとタイトル、ホストの表示名、人数）と公開かどうかが招待ページで見えます。招待リンクをメッセンジャーやコミュニティに投稿すると、そのサービスが作るプレビューにルーム名、ルームの動画のサービスとタイトル、ホストの表示名が表示され、そのサービスがプレビューを保管する場合があります。</li>
+</ul>
+
+<h2>5. 処理の委託と国外への移転</h2>
+<ul>
+  <li>サーバーとデータベースは運営者が直接管理する大韓民国所在のサーバーで運営し、データベースのバックアップも同じサーバーにのみ保管します。</li>
+  <li>本サービスのすべての通信は、セキュリティと転送のため <strong>Cloudflare, Inc.</strong>（米国）のネットワークを経由します。移転される項目はサービス利用中にやりとりする通信内容と接続 IP アドレスで、利用時にネットワークを通じて送信され、Cloudflare のポリシーに従って処理されます。これを望まない場合は、サービスの利用をやめてアカウントを削除できます。</li>
+  <li>ログインは同じ運営者が運営する Mirattic アカウント（auth.mirattic.com）が処理します。</li>
+</ul>
+
+<h2>6. 利用者の権利</h2>
+<ul>
+  <li><strong>友だちリクエストの受け取り</strong>：アプリの設定で、同じルームのメンバーがフレンドコードなしで友だちリクエストを送れるようにするか（初期値：誰でも）、フレンドコードのみで受け取るかを選べます。</li>
+  <li><strong>公開範囲</strong>：アプリの「公開範囲」で、視聴中のコンテンツを友だちに見せるかを選べます（初期値：友だち）。再生位置は友だちには見えず、同じルームのメンバーだけがルームの再生状態として見ます。</li>
+  <li><strong>メッセージの削除</strong>：自分が送ったチャットメッセージはいつでも削除できます。内容はサーバーからも削除され、「削除されたメッセージです」という表示だけが残ります。ルームのホストもルームのメッセージを削除できます。</li>
+  <li><strong>アカウントの削除</strong>：アプリの「アカウントを削除」で Mirattic アカウントのパスワードをもう一度入力すると、すぐに削除されます。本サービスのアカウント、友だち・リクエスト・ブロックの関係、ルームのメンバーシップ、自分が送ったすべてのチャットメッセージ、自分がした・受けた報告、自分が送ったフィードバックが一緒に削除され、自分がホストのルームは閉じられます。データベースのバックアップ（毎日）には削除後最大8日間残り、バックアップとともに削除されます。Mirattic アカウント自体（メールアドレス、パスワード）は auth.mirattic.com で別に管理されます。</li>
+  <li><strong>閲覧・訂正・削除・処理停止の請求</strong>：公開範囲はアプリで直接確認・変更でき、表示名は Mirattic アカウント（auth.mirattic.com）で変更します。そのほかの請求は上記のメールアドレスに送っていただければ、遅滞なく対応します。</li>
+  <li><strong>ブロック・報告</strong>：友だちやルームのメンバーをブロックしたり報告したりできます。</li>
+</ul>
+
+<h2>7. 安全性確保のための措置</h2>
+<ul>
+  <li>すべての通信は HTTPS と WSS で暗号化します。</li>
+  <li>パスワードとログイントークンは、Mirattic アカウントがハッシュとしてのみ保存します。本サービスのサーバーはパスワードとトークンを保存しません。</li>
+  <li>デバイスのログイン維持トークンは拡張機能のページだけが読めるストレージに置き、ログアウトすると削除します。トークンは使うたびに変わり、再利用が検知されるとそのログイン全体を切断します。</li>
+  <li>サーバーのログには、パスワード、トークン、再生情報、メッセージや報告の内容を残しません。</li>
+</ul>
+
+<h2>8. 児童の個人情報</h2>
+<p>本サービスは14歳未満の児童を対象としておらず、14歳未満は利用できません。14歳未満の児童の情報が収集されたことがわかった場合は、すぐに削除します。</p>
+
+<h2>9. ポリシーの変更</h2>
+<p>収集する項目が変わった場合はこのポリシーを改訂して施行日を更新し、拡張機能は同意画面をもう一度表示します。</p>
+</div>
 </main>
+<script type="application/json" id="page-text">
+{"en": {"Mirattic Sync 개인정보처리방침": "Mirattic Sync Privacy Policy", "한국어": "한국어"}, "ja": {"Mirattic Sync 개인정보처리방침": "Mirattic Sync プライバシーポリシー", "한국어": "한국어"}}
+</script>
+<script src="/landing/page-lang.js"></script>
 </body>
 </html>

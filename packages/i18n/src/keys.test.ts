@@ -66,3 +66,44 @@ describe("t", () => {
     setLang("ko");
   });
 });
+
+/**
+ * The site pages (server static, decision 124): every Korean text node and alt / aria-label / content / title outside
+ * script, style and data-lang blocks — what landing/page-lang.js looks up — plus each t('…') in their scripts, is in
+ * the page's page-text English and Japanese, and nothing else is.
+ */
+describe("site pages", () => {
+  const STATIC = join(ROOT, "server/src/main/resources/static");
+  const VOID = new Set(["br", "img", "meta", "link", "input", "source", "path", "circle", "rect", "line", "polyline"]);
+  const text = (s: string) => s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').trim().replace(/\s+/g, " ");
+  for (const page of ["index.html", "invite.html", "privacy.html"]) {
+    it(page, () => {
+      const html = readFileSync(join(STATIC, page), "utf8");
+      const keys = new Set<string>();
+      const open: boolean[] = []; // per open element: skipped
+      let skip = 0, at = 0;
+      for (const m of html.matchAll(/<(\/?)([a-zA-Z][\w-]*)([^>]*)>/g)) {
+        const between = text(html.slice(at, m.index));
+        at = m.index + m[0].length;
+        if (!skip && /[가-힣]/.test(between)) keys.add(between);
+        const [, close, name, attrs] = m;
+        const tag = name.toLowerCase();
+        if (close) {
+          if (open.pop()) skip--;
+          continue;
+        }
+        if (!skip) for (const a of attrs.matchAll(/\b(alt|aria-label|content|title)="([^"]*)"/g)) if (/[가-힣]/.test(a[2])) keys.add(text(a[2]));
+        if (VOID.has(tag) || attrs.endsWith("/")) continue;
+        const skipped = tag === "script" || tag === "style" || /\bdata-lang=/.test(attrs);
+        open.push(skipped);
+        if (skipped) skip++;
+      }
+      for (const m of html.matchAll(/\bt\((['"])(.*?)\1/g)) keys.add(m[2]);
+      const words = JSON.parse(/<script type="application\/json" id="page-text">([\s\S]*?)<\/script>/.exec(html)![1]);
+      for (const lang of ["en", "ja"]) {
+        expect([...keys].filter((k) => !(k in words[lang])), lang).toEqual([]);
+        expect(Object.keys(words[lang]).filter((k) => !keys.has(k)), lang).toEqual([]);
+      }
+    });
+  }
+});

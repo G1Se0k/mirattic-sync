@@ -4,9 +4,12 @@ import com.mirattic.sync.config.AuthRateLimitFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,7 +42,9 @@ class InviteController {
 
 	@GetMapping(value = "/r/{code}", produces = MediaType.TEXT_HTML_VALUE)
 	@ResponseBody
-	String page(@PathVariable String code, HttpServletRequest request) {
+	ResponseEntity<String> page(@PathVariable String code, HttpServletRequest request) {
+		// The preview in the language asked (decision 124): the app fetching the link says which, if any.
+		Words words = Words.of(request.getHeader(HttpHeaders.ACCEPT_LANGUAGE));
 		RoomService.InvitePreview room = null;
 		if (request.getAttribute(AuthRateLimitFilter.LIMITED) == null) {
 			try {
@@ -48,13 +53,14 @@ class InviteController {
 				// the generic preview
 			}
 		}
-		if (room == null) {
-			return page;
+		String title = words.generic;
+		String about = words.about;
+		if (room != null) {
+			String name = room.name() != null ? room.name() : room.title();
+			title = words.invite.formatted(room.hostName()) + (name != null ? ": " + name : "");
+			about = room.provider() == null ? words.noVideo
+					: SITES.getOrDefault(room.provider().name(), room.provider().name()) + (room.title() != null ? " · " + room.title() : "");
 		}
-		String name = room.name() != null ? room.name() : room.title();
-		String title = room.hostName() + "님의 같이 보기 초대" + (name != null ? ": " + name : "");
-		String about = room.provider() == null ? "아직 고른 영상이 없습니다"
-				: SITES.getOrDefault(room.provider().name(), room.provider().name()) + (room.title() != null ? " · " + room.title() : "");
 		String base = ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString();
 		String tags = """
 				<meta property="og:site_name" content="Mirattic Sync">
@@ -66,7 +72,45 @@ class InviteController {
 				""".formatted(HtmlUtils.htmlEscape(title, "UTF-8"), HtmlUtils.htmlEscape(about, "UTF-8"), base);
 		int start = page.indexOf(TAGS_START);
 		int end = page.indexOf(TAGS_END) + TAGS_END.length();
-		return page.substring(0, start) + tags.strip() + page.substring(end);
+		return ResponseEntity.ok().header(HttpHeaders.VARY, HttpHeaders.ACCEPT_LANGUAGE).contentType(MediaType.TEXT_HTML)
+				.body(page.substring(0, start) + tags.strip() + page.substring(end));
+	}
+
+	/** The preview's words: Korean when no language is asked, Korean or Japanese when asked first, else English. */
+	record Words(String generic, String about, String invite, String noVideo) {
+		static final Words KO = new Words("Mirattic Sync 같이 보기 초대", "링크를 열고 수락하면 같은 영상을 같은 순간에 함께 봅니다.",
+				"%s님의 같이 보기 초대", "아직 고른 영상이 없습니다");
+		static final Words EN = new Words("Mirattic Sync watch-together invitation",
+				"Open the link and accept to watch the same video at the same moment.", "%s invited you to watch together",
+				"No video picked yet");
+		static final Words JA = new Words("Mirattic Sync 一緒に見る招待", "リンクを開いて承認すると、同じ動画を同じ瞬間に一緒に見られます。",
+				"%sさんから一緒に見る招待", "まだ動画が選ばれていません");
+
+		static Words of(String acceptLanguage) {
+			if (acceptLanguage == null || acceptLanguage.isBlank()) {
+				return KO;
+			}
+			try {
+				for (Locale.LanguageRange r : Locale.LanguageRange.parse(acceptLanguage)) {
+					if (r.getWeight() == 0) {
+						continue; // declined
+					}
+					String l = r.getRange().split("-")[0];
+					if (l.equals("ko")) {
+						return KO;
+					}
+					if (l.equals("ja")) {
+						return JA;
+					}
+					if (l.equals("en")) {
+						return EN;
+					}
+				}
+			} catch (IllegalArgumentException malformed) {
+				return KO;
+			}
+			return EN;
+		}
 	}
 
 	@GetMapping(PREVIEW + "{code}")

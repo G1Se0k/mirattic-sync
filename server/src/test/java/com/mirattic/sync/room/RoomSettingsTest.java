@@ -355,6 +355,16 @@ class RoomSettingsTest extends IntegrationTest {
 				.contains("/landing/logo.png").contains("twitter:card").doesNotContain("1/4").doesNotContain("<!-- link preview");
 		assertThat(mvc.perform(get("/r/" + "Z".repeat(8))).andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8))
 				.contains("Mirattic Sync 같이 보기 초대");
+		// In the language the link's reader asks (decision 124): Korean or Japanese first, else English.
+		String en = mvc.perform(get("/r/" + code).header("Accept-Language", "en-US,en;q=0.9")).andReturn().getResponse()
+				.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+		assertThat(en).contains("content=\"Tester invited you to watch together: 금요 &quot;&lt;영화&gt;&quot;\">");
+		String ja = mvc.perform(get("/r/" + code).header("Accept-Language", "ja,en;q=0.8")).andReturn().getResponse()
+				.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+		assertThat(ja).contains("Testerさんから一緒に見る招待");
+		assertThat(InviteController.Words.of("ko;q=0, ja;q=0")).isEqualTo(InviteController.Words.EN); // both declined
+		assertThat(mvc.perform(get("/r/" + code).header("Accept-Language", "fr-FR")).andReturn().getResponse()
+				.getHeader("Vary")).contains("Accept-Language");
 		// Unknown or malformed: the same 404.
 		call(HttpMethod.GET, "/api/invite/" + "Z".repeat(8), null, null).andExpect(status().isNotFound());
 		call(HttpMethod.GET, "/api/invite/nope", null, null).andExpect(status().isNotFound());

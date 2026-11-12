@@ -158,7 +158,8 @@ export type ChatMessage = {
   /** Mentioned members' IDs (decision 118); led by "everyone" for the host's @everyone (118a). */
   mentions?: string[] | null;
   /** Where the text shows a mention kept by ID, as "@<their name now>" (decision 122): `start` / `end` in UTF-16 units. */
-  mentionSpans?: { id: string; start: number; end: number }[] | null;
+  /** `id` null: one no longer known (its text the server's "@알 수 없음", shown in the language here). */
+  mentionSpans?: { id: string | null; start: number; end: number }[] | null;
   /** A message's author's name (decision 112), so one who left shows by name; absent on log lines and older servers. */
   userName?: string | null;
 };

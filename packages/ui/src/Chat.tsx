@@ -60,7 +60,7 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
       // The host's "@everyone" (server-marked) found in the whole text, as a word of its own there, outside the spans.
       const spans = item.mentionSpans;
       const everyone = item.mentions?.includes(EVERYONE)
-        ? [...item.text.matchAll(mentionRe([EVERYONE], "gu"))].map((m) => ({ id: null, start: m.index, end: m.index + m[0].length }))
+        ? [...item.text.matchAll(mentionRe([EVERYONE], "gu"))].map((m) => ({ id: null, everyone: true, start: m.index, end: m.index + m[0].length }))
           .filter((e) => !spans.some((s) => e.start < s.end && s.start < e.end))
         : [];
       const out: ReactNode[] = [];
@@ -68,7 +68,8 @@ export function Chat({ roomId, meId, members, isHost, socket, status, subscribe,
       [...spans, ...everyone].sort((a, b) => a.start - b.start).forEach((s, i) => {
         out.push(item.text.slice(from, s.start));
         const shown = item.text.slice(s.start + 1, s.end);
-        out.push(s.id ? mentionLink(item, s.id, shown, `m${i}`) : <strong key={`e${i}`} className="mention">@{shown}</strong>);
+        out.push(s.id ? mentionLink(item, s.id, shown, `m${i}`)
+          : <strong key={`e${i}`} className="mention">@{"everyone" in s ? shown : t("알 수 없음")}</strong>);
         from = s.end;
       });
       out.push(item.text.slice(from));

@@ -52,9 +52,8 @@ public class ChatMessage {
 				String name = who == null || who.equals(RoomService.EVERYONE) ? null : nameOf.apply(who);
 				int start = out.length();
 				out.append('@').append(name != null ? name : UNKNOWN);
-				if (name != null) {
-					spans.add(new Span(who, start, out.length()));
-				}
+				// One no longer known: a span without an ID, which the panel shows as "unknown" in its language (decision 124).
+				spans.add(new Span(name != null ? who : null, start, out.length()));
 				from = m.end();
 			}
 			out.append(text, from, text.length());
